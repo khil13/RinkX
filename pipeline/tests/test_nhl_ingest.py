@@ -240,3 +240,50 @@ def test_box_score_alone_leaves_unprovided_fields_null(conn):
     store.write_boxscore(conn, gid, box, 1, "2026-03-11T00:00:00Z")  # rewrite: enrichment columns reset
     for col in ("pp_points", "shot_attempts", "ev_toi_s", "primary_assists"):
         assert one(conn, f"SELECT count(*) FROM player_game_stats WHERE game_id = ? AND {col} IS NOT NULL", gid) == 0
+
+
+def test_player_page_hit_rates_dnp_and_enriched_log(conn):
+    from rinkx.publish import views
+
+    ingest(conn)
+    page = views.player(conn, 8477960, 20252026)  # Adrian Kempe, LAK
+    g = page["games"][0]
+    assert (g["sog"], g["icf"], g["pp_toi_s"], g["a1"] + g["a2"], g["ppp"]) == (2, 6, 122, 1, 0)
+    sog = page["hit_rates"]["sog"]
+    assert sog["thresholds"] == [1, 2, 3, 4, 5, 6, 7]
+    assert sog["windows"]["L5"]["games"] == 1 and sog["windows"]["L5"]["counts"][:3] == [1, 1, 0]
+    assert page["hit_rates_basis"] == "games_played"
+
+    # A later LAK game with a loaded box score that Kempe has no row for is a DNP: listed in
+    # the log, excluded from every hit-rate denominator.
+    lak = one(conn, "SELECT id FROM teams WHERE abbrev = 'LAK'")
+    later = conn.execute(
+        "SELECT id, nhl_game_id, home_team_id, away_team_id FROM games WHERE ? IN (home_team_id, away_team_id) "
+        "AND game_date > '2026-03-10' ORDER BY game_date LIMIT 1",
+        (lak,),
+    ).fetchone()
+    opp = later["away_team_id"] if later["home_team_id"] == lak else later["home_team_id"]
+    for team, other, home in (
+        (lak, opp, int(later["home_team_id"] == lak)),
+        (opp, lak, int(later["home_team_id"] != lak)),
+    ):
+        conn.execute(
+            "INSERT INTO team_game_stats (team_id, game_id, opponent_team_id, is_home, goals_for, shots_for, "
+            "provenance, source_id, fetched_at) VALUES (?,?,?,?,0,0,'official',1,'x')",
+            (team, later["id"], other, home),
+        )
+    page = views.player(conn, 8477960, 20252026)
+    dnp = [x for x in page["games"] if x.get("dnp")]
+    assert [x["game_id"] for x in dnp] == [later["nhl_game_id"]]
+    assert page["hit_rates"]["sog"]["windows"]["L5"]["games"] == 1  # unchanged by the DNP
+    assert page["totals"]["gp"] == 1
+
+
+def test_goalie_hit_rates_use_starts_only(conn):
+    from rinkx.publish import views
+
+    ingest(conn)
+    page = views.player(conn, 8480280, 20252026)  # Jeremy Swayman
+    assert page["hit_rates_basis"] == "starts"
+    assert page["hit_rates"]["sv"]["windows"]["L5"]["counts"][0] == 1  # 15 saves >= 15
+    assert page["hit_rates"]["sv"]["windows"]["L5"]["counts"][1] == 0  # but not >= 20
