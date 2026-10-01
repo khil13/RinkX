@@ -1,0 +1,63 @@
+{
+  "recorded_at": "2026-10-01T19:39:31Z",
+  "source": "NHL public API (api-web.nhle.com, api.nhle.com/stats)",
+  "note": "Unmodified responses (pretty-printed) used only as parser test fixtures.",
+  "files": [
+    {
+      "file": "seasons.json",
+      "url": "https://api-web.nhle.com/v1/season"
+    },
+    {
+      "file": "standings_season.json",
+      "url": "https://api-web.nhle.com/v1/standings-season"
+    },
+    {
+      "file": "schedule_2026-03-10.json",
+      "url": "https://api-web.nhle.com/v1/schedule/2026-03-10"
+    },
+    {
+      "file": "schedule_now.json",
+      "url": "https://api-web.nhle.com/v1/schedule/now"
+    },
+    {
+      "file": "standings_2026-03-10.json",
+      "url": "https://api-web.nhle.com/v1/standings/2026-03-10"
+    },
+    {
+      "file": "standings_now.json",
+      "url": "https://api-web.nhle.com/v1/standings/now"
+    },
+    {
+      "file": "roster_TOR_20252026.json",
+      "url": "https://api-web.nhle.com/v1/roster/TOR/20252026"
+    },
+    {
+      "file": "roster_TOR_current.json",
+      "url": "https://api-web.nhle.com/v1/roster/TOR/current"
+    },
+    {
+      "file": "club_schedule_TOR_20252026.json",
+      "url": "https://api-web.nhle.com/v1/club-schedule-season/TOR/20252026"
+    },
+    {
+      "file": "stats_team.json",
+      "url": "https://api.nhle.com/stats/rest/en/team"
+    },
+    {
+      "file": "boxscore_2025021012.json",
+      "url": "https://api-web.nhle.com/v1/gamecenter/2025021012/boxscore"
+    },
+    {
+      "file": "landing_2025021012.json",
+      "url": "https://api-web.nhle.com/v1/gamecenter/2025021012/landing"
+    },
+    {
+      "file": "player_8477503.json",
+      "url": "https://api-web.nhle.com/v1/player/8477503/landing"
+    },
+    {
+      "file": "player_8476932.json",
+      "url": "https://api-web.nhle.com/v1/player/8476932/landing"
+    }
+  ]
+}
