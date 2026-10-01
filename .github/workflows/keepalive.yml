@@ -1,0 +1,23 @@
+name: keepalive
+
+# GitHub silently disables scheduled workflows in public repos after 60 days without
+# repository activity, and pipeline runs don't count as activity. Re-enabling through the
+# API resets that clock. Weekly is well inside the window.
+on:
+  schedule:
+    - cron: "41 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  actions: write
+
+jobs:
+  enable:
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for wf in pipeline.yml keepalive.yml; do
+            gh workflow enable "$wf" --repo "$GITHUB_REPOSITORY"
+          done

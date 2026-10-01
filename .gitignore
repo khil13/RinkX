@@ -1,0 +1,9 @@
+# local secrets, dev store, work files
+.rinkx/
+# python
+__pycache__/
+*.egg-info/
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/

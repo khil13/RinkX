@@ -1,0 +1,42 @@
+# Home-arena location per team, used only to compute travel distance and time-zone shifts
+# (game_team_context). The NHL API does not publish coordinates.
+#
+# Source: compiled by hand from public map data, rounded to ~0.001° (about 100 m), which is
+# far more precise than travel-distance features need. Arena *names* are not kept here;
+# they come from the NHL API with each game.
+#
+# Neutral-site games (e.g. international series) get travel_km = NULL rather than a guess.
+source: "Public map data, compiled manually; approximate to ~1 km"
+teams:
+  ANA: { lat: 33.808, lon: -117.877, tz: America/Los_Angeles }
+  BOS: { lat: 42.366, lon: -71.062, tz: America/New_York }
+  BUF: { lat: 42.875, lon: -78.876, tz: America/New_York }
+  CAR: { lat: 35.803, lon: -78.722, tz: America/New_York }
+  CBJ: { lat: 39.969, lon: -83.006, tz: America/New_York }
+  CGY: { lat: 51.037, lon: -114.052, tz: America/Edmonton }
+  CHI: { lat: 41.881, lon: -87.674, tz: America/Chicago }
+  COL: { lat: 39.749, lon: -105.008, tz: America/Denver }
+  DAL: { lat: 32.790, lon: -96.810, tz: America/Chicago }
+  DET: { lat: 42.341, lon: -83.055, tz: America/Detroit }
+  EDM: { lat: 53.547, lon: -113.498, tz: America/Edmonton }
+  FLA: { lat: 26.158, lon: -80.326, tz: America/New_York }
+  LAK: { lat: 34.043, lon: -118.267, tz: America/Los_Angeles }
+  MIN: { lat: 44.945, lon: -93.101, tz: America/Chicago }
+  MTL: { lat: 45.496, lon: -73.569, tz: America/Toronto }
+  NJD: { lat: 40.734, lon: -74.171, tz: America/New_York }
+  NSH: { lat: 36.159, lon: -86.778, tz: America/Chicago }
+  NYI: { lat: 40.712, lon: -73.726, tz: America/New_York }
+  NYR: { lat: 40.751, lon: -73.993, tz: America/New_York }
+  OTT: { lat: 45.297, lon: -75.927, tz: America/Toronto }
+  PHI: { lat: 39.901, lon: -75.172, tz: America/New_York }
+  PIT: { lat: 40.439, lon: -79.989, tz: America/New_York }
+  SEA: { lat: 47.622, lon: -122.354, tz: America/Los_Angeles }
+  SJS: { lat: 37.333, lon: -121.901, tz: America/Los_Angeles }
+  STL: { lat: 38.627, lon: -90.203, tz: America/Chicago }
+  TBL: { lat: 27.943, lon: -82.452, tz: America/New_York }
+  TOR: { lat: 43.643, lon: -79.379, tz: America/Toronto }
+  UTA: { lat: 40.768, lon: -111.901, tz: America/Denver }
+  VAN: { lat: 49.278, lon: -123.109, tz: America/Vancouver }
+  VGK: { lat: 36.103, lon: -115.178, tz: America/Los_Angeles }
+  WPG: { lat: 49.893, lon: -97.144, tz: America/Winnipeg }
+  WSH: { lat: 38.898, lon: -77.021, tz: America/New_York }
