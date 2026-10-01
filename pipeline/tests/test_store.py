@@ -81,3 +81,20 @@ def test_github_backend_requires_repo():
     s = Settings.from_env({"RINKX_ENV": "prod"})
     with pytest.raises(ConfigError):
         remote.backend_for(s)
+
+
+def test_repo_root_is_found_from_the_checkout_not_the_install_location(tmp_path: Path, monkeypatch):
+    from rinkx.config import ConfigError, find_repo_root
+
+    # Running from anywhere inside the checkout finds it (the CI/production case, where the
+    # package is installed into site-packages and __file__ points far away).
+    monkeypatch.chdir(REPO_ROOT / "web")
+    assert find_repo_root(environ={}) == REPO_ROOT
+    assert find_repo_root(start=REPO_ROOT / "pipeline/rinkx", environ={}) == REPO_ROOT
+    assert find_repo_root(environ={"RINKX_REPO_ROOT": str(tmp_path)}) == tmp_path.resolve()
+    # Outside any checkout, with the file-location fallback also outside: a clear error.
+    import rinkx.config as cfg
+
+    monkeypatch.setattr(cfg, "__file__", str(tmp_path / "site-packages/rinkx/config.py"))
+    with pytest.raises(ConfigError, match="RINKX_REPO_ROOT"):
+        find_repo_root(start=tmp_path, environ={})
