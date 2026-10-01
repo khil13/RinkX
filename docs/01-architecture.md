@@ -139,7 +139,7 @@ The repo, the Release asset and the Pages site are all **publicly downloadable**
 | Published data files | AES-256-GCM with a random 256-bit data key (Actions secret `DATA_KEY`). `keyfile.json` holds that key wrapped with a key derived from your passphrase (PBKDF2-SHA256, 600k iterations). Your passphrase never leaves your device and is never stored in the repo. |
 | Unlock on your devices | You enter the passphrase once per device. The browser stores the derived key in IndexedDB as a **non-extractable** CryptoKey. "Lock" clears it. |
 | Passphrase strength | All of the protection rests on it. Use a long passphrase (5+ random words). The keyfile is public, so a weak passphrase can be brute-forced offline. |
-| API keys | Actions secrets only (`ODDS_API_KEY`, `NTFY_TOPIC`, ...). The ntfy topic is a long random name, which acts as its password.. Never in the bundle or the repo. |
+| API keys | Actions secrets only (`ODDS_API_KEY`, `NTFY_TOPIC`, ...). The ntfy topic is a long random name, which acts as its password. Never in the bundle or the repo. |
 | Quick Entry | The workflow acts only on issues opened by the repo owner, and anyone else's issues are ignored. Issue contents are public, but that information (a goalie confirmation plus a public source URL) is already public. |
 | Odds vendor terms | Raw odds are never published in readable form. They exist only inside the encrypted store and bundle, for your personal use. |
 
