@@ -95,6 +95,7 @@ class GameRec:
 
 @dataclass(frozen=True)
 class ScheduleWeek:
+    days: list[str]  # every date the response covers, including days with no games
     games: list[GameRec]
     regular_season_start: str | None
     regular_season_end: str | None
@@ -147,6 +148,7 @@ def parse_schedule(payload: dict[str, Any]) -> ScheduleWeek:
                 )
             )
     return ScheduleWeek(
+        days=[str(d["date"]) for d in payload.get("gameWeek", [])],
         games=games,
         regular_season_start=payload.get("regularSeasonStartDate"),
         regular_season_end=payload.get("regularSeasonEndDate"),

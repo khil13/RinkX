@@ -59,7 +59,15 @@ def _context(conn: sqlite3.Connection, game_id: int, team_id: int) -> dict[str, 
     ).fetchone()
     if r is None:
         return None
+    # rest_days is NULL when no earlier game is stored. That only means "first game of the
+    # season" if the whole season schedule was loaded; otherwise rest is simply unknown.
+    season_complete = conn.execute(
+        "SELECT 1 FROM ingestion_runs WHERE status = 'succeeded' AND job_name = "
+        "'nhl.schedule_backfill:' || (SELECT season_id FROM games WHERE id = ?) LIMIT 1",
+        (game_id,),
+    ).fetchone()
     return {
+        "first_game_of_season": (r["rest_days"] is None) if season_complete else None,
         "rest_days": r["rest_days"],
         "back_to_back": bool(r["is_back_to_back"]),
         "games_last_7d": r["games_last_7d"],

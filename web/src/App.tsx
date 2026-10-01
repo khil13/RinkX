@@ -5,12 +5,17 @@ import { useManifest } from "./lib/data/fetch";
 import { SessionProvider, useSession } from "./lib/session";
 import { Admin } from "./routes/Admin";
 import { Dashboard } from "./routes/Dashboard";
+import { Game } from "./routes/Game";
+import { Games } from "./routes/Games";
 import { Placeholder } from "./routes/Placeholder";
+import { Player, Players } from "./routes/Players";
 import { Setup } from "./routes/Setup";
 import { Unlock } from "./routes/Unlock";
 
 const BUILT: Record<string, () => React.ReactElement> = {
   "/": () => <Dashboard />,
+  "/games": () => <Games />,
+  "/players": () => <Players />,
   "/admin": () => <Admin />,
 };
 
@@ -48,6 +53,8 @@ function Gate() {
               element={BUILT[n.to]?.() ?? <Placeholder title={n.label} phase={n.phase} />}
             />
           ))}
+          <Route path="/games/:id" element={<Game />} />
+          <Route path="/players/:id" element={<Player />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       )}

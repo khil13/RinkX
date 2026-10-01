@@ -6,7 +6,7 @@ RinkX answers **"why does the model project this player at this number?"** It do
 
 ## Status
 
-**Phase 0 complete:** pipeline skeleton, encrypted store and site, deploy workflow, Setup/Unlock flow. No data sources are connected yet; Phase 1 adds the NHL schedule.
+**Phase 1 complete:** NHL schedule, standings, rosters and box scores ingested hourly from the free NHL API; Games (daily slate), Game, Players and Player pages. Goalies, lineups, injuries and odds are clearly marked *not connected yet*. Next: Phase 2 (play-by-play, ice-time splits, hit rates).
 
 **First time?** Follow [docs/setup.md](docs/setup.md).
 

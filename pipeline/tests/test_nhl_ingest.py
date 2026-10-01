@@ -159,3 +159,13 @@ def test_outage_is_reported_not_hidden(conn):
     assert one(conn, "SELECT count(*) FROM ingestion_runs WHERE status = 'failed'") >= 2
     feeds = {f.code: f for f in feed_statuses(conn, NOW)}
     assert feeds["schedule"].state == "failed"
+
+
+def test_failed_schedule_weeks_are_partial_and_leave_dates_uncovered(conn):
+    ingest(conn)
+    status, meta = conn.execute(
+        "SELECT status, meta FROM ingestion_runs WHERE job_name = 'nhl.schedule' ORDER BY id DESC LIMIT 1"
+    ).fetchone()
+    assert status == "partial" and json.loads(meta)["error_count"] == 2  # weeks of 03-03 and 03-17
+    covered = [r[0] for r in conn.execute("SELECT game_date FROM schedule_coverage ORDER BY game_date")]
+    assert covered == [f"2026-03-{d}" for d in range(10, 17)]

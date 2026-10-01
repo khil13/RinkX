@@ -41,7 +41,7 @@ Each file gets a fresh random IV. The file path is bound in as GCM additional da
 
 | File | Equivalent endpoint | Contents |
 |---|---|---|
-| `manifest.json` *(public)* | — | Build time, schema version, per-feed `last_success_at` and status, file list with SHA-256 hashes |
+| `manifest.json` *(public)* | — | Build time, schema version, `slate_date` (Eastern date the site opens on, 6 am rollover), per-feed `last_success_at` and status, file list with SHA-256 hashes |
 | `slate/{date}.json.enc` | `GET /games/today` | Games with teams, records, L10, venue, start time, goalies (projected/confirmed + source), environment (total, ML, implied team totals), rest/B2B/travel, injury counts, PP1 units, team metrics |
 | `games/{id}.json.enc` | `GET /games/{id}` + `/games/{id}/props` | Full game detail, lineups (ES + PP/PK), injuries, every priced prop card for the game |
 | `props/best/{date}.json.enc` | `GET /props/best` | Flattened rows for the Best Props table. Filtering and sorting happen in the browser. |
@@ -55,7 +55,7 @@ Each file gets a fresh random IV. The file path is bound in as GCM additional da
 | `correlations/{date}.json.enc` | (used by parlay) | Pairwise correlations relevant to today's props, with `n_obs`, CI and method; same-game joint probabilities from the simulation |
 | `admin/health.json.enc` | `GET /admin/*` | Per-source health, recent runs and failures, open data-quality issues, market coverage, odds credit usage, model registry |
 
-Older dates stay published for 30 days. After that, the history remains in the store and in player and performance files.
+A slate is published only for dates that a successful schedule fetch covered (`schedule_coverage`), so an empty slate always means "no games", never "no data". Phase 1 publishes slates for today ± 3 days. Older dates stay published for 30 days once later phases need them. After that, the history remains in the store and in player and performance files.
 
 ## Canonical prop card (`props/{id}`)
 

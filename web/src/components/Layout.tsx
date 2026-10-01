@@ -16,7 +16,7 @@ export const NAV: NavItem[] = [
   { to: "/games", label: "Games", phase: 1 },
   { to: "/props", label: "Props", phase: 5 },
   { to: "/props/best", label: "Best Props", phase: 6 },
-  { to: "/players", label: "Players", phase: 2 },
+  { to: "/players", label: "Players", phase: 1 },
   { to: "/goalies", label: "Goalies", phase: 3 },
   { to: "/lines", label: "Line Movement", phase: 4 },
   { to: "/parlay", label: "Parlay Builder", phase: 8 },
@@ -28,6 +28,7 @@ export const NAV: NavItem[] = [
 
 const TABS = ["/", "/games", "/props/best", "/players"];
 const exact = (to: string) => to === "/" || to === "/props";
+const BUILT_PHASE = 1; // pages up to this roadmap phase exist
 
 function navClass({ isActive }: { isActive: boolean }) {
   return `flex items-center justify-between rounded-md px-3 py-2 text-sm ${
@@ -72,7 +73,7 @@ export function Layout() {
           {NAV.map((n) => (
             <NavLink key={n.to} to={n.to} end={exact(n.to)} className={navClass}>
               {n.label}
-              {n.phase > 0 && <span className="num text-[10px] text-muted/60">P{n.phase}</span>}
+              {n.phase > BUILT_PHASE && <span className="num text-[10px] text-muted/60">P{n.phase}</span>}
             </NavLink>
           ))}
         </nav>

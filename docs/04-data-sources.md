@@ -38,6 +38,9 @@ If a needed category has no compliant source, the app shows **"Data unavailable"
 * Corsi/Fenwick, high-danger counts, on-ice rates, rest/travel, and actual line deployment reconstructed from shift charts.
 * Arena scorekeeper bias factors for hits, blocks and SOG, estimated from home/away differentials.
 
+### Moneylines inside the NHL schedule (found while building Phase 1)
+The NHL schedule endpoint carries **game moneylines from the NHL's betting partners** (an `odds` array per team plus an `oddsPartners` list), including DraftKings (US) and FanDuel (Canada). This is a free, legitimate source for *game* moneylines and therefore for game-environment inputs, but it has **no totals and no player props**. It is planned as a Phase 4 input next to a paid odds feed.
+
 ## Paid sources (recommended budget order)
 
 1. **Odds vendor (required for any market feature).** Recommendation: **The Odds API** as the starting point. It covers NHL player props (shots on goal, goals, assists, points, PP points, blocked shots, saves, anytime/first goal scorer) for US books on paid tiers, and offers historical snapshots. Credits are metered per market × region, which is why polling cadence is quota-aware. Alternatives with deeper prop coverage and lower latency, at higher cost: **OpticOdds**, **SportsGameOdds**, **OddsJam API**. Hits props in particular are offered by fewer books and vendors, so expect "Data unavailable" more often.

@@ -1,6 +1,49 @@
+import { Link } from "react-router";
 import { DataChip, Notice, Panel } from "../components/ui";
-import { useManifest } from "../lib/data/fetch";
-import { ago, localTime } from "../lib/format";
+import { useEncrypted, useManifest } from "../lib/data/fetch";
+import type { Slate } from "../lib/data/types";
+import { ago, clock, localTime, longDate } from "../lib/format";
+import { statusLabel } from "./Games";
+
+function TodaySlate({ date }: { date: string }) {
+  const slate = useEncrypted<Slate>(`slate/${date}.json`);
+  if (slate.state !== "ready") return null;
+  const games = slate.value.data.games;
+  return (
+    <Panel
+      title={`Today · ${longDate(date)}`}
+      right={
+        <Link to="/games" className="text-xs text-accent">
+          All games →
+        </Link>
+      }
+    >
+      {games.length === 0 ? (
+        <p className="text-sm text-muted">No NHL games scheduled.</p>
+      ) : (
+        <ul className="divide-y divide-line">
+          {games.map((g) => (
+            <li key={g.id}>
+              <Link to={`/games/${g.id}`} className="flex min-h-10 items-center justify-between gap-3 py-1.5 text-sm">
+                <span className="num">
+                  {g.away.team.abbrev} @ {g.home.team.abbrev}
+                  {(g.status === "final" || g.status === "live") && (
+                    <span className="ml-2 text-muted">
+                      {g.away.score}–{g.home.score}
+                    </span>
+                  )}
+                </span>
+                <span className="num text-xs text-muted">
+                  {g.status === "scheduled" ? clock(g.start_time_utc) : statusLabel(g)}
+                </span>
+              </Link>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Panel>
+  );
+}
 
 export function Dashboard() {
   const manifest = useManifest().data;
@@ -14,9 +57,11 @@ export function Dashboard() {
       {!connected && (
         <Notice tone="warn">
           Live data unavailable. No data sources are connected yet, so there is no slate, no projections and no
-          lines to show. The NHL schedule and game pages arrive in Phase 1.
+          lines to show.
         </Notice>
       )}
+
+      <TodaySlate date={manifest.slate_date} />
 
       <Panel title="Data feeds" right={<span className="text-xs text-muted">as of {ago(manifest.generated_at)}</span>}>
         <ul className="divide-y divide-line">

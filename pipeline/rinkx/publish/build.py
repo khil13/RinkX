@@ -15,7 +15,6 @@ from typing import Any
 from rinkx import __version__, crypto
 from rinkx.config import ConfigError, Settings
 from rinkx.ingestion.nhl.jobs import current_season
-from rinkx.ingestion.runs import last_success
 from rinkx.publish import guards, views
 from rinkx.publish.schemas import BuildInfo, Envelope, FeedStatus, FileEntry, Manifest, Meta
 from rinkx.store.db import schema_version
@@ -135,12 +134,12 @@ def _league_files(conn: sqlite3.Connection, today: date) -> dict[str, tuple[Any,
     """Slates for a week around today, their games, teams, and players."""
     out: dict[str, tuple[Any, str | None]] = {}
     season = current_season(conn, today)
-    # An empty slate must mean "no games that day", never "we have no schedule data".
-    # Until the schedule has been fetched successfully, publish no slates at all.
-    if last_success(conn, "nhl.schedule") is None:
-        return out
+    # An empty slate must mean "no games that day", never "we have no schedule data", so a
+    # slate is only published for dates a successful schedule fetch actually covered.
     for offset in range(-SLATE_DAYS_BACK, SLATE_DAYS_AHEAD + 1):
         d = (today + timedelta(days=offset)).isoformat()
+        if not conn.execute("SELECT 1 FROM schedule_coverage WHERE game_date = ?", (d,)).fetchone():
+            continue
         oldest = conn.execute("SELECT min(fetched_at) FROM games WHERE game_date = ?", (d,)).fetchone()[0]
         out[f"slate/{d}.json"] = (views.slate(conn, d), oldest)
         for (gid,) in conn.execute("SELECT nhl_game_id FROM games WHERE game_date = ?", (d,)).fetchall():

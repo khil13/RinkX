@@ -139,6 +139,10 @@ def test_publishes_league_files_from_replayed_nhl_data(tmp_path: Path, keys):
     files = set(m["files"])
     assert {"slate/2026-03-10.json.enc", "teams.json.enc", "players/index.json.enc"} <= files
     assert "games/2025021012.json.enc" in files
+    # Only dates a successful schedule fetch covered get a slate. The recorded week starts on
+    # 03-10, so 03-07..03-09 must be absent (unknown), not published as "no games".
+    slates = sorted(f for f in files if f.startswith("slate/"))
+    assert slates == [f"slate/2026-03-{d}.json.enc" for d in (10, 11, 12, 13)]
 
     key = keys["data_key"]
 

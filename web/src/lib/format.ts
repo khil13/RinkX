@@ -29,3 +29,27 @@ export function githubRepo(loc: Location = window.location): { owner: string; re
   const repo = loc.pathname.split("/").filter(Boolean)[0];
   return m?.[1] && repo ? { owner: m[1], repo } : null;
 }
+
+export function clock(iso: string): string {
+  return new Date(iso).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit", timeZoneName: "short" });
+}
+
+export function longDate(day: string): string {
+  // `day` is a calendar date (YYYY-MM-DD); format it without shifting through UTC.
+  const [y, m, d] = day.split("-").map(Number);
+  return new Date(y!, m! - 1, d!).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+}
+
+export function mmss(seconds: number | null): string {
+  if (seconds === null) return "—";
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+}
+
+export function signed(n: number | null): string {
+  if (n === null) return "—";
+  return n > 0 ? `+${n}` : String(n);
+}
+
+export function num(n: number | null | undefined): string {
+  return n === null || n === undefined ? "—" : String(n);
+}

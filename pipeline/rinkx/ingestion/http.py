@@ -89,9 +89,9 @@ class FixtureFetcher:
 class ReplayFetcher(FixtureFetcher):
     """Offline replay of the recorded 2026-03-10 snapshot, for tests and local dev only.
 
-    "Current" endpoints are served from the dated recordings, and URLs outside the sample
-    behave as the API does for a quiet date or an unknown team: empty schedule weeks and
-    empty rosters. Box scores for unrecorded games fail like a real outage would.
+    "Current" endpoints are served from their dated recordings. Anything not recorded fails
+    exactly like an outage would, so the pipeline's handling of missing data is exercised
+    rather than papered over.
     """
 
     ALIASES: ClassVar[dict[str, str]] = {
@@ -102,12 +102,4 @@ class ReplayFetcher(FixtureFetcher):
     }
 
     def get_json(self, url: str) -> Any:
-        url = self.ALIASES.get(url, url)
-        try:
-            return super().get_json(url)
-        except FetchError:
-            if "/schedule/" in url:
-                return {"gameWeek": []}
-            if "/roster/" in url:
-                return {"forwards": [], "defensemen": [], "goalies": []}
-            raise
+        return super().get_json(self.ALIASES.get(url, url))

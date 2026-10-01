@@ -1,6 +1,7 @@
-"""Build the two sites the e2e tests run against, using the real pipeline.
+"""Build the sites the e2e tests run against, using the real pipeline.
 
-  .sites/configured  dist/ + a bundle published by `rinkx.pipeline.run` with test keys
+  .sites/league      dist/ + the real pipeline replaying recorded NHL responses (2026-03-10)
+  .sites/empty       dist/ + a configured bundle with no data sources connected
   .sites/setup       dist/ + a manifest-only bundle (no keys yet)
 
 Run from web/ after `vite build`:  python tests/e2e/prepare.py
@@ -48,22 +49,34 @@ def main() -> None:
         "RINKX_SOURCES": "none",
     }
 
-    # Configured site: production keyfile parameters (600k iterations), prod env.
+    # Configured sites share production keyfile parameters (600k iterations) and prod env.
     data_key, store_key = crypto.new_key(), crypto.new_key()
     keyfile = tmp / "keyfile.json"
     keyfile.write_text(json.dumps(crypto.make_keyfile(PASSPHRASE, data_key)))
-    configured = site("configured")
+    keys = {
+        "RINKX_KEYFILE": str(keyfile),
+        "RINKX_DATA_KEY": crypto.b64e(data_key),
+        "RINKX_STORE_KEY": crypto.b64e(store_key),
+    }
+
+    # League site: the real pipeline ingesting the recorded NHL responses for 2026-03-10.
     run(
         Settings.from_env(
             base
+            | keys
             | {
-                "RINKX_KEYFILE": str(keyfile),
-                "RINKX_DATA_KEY": crypto.b64e(data_key),
-                "RINKX_STORE_KEY": crypto.b64e(store_key),
+                "RINKX_SOURCES": "nhl",
+                "RINKX_FIXTURES": str(REPO / "pipeline/tests/fixtures/nhl"),
+                "RINKX_TODAY": "2026-03-10",
+                "RINKX_BOXSCORE_LIMIT": "100",
+                "RINKX_STORE_DIR": str(tmp / "remote-league"),
             }
         ),
-        configured / "data",
+        site("league") / "data",
     )
+
+    # Empty site: configured, but no data source has ever run.
+    run(Settings.from_env(base | keys | {"RINKX_STORE_DIR": str(tmp / "remote-empty")}), site("empty") / "data")
 
     # Unconfigured site: what Pages serves before the owner completes setup.
     setup = site("setup")

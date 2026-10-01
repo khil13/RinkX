@@ -84,3 +84,16 @@ export function Button({
     </button>
   );
 }
+
+const REASON_LABEL: Record<string, string> = {
+  not_connected: "Not connected yet",
+  data_unavailable: "Data unavailable",
+  insufficient_sample: "Insufficient data",
+  not_final: "Available after the game",
+  no_games_this_season: "No games this season",
+};
+
+/** Renders a missing value with its reason. Never a zero, never a guess. */
+export function Missing({ reason }: { reason: string | null | undefined }) {
+  return <span className="text-xs italic text-muted">{REASON_LABEL[reason ?? "data_unavailable"] ?? "Data unavailable"}</span>;
+}

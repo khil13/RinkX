@@ -62,6 +62,7 @@ def _fetch_week(
     for g in week.games:
         store.upsert_game(conn, g, source_id, fetched)
         store.extend_season_end(conn, g.season_id, week.playoff_end or week.regular_season_end)
+    store.mark_covered(conn, week.days, source_id, fetched)
     return len(week.games), week
 
 
@@ -84,9 +85,15 @@ def run_nhl(conn: sqlite3.Connection, fetcher: Fetcher, now: datetime, opts: Nhl
 
     calls0 = fetcher.calls
     with ingestion_run(conn, sched, "nhl.schedule") as st:
-        for start in (today - timedelta(days=7), today, today + timedelta(days=7)):
-            n, _ = _fetch_week(conn, fetcher, start, sched)
-            st.rows_upserted += n
+        weeks = (today - timedelta(days=7), today, today + timedelta(days=7))
+        for start in weeks:
+            try:
+                n, _ = _fetch_week(conn, fetcher, start, sched)
+                st.rows_upserted += n
+            except (FetchError, parse.ParseError) as exc:
+                st.errors.append(str(exc))
+        if len(st.errors) == len(weeks):
+            raise FetchError(f"{WEB}/schedule", "every schedule request failed")
         st.http_calls = fetcher.calls - calls0
         st.meta["window"] = [str(today - timedelta(days=7)), str(today + timedelta(days=13))]
 
@@ -137,7 +144,7 @@ def _backfill_season(conn: sqlite3.Connection, fetcher: Fetcher, source_id: int,
                 st.rows_upserted += n
                 if week.regular_season_end:
                     end = max(end, date.fromisoformat(week.regular_season_end))
-            except FetchError as exc:
+            except (FetchError, parse.ParseError) as exc:
                 st.errors.append(str(exc))
             d += timedelta(days=7)
         st.http_calls = fetcher.calls - calls0

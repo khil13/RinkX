@@ -314,3 +314,11 @@ def write_boxscore(conn: sqlite3.Connection, game_id: int, box: Boxscore, source
         )
         n += 1
     return n
+
+
+def mark_covered(conn: sqlite3.Connection, days: list[str], source_id: int, fetched_at: str) -> None:
+    conn.executemany(
+        "INSERT INTO schedule_coverage (game_date, fetched_at, source_id) VALUES (?,?,?) "
+        "ON CONFLICT(game_date) DO UPDATE SET fetched_at = excluded.fetched_at",
+        [(d, fetched_at, source_id) for d in days],
+    )
