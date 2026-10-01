@@ -1,0 +1,87 @@
+name: record-nhl-fixtures
+
+# Records real NHL API responses as parser test fixtures, so contract tests run against
+# what the API actually returns. Runs when this file or the request list changes on a
+# development branch (or manually), and commits the results back to that branch.
+on:
+  push:
+    branches: ["claude/**"]
+    paths:
+      - ".github/workflows/record-nhl-fixtures.yml"
+      - "pipeline/tests/fixtures/nhl/REQUEST"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: record-nhl-fixtures-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  record:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+
+      - name: Fetch endpoints
+        run: |
+          set -euo pipefail
+          out=pipeline/tests/fixtures/nhl
+          mkdir -p "$out"
+          web=https://api-web.nhle.com/v1
+          stats=https://api.nhle.com/stats/rest/en
+          index="[]"
+
+          get() {  # get <name> <url>
+            local name="$1" url="$2"
+            sleep 1  # be polite: well under any reasonable rate limit
+            code=$(curl -sS -L --retry 3 --retry-delay 2 -A "RinkX fixture recorder (personal project)" \
+                   -o "$out/$name.raw" -w '%{http_code}' "$url")
+            if [ "$code" != "200" ]; then
+              echo "::warning::$url -> HTTP $code"; rm -f "$out/$name.raw"; return 0
+            fi
+            jq . "$out/$name.raw" > "$out/$name.json" && rm "$out/$name.raw"
+            index=$(jq --arg n "$name.json" --arg u "$url" '. + [{file: $n, url: $u}]' <<<"$index")
+          }
+
+          get seasons                    "$web/season"
+          get standings_season           "$web/standings-season"
+          get schedule_2026-03-10        "$web/schedule/2026-03-10"
+          get schedule_now               "$web/schedule/now"
+          get standings_2026-03-10       "$web/standings/2026-03-10"
+          get standings_now              "$web/standings/now"
+          get roster_TOR_20252026        "$web/roster/TOR/20252026"
+          get roster_TOR_current         "$web/roster/TOR/current"
+          get club_schedule_TOR_20252026 "$web/club-schedule-season/TOR/20252026"
+          get stats_team                 "$stats/team"
+
+          # One completed regular-season game from the recorded day: boxscore + landing.
+          game=$(jq -r '[.gameWeek[0].games[] | select(.gameState=="OFF" or .gameState=="FINAL")][0].id // empty' \
+                 "$out/schedule_2026-03-10.json")
+          if [ -n "$game" ]; then
+            get "boxscore_$game" "$web/gamecenter/$game/boxscore"
+            get "landing_$game"  "$web/gamecenter/$game/landing"
+          fi
+
+          # One skater and one goalie from the recorded roster.
+          skater=$(jq -r '.forwards[0].id // empty' "$out/roster_TOR_20252026.json")
+          goalie=$(jq -r '.goalies[0].id // empty' "$out/roster_TOR_20252026.json")
+          [ -n "$skater" ] && get "player_$skater" "$web/player/$skater/landing"
+          [ -n "$goalie" ] && get "player_$goalie" "$web/player/$goalie/landing"
+
+          jq -n --argjson files "$index" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+             '{recorded_at: $at, source: "NHL public API (api-web.nhle.com, api.nhle.com/stats)", note: "Unmodified responses (pretty-printed) used only as parser test fixtures.", files: $files}' \
+             > "$out/index.json"
+          ls -la "$out"
+
+      - name: Commit fixtures
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add pipeline/tests/fixtures/nhl
+          if git diff --cached --quiet; then echo "no changes"; exit 0; fi
+          git commit -m "Record NHL API fixtures"
+          git push
