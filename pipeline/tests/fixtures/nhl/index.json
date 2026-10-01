@@ -1,5 +1,5 @@
 {
-  "recorded_at": "2026-10-01T19:45:45Z",
+  "recorded_at": "2026-10-01T19:48:35Z",
   "source": "NHL public API (api-web.nhle.com, api.nhle.com/stats)",
   "note": "Unmodified responses (pretty-printed) used only as parser test fixtures.",
   "files": [
@@ -58,6 +58,30 @@
     {
       "file": "roster_BOS_20252026.json",
       "url": "https://api-web.nhle.com/v1/roster/BOS/20252026"
+    },
+    {
+      "file": "player_8471685.json",
+      "url": "https://api-web.nhle.com/v1/player/8471685/landing"
+    },
+    {
+      "file": "player_8476872.json",
+      "url": "https://api-web.nhle.com/v1/player/8476872/landing"
+    },
+    {
+      "file": "player_8478042.json",
+      "url": "https://api-web.nhle.com/v1/player/8478042/landing"
+    },
+    {
+      "file": "player_8479369.json",
+      "url": "https://api-web.nhle.com/v1/player/8479369/landing"
+    },
+    {
+      "file": "player_8482408.json",
+      "url": "https://api-web.nhle.com/v1/player/8482408/landing"
+    },
+    {
+      "file": "player_8483756.json",
+      "url": "https://api-web.nhle.com/v1/player/8483756/landing"
     },
     {
       "file": "player_8477503.json",
