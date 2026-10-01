@@ -410,3 +410,122 @@ def parse_boxscore(payload: dict[str, Any]) -> Boxscore:
                 )
             )
     return box
+
+
+# --------------------------------------------------------------------------- play-by-play
+
+SHOT_TYPES = {"shot-on-goal": "shot", "missed-shot": "miss", "blocked-shot": "block", "goal": "goal"}
+
+
+@dataclass(frozen=True)
+class ShotEvent:
+    event_idx: int
+    period: int
+    period_seconds: int
+    event_type: str  # shot | miss | block | goal
+    shooter_id: int | None
+    goalie_id: int | None  # None for empty-net attempts and blocks
+    # Matches official stats: a shot blocked by the shooter's own teammate counts as the
+    # shooter's blocked attempt, but is NOT a blocked shot for the teammate.
+    blocker_id: int | None  # opponent who blocked it; None for teammate blocks
+    teammate_block: bool
+    shooter_team_id: int
+    strength_state: str  # from the shooting team's view, e.g. "5v4"; "5v5" at even strength
+    empty_net: bool
+    x: int | None  # normalized so the shooting team attacks toward +x
+    y: int | None
+    shot_type: str | None
+
+
+@dataclass(frozen=True)
+class GoalCredit:
+    scorer_id: int
+    assist1_id: int | None
+    assist2_id: int | None
+    team_id: int
+    strength_state: str
+
+
+@dataclass
+class PlayByPlay:
+    nhl_game_id: int
+    game_state: str
+    home_team_id: int
+    away_team_id: int
+    shots: list[ShotEvent] = field(default_factory=list)
+    goals: list[GoalCredit] = field(default_factory=list)
+
+
+def _strength(situation: str, team_is_home: bool) -> tuple[str, bool]:
+    """situationCode digits: away goalie, away skaters, home skaters, home goalie."""
+    if len(situation) != 4 or not situation.isdigit():
+        raise ParseError(f"bad situationCode {situation!r}")
+    away_g, away_s, home_s, home_g = (int(c) for c in situation)
+    own, opp = (home_s, away_s) if team_is_home else (away_s, home_s)
+    opp_goalie = away_g if team_is_home else home_g
+    return f"{own}v{opp}", opp_goalie == 0
+
+
+def parse_play_by_play(payload: dict[str, Any]) -> PlayByPlay:
+    home, away = int(payload["homeTeam"]["id"]), int(payload["awayTeam"]["id"])
+    pbp = PlayByPlay(int(payload["id"]), str(payload["gameState"]), home, away)
+    # The roster is the source of truth for a player's team; eventOwnerTeamId is not
+    # consistent across event types.
+    team_of = {int(r["playerId"]): int(r["teamId"]) for r in payload.get("rosterSpots", [])}
+    for play in payload.get("plays", []):
+        kind = SHOT_TYPES.get(play.get("typeDescKey", ""))
+        period = play.get("periodDescriptor") or {}
+        if kind is None or period.get("periodType") == "SO":
+            continue  # shootout attempts are not shots or goals in any stat or prop
+        d = play.get("details") or {}
+        shooter = d.get("scoringPlayerId") if kind == "goal" else d.get("shootingPlayerId")
+        team = team_of.get(int(shooter)) if shooter is not None else d.get("eventOwnerTeamId")
+        if team is None:
+            raise ParseError(f"cannot determine shooting team for event {play.get('eventId')}")
+        is_home = team == home
+        state, empty_net = _strength(str(play["situationCode"]), is_home)
+        x, y = d.get("xCoord"), d.get("yCoord")
+        if x is not None and y is not None:
+            # Home defends `homeTeamDefendingSide` (left/right); flip so every shot attacks +x.
+            home_attacks_right = play.get("homeTeamDefendingSide") == "left"
+            if is_home != home_attacks_right:
+                x, y = -x, -y
+        pbp.shots.append(
+            ShotEvent(
+                event_idx=int(play["sortOrder"]),
+                period=int(period["number"]),
+                period_seconds=toi_seconds(play.get("timeInPeriod")) or 0,
+                event_type=kind,
+                shooter_id=int(shooter) if shooter is not None else None,
+                goalie_id=d.get("goalieInNetId"),
+                blocker_id=None if d.get("reason") == "teammate-blocked" else d.get("blockingPlayerId"),
+                teammate_block=d.get("reason") == "teammate-blocked",
+                shooter_team_id=int(team),
+                strength_state=state,
+                empty_net=empty_net,
+                x=x,
+                y=y,
+                shot_type=d.get("shotType"),
+            )
+        )
+        if kind == "goal":
+            if shooter is None:
+                raise ParseError(f"goal event {play.get('eventId')} has no scorer")
+            pbp.goals.append(
+                GoalCredit(int(shooter), d.get("assist1PlayerId"), d.get("assist2PlayerId"), int(team), state)
+            )
+    return pbp
+
+
+# --------------------------------------------------------------------------- stats API game reports
+
+
+def parse_game_report(payload: dict[str, Any]) -> tuple[list[dict[str, Any]], int]:
+    """Rows of a stats-API report page, plus the total row count across pages."""
+    rows = payload.get("data")
+    if not isinstance(rows, list):
+        raise ParseError("stats report has no data list")
+    for r in rows:
+        if "playerId" not in r or "gameId" not in r:
+            raise ParseError("stats report row without playerId/gameId")
+    return rows, int(payload.get("total", len(rows)))

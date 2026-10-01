@@ -7,6 +7,11 @@ on:
   schedule:
     - cron: "17 * * * *" # hourly baseline (minute 17 avoids the top-of-hour rush)
   workflow_dispatch:
+    inputs:
+      boxscore_limit:
+        description: "Games to load this run (box scores + play-by-play). Raise to e.g. 400 to backfill faster."
+        required: false
+        default: "40"
   push:
     branches: [main]
     paths: ["web/**", "pipeline/**", "db/**", "config/**", ".github/workflows/pipeline.yml"]
@@ -23,7 +28,7 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
 
@@ -50,6 +55,7 @@ jobs:
           # Empty until setup is done; the pipeline then publishes a setup-only site.
           RINKX_DATA_KEY: ${{ secrets.DATA_KEY }}
           RINKX_STORE_KEY: ${{ secrets.STORE_KEY }}
+          RINKX_BOXSCORE_LIMIT: ${{ inputs.boxscore_limit || '40' }}
           GH_TOKEN: ${{ github.token }}
         run: python -m rinkx run --out web/dist/data
 

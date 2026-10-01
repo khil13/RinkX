@@ -1,8 +1,10 @@
 """NHL ingestion jobs. Each job is logged in ingestion_runs; one failing job or item never
 stops the others, and failures show up as failed/partial feeds on the site.
 
-Per-run budget (hourly): ~6 schedule/standings calls + up to BOXSCORE_LIMIT box scores, plus
-once a day 32 roster calls, plus once per season a ~30-call schedule backfill.
+Per-run budget (hourly): ~6 schedule/standings calls; up to BOXSCORE_LIMIT box scores and as
+many play-by-plays; stats-API reports for a few dates (4 reports x ~5 pages each); once a day
+32 roster calls; once per season a ~30-call schedule walk. Work is ordered current season
+first, then the previous season (backfill), so recent data is never starved by history.
 """
 
 from __future__ import annotations
@@ -14,7 +16,7 @@ from datetime import date, datetime, timedelta
 
 from rinkx.ingestion import context
 from rinkx.ingestion.http import Fetcher, FetchError
-from rinkx.ingestion.nhl import parse, store
+from rinkx.ingestion.nhl import parse, store, urls
 from rinkx.ingestion.runs import SourceSpec, ingestion_run, last_success, register_source, source_enabled
 from rinkx.timeutil import iso, parse_iso, slate_date, utcnow
 
@@ -28,7 +30,11 @@ LICENSE = (
 SCHEDULE_SOURCE = SourceSpec(
     "nhl_web_schedule", "NHL API: schedule, standings, rosters", "schedule", "free", WEB, LICENSE
 )
-STATS_SOURCE = SourceSpec("nhl_web_boxscore", "NHL API: box scores", "stats", "free", WEB, LICENSE)
+STATS_SOURCE = SourceSpec("nhl_web_boxscore", "NHL API: box scores & play-by-play", "stats", "free", WEB, LICENSE)
+STATS_API_SOURCE = SourceSpec(
+    "nhl_stats_api", "NHL stats API: ice-time splits, shot attempts, faceoffs", "stats", "free", urls.STATS, LICENSE
+)
+REPORTS = ("timeonice", "summary", "realtime", "faceoffwins")
 
 BOXSCORE_LIMIT = 40
 ROSTER_MAX_AGE = timedelta(hours=20)
@@ -39,6 +45,10 @@ class NhlOptions:
     today: date | None = None
     boxscore_limit: int = BOXSCORE_LIMIT
     roster_max_age: timedelta = ROSTER_MAX_AGE
+
+    @property
+    def report_date_limit(self) -> int:
+        return max(3, self.boxscore_limit // 8)
 
 
 def current_season(conn: sqlite3.Connection, today: date) -> int | None:
@@ -71,6 +81,7 @@ def run_nhl(conn: sqlite3.Connection, fetcher: Fetcher, now: datetime, opts: Nhl
     today = opts.today or slate_date(now)
     sched = register_source(conn, SCHEDULE_SOURCE)
     stats_src = register_source(conn, STATS_SOURCE)
+    stats_api = register_source(conn, STATS_API_SOURCE)
     conn.commit()
     if not source_enabled(conn, SCHEDULE_SOURCE.code):
         log.info("NHL schedule source disabled; skipping NHL jobs")
@@ -98,8 +109,16 @@ def run_nhl(conn: sqlite3.Connection, fetcher: Fetcher, now: datetime, opts: Nhl
         st.meta["window"] = [str(today - timedelta(days=7)), str(today + timedelta(days=13))]
 
     season = current_season(conn, today)
+    seasons: tuple[int, ...] = ()
     if season is not None:
-        _backfill_season(conn, fetcher, sched, season, today)
+        previous = season - 10001  # 20262027 -> 20252026
+        seasons = (
+            (season, previous)
+            if conn.execute("SELECT 1 FROM seasons WHERE id = ?", (previous,)).fetchone()
+            else (season,)
+        )
+        for s_id in seasons:
+            _backfill_season(conn, fetcher, sched, s_id, today, extend_to_today=s_id == season)
 
     calls0 = fetcher.calls
     with ingestion_run(conn, sched, "nhl.standings") as st:
@@ -118,13 +137,17 @@ def run_nhl(conn: sqlite3.Connection, fetcher: Fetcher, now: datetime, opts: Nhl
     if last is None or now - parse_iso(last) >= opts.roster_max_age:
         _sync_rosters(conn, fetcher, sched, today)
 
-    if season is not None:
-        _sync_boxscores(conn, fetcher, stats_src, season, opts.boxscore_limit, today)
+    if seasons:
+        _sync_boxscores(conn, fetcher, stats_src, seasons, opts.boxscore_limit, today)
+        _sync_play_by_play(conn, fetcher, stats_src, seasons, opts.boxscore_limit)
+        _sync_game_reports(conn, fetcher, stats_api, seasons, opts.report_date_limit)
         with ingestion_run(conn, sched, "nhl.context") as st:
-            st.rows_upserted = context.recompute_context(conn, season)
+            st.rows_upserted = sum(context.recompute_context(conn, s_id) for s_id in seasons)
 
 
-def _backfill_season(conn: sqlite3.Connection, fetcher: Fetcher, source_id: int, season: int, today: date) -> None:
+def _backfill_season(
+    conn: sqlite3.Connection, fetcher: Fetcher, source_id: int, season: int, today: date, *, extend_to_today: bool
+) -> None:
     """Once per season: walk the whole schedule so rest/back-to-back context is complete."""
     job = f"nhl.schedule_backfill:{season}"
     done = conn.execute(
@@ -134,7 +157,8 @@ def _backfill_season(conn: sqlite3.Connection, fetcher: Fetcher, source_id: int,
         return
     row = conn.execute("SELECT start_date, end_date FROM seasons WHERE id = ?", (season,)).fetchone()
     start, end = date.fromisoformat(row[0]), date.fromisoformat(row[1])
-    end = max(end, today + timedelta(days=14))
+    if extend_to_today:
+        end = max(end, today + timedelta(days=14))
     calls0 = fetcher.calls
     with ingestion_run(conn, source_id, job) as st:
         d = start
@@ -142,8 +166,9 @@ def _backfill_season(conn: sqlite3.Connection, fetcher: Fetcher, source_id: int,
             try:
                 n, week = _fetch_week(conn, fetcher, d, source_id)
                 st.rows_upserted += n
-                if week.regular_season_end:
-                    end = max(end, date.fromisoformat(week.regular_season_end))
+                for last in (week.regular_season_end, week.playoff_end):
+                    if last:
+                        end = max(end, date.fromisoformat(last))
             except (FetchError, parse.ParseError) as exc:
                 st.errors.append(str(exc))
             d += timedelta(days=7)
@@ -172,15 +197,20 @@ def _sync_rosters(conn: sqlite3.Connection, fetcher: Fetcher, source_id: int, to
         st.http_calls = fetcher.calls - calls0
 
 
+def _seasons_sql(seasons: tuple[int, ...]) -> str:
+    """WHERE fragment + ORDER BY rank: the current season (first) before older ones."""
+    return ",".join(str(int(s)) for s in seasons)
+
+
 def _sync_boxscores(
-    conn: sqlite3.Connection, fetcher: Fetcher, source_id: int, season: int, limit: int, today: date
+    conn: sqlite3.Connection, fetcher: Fetcher, source_id: int, seasons: tuple[int, ...], limit: int, today: date
 ) -> None:
     pending = conn.execute(
-        """SELECT g.id, g.nhl_game_id FROM games g
-           WHERE g.season_id = ? AND g.status = 'final'
+        f"""SELECT g.id, g.nhl_game_id FROM games g
+           WHERE g.season_id IN ({_seasons_sql(seasons)}) AND g.status = 'final'
              AND NOT EXISTS (SELECT 1 FROM team_game_stats t WHERE t.game_id = g.id)
-           ORDER BY g.start_time_utc DESC LIMIT ?""",
-        (season, limit),
+           ORDER BY g.season_id = ? DESC, g.start_time_utc DESC LIMIT ?""",
+        (seasons[0], limit),
     ).fetchall()
     calls0 = fetcher.calls
     with ingestion_run(conn, source_id, "nhl.boxscores") as st:
@@ -210,3 +240,84 @@ def _ensure_players(
         if store.player_id(conn, pid) is None:
             rec = parse.parse_player_landing(fetcher.get_json(f"{WEB}/player/{pid}/landing"))
             store.upsert_player(conn, rec, source_id, iso(utcnow()), today.isoformat())
+
+
+def _sync_play_by_play(
+    conn: sqlite3.Connection, fetcher: Fetcher, source_id: int, seasons: tuple[int, ...], limit: int
+) -> None:
+    """Shot events and primary/secondary assists, for games whose box score is loaded."""
+    pending = conn.execute(
+        f"""SELECT g.id, g.nhl_game_id FROM games g
+           WHERE g.season_id IN ({_seasons_sql(seasons)}) AND g.status = 'final'
+             AND EXISTS (SELECT 1 FROM team_game_stats t WHERE t.game_id = g.id)
+             AND NOT EXISTS (SELECT 1 FROM game_enrichment e WHERE e.game_id = g.id AND e.pbp_at IS NOT NULL)
+           ORDER BY g.season_id = ? DESC, g.start_time_utc DESC LIMIT ?""",
+        (seasons[0], limit),
+    ).fetchall()
+    calls0 = fetcher.calls
+    with ingestion_run(conn, source_id, "nhl.play_by_play") as st:
+        st.meta["pending"] = len(pending)
+        for game_id, nhl_game_id in pending:
+            try:
+                pbp = parse.parse_play_by_play(fetcher.get_json(urls.play_by_play(nhl_game_id)))
+                if pbp.game_state not in parse.FINAL_STATES:
+                    continue
+                st.rows_upserted += store.write_play_by_play(conn, game_id, pbp, source_id, iso(utcnow()))
+                st.rows_read += 1
+                conn.commit()
+            except (FetchError, parse.ParseError, KeyError) as exc:
+                conn.rollback()
+                st.errors.append(f"game {nhl_game_id}: {exc}")
+        st.http_calls = fetcher.calls - calls0
+
+
+def _sync_game_reports(
+    conn: sqlite3.Connection, fetcher: Fetcher, source_id: int, seasons: tuple[int, ...], date_limit: int
+) -> None:
+    """Official per-game TOI splits, PP assists, shot attempts and faceoffs, one date at a time.
+    Only games whose box score is loaded are marked enriched; a game whose box score arrives
+    later brings its date back here, so one stuck game never blocks the rest of its date."""
+    loaded = "EXISTS (SELECT 1 FROM team_game_stats t WHERE t.game_id = g.id)"
+    not_enriched = "NOT EXISTS (SELECT 1 FROM game_enrichment e WHERE e.game_id = g.id AND e.stats_at IS NOT NULL)"
+    dates = [
+        r[0]
+        for r in conn.execute(
+            f"""SELECT g.game_date FROM games g
+               WHERE g.season_id IN ({_seasons_sql(seasons)}) AND g.status = 'final' AND {loaded} AND {not_enriched}
+               GROUP BY g.game_date
+               ORDER BY max(g.season_id = ?) DESC, g.game_date DESC LIMIT ?""",
+            (seasons[0], date_limit),
+        )
+    ]
+    calls0 = fetcher.calls
+    with ingestion_run(conn, source_id, "nhl.game_reports") as st:
+        st.meta["dates"] = dates
+        for day in dates:
+            try:
+                touched: set[int] = set()
+                for report in REPORTS:
+                    start = 0
+                    while True:
+                        rows, total = parse.parse_game_report(
+                            fetcher.get_json(urls.game_report("skater", report, day, start))
+                        )
+                        touched |= store.apply_game_report(conn, report, rows)
+                        st.rows_read += len(rows)
+                        start += urls.PAGE_SIZE
+                        if start >= total:
+                            break
+                ready = {
+                    int(r[0])
+                    for r in conn.execute(
+                        f"SELECT g.id FROM games g WHERE g.game_date = ? AND g.status = 'final' AND {loaded}", (day,)
+                    )
+                }
+                store.mark_stats_enriched(conn, ready, iso(utcnow()))
+                st.rows_upserted += len(touched)
+                if ready - touched:
+                    st.errors.append(f"{day}: stats API returned no rows for {len(ready - touched)} game(s)")
+                conn.commit()
+            except (FetchError, parse.ParseError) as exc:
+                conn.rollback()
+                st.errors.append(f"{day}: {exc}")
+        st.http_calls = fetcher.calls - calls0

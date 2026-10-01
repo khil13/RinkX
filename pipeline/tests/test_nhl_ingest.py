@@ -83,9 +83,6 @@ def test_ingests_rosters_and_one_boxscore(conn):
     assert one(conn, "SELECT count(*) FROM team_game_stats WHERE game_id = ?", gid) == 2
     assert one(conn, "SELECT sum(goals) FROM player_game_stats WHERE game_id = ?", gid) == 3
     assert one(conn, "SELECT sum(shots) FROM player_game_stats WHERE game_id = ?", gid) == 39
-    # Fields the box score doesn't provide stay NULL, never 0.
-    assert one(conn, "SELECT count(*) FROM player_game_stats WHERE game_id = ? AND pp_points IS NOT NULL", gid) == 0
-    assert one(conn, "SELECT count(*) FROM player_game_stats WHERE game_id = ? AND shot_attempts IS NOT NULL", gid) == 0
     # Only goalies who actually played get a row; the winner's shutout flag is decided.
     rows = conn.execute(
         "SELECT p.last_name, s.started, s.decision, s.saves, s.shutout, s.pulled FROM goalie_game_stats s "
@@ -169,3 +166,77 @@ def test_failed_schedule_weeks_are_partial_and_leave_dates_uncovered(conn):
     assert status == "partial" and json.loads(meta)["error_count"] == 2  # weeks of 03-03 and 03-17
     covered = [r[0] for r in conn.execute("SELECT game_date FROM schedule_coverage ORDER BY game_date")]
     assert covered == [f"2026-03-{d}" for d in range(10, 17)]
+
+
+def test_play_by_play_and_stats_reports_enrich_the_box_score(conn):
+    ingest(conn)
+    gid = one(conn, "SELECT id FROM games WHERE nhl_game_id = 2025021012")
+    # Play-by-play: events stored; primary + secondary assists add up to box-score assists.
+    assert one(conn, "SELECT count(*) FROM pbp_shot_events WHERE game_id = ?", gid) == 123  # 36 SOG+3 G+52 miss+32 blk
+    assert one(conn, "SELECT count(*) FROM pbp_shot_events WHERE game_id = ? AND is_teammate_block = 1", gid) == 2
+    assert (
+        one(
+            conn,
+            "SELECT count(*) FROM player_game_stats "
+            "WHERE game_id = ? AND primary_assists + secondary_assists <> assists",
+            gid,
+        )
+        == 0
+    )
+    # Stats API: every skater in that game now has official TOI splits and shot attempts.
+    rows = conn.execute(
+        "SELECT toi_s, ev_toi_s, pp_toi_s, sh_toi_s, shots, missed_shots, shots_blocked_by_opp, shot_attempts, "
+        "pp_goals, pp_assists, pp_points FROM player_game_stats WHERE game_id = ?",
+        (gid,),
+    ).fetchall()
+    assert len(rows) == 36
+    for r in rows:
+        assert r["ev_toi_s"] + r["pp_toi_s"] + r["sh_toi_s"] == r["toi_s"]
+        assert r["shot_attempts"] == r["shots"] + r["missed_shots"] + r["shots_blocked_by_opp"]
+        assert r["pp_points"] == r["pp_goals"] + r["pp_assists"]
+    kempe = conn.execute(
+        "SELECT s.pp_toi_s, s.shot_attempts, json_extract(s.extra, '$.first_goals') AS fg FROM player_game_stats s "
+        "JOIN players p ON p.id = s.player_id WHERE p.nhl_player_id = 8477960 AND s.game_id = ?",
+        (gid,),
+    ).fetchone()
+    assert tuple(kempe) == (122, 6, 0)
+    extra = json.loads(
+        conn.execute(
+            "SELECT s.extra FROM player_game_stats s JOIN players p ON p.id = s.player_id "
+            "WHERE p.nhl_player_id = 8477960 AND s.game_id = ?",
+            (gid,),
+        ).fetchone()[0]
+    )
+    assert extra == {"first_goals": 0, "empty_net_goals": 0, "ot_goals": 0}  # all three kept, not just the last
+    done = conn.execute(
+        "SELECT pbp_at IS NOT NULL, stats_at IS NOT NULL FROM game_enrichment WHERE game_id = ?", (gid,)
+    )
+    assert tuple(done.fetchone()) == (1, 1)
+    # Games on that date whose box score never loaded are not marked enriched.
+    assert one(conn, "SELECT count(*) FROM game_enrichment WHERE stats_at IS NOT NULL") == 1
+
+
+def test_enrichment_is_not_repeated(conn):
+    ingest(conn)
+    first = one(conn, "SELECT count(*) FROM ingestion_runs WHERE job_name = 'nhl.game_reports' AND rows_read > 0")
+    ingest(conn)
+    second = one(conn, "SELECT count(*) FROM ingestion_runs WHERE job_name = 'nhl.game_reports' AND rows_read > 0")
+    assert first == second == 1  # the date was processed once; nothing left to do on rerun
+    meta = json.loads(
+        conn.execute("SELECT meta FROM ingestion_runs WHERE job_name = 'nhl.play_by_play' ORDER BY id DESC").fetchone()[
+            0
+        ]
+    )
+    assert meta["pending"] == 0
+
+
+def test_box_score_alone_leaves_unprovided_fields_null(conn):
+    """Before enrichment, fields the box score doesn't carry are NULL, never 0."""
+    from rinkx.ingestion.nhl import parse, store
+
+    ingest(conn)
+    gid = one(conn, "SELECT id FROM games WHERE nhl_game_id = 2025021012")
+    box = parse.parse_boxscore(json.loads((FIX / "boxscore_2025021012.json").read_text()))
+    store.write_boxscore(conn, gid, box, 1, "2026-03-11T00:00:00Z")  # rewrite: enrichment columns reset
+    for col in ("pp_points", "shot_attempts", "ev_toi_s", "primary_assists"):
+        assert one(conn, f"SELECT count(*) FROM player_game_stats WHERE game_id = ? AND {col} IS NOT NULL", gid) == 0

@@ -102,3 +102,72 @@ def test_boxscore():
         assert g.shots_against == home.shots if not g.is_home else g.shots_against == away.shots
         assert g.saves is not None and g.ev_saves is not None
         assert (g.ev_saves or 0) + (g.pp_saves or 0) + (g.sh_saves or 0) == g.saves
+
+
+def test_play_by_play_reconciles_with_box_score():
+    pbp = parse.parse_play_by_play(load("pbp_2025021012.json"))
+    box = parse.parse_boxscore(load("boxscore_2025021012.json"))
+    assert (pbp.home_team_id, pbp.away_team_id) == (6, 26)
+
+    # Goals and SOG per player from play-by-play match the official box score exactly.
+    for s in box.skaters:
+        mine = [e for e in pbp.shots if e.shooter_id == s.nhl_player_id]
+        assert sum(e.event_type == "goal" for e in mine) == s.goals, s
+        assert sum(e.event_type in ("shot", "goal") for e in mine) == s.shots, s
+    # Assists split into primary/secondary still sum to the box-score assists.
+    a1 = {g.assist1_id for g in pbp.goals} - {None}
+    for s in box.skaters:
+        n = sum(g.assist1_id == s.nhl_player_id for g in pbp.goals) + sum(
+            g.assist2_id == s.nhl_player_id for g in pbp.goals
+        )
+        assert n == s.assists, s
+    assert len(a1) == 3
+
+
+def test_play_by_play_strength_coords_and_ot():
+    pbp = parse.parse_play_by_play(load("pbp_2025021012.json"))
+    ot = [g for g in pbp.goals if g.strength_state == "3v3"]
+    assert len(ot) == 1 and ot[0].scorer_id == 8479325  # McAvoy, 3-on-3 overtime winner
+    assert {e.event_type for e in pbp.shots} == {"shot", "miss", "block", "goal"}
+    # Normalized coordinates: shots on goal come from the attacking half almost always.
+    on_goal = [e for e in pbp.shots if e.event_type in ("shot", "goal") and e.x is not None]
+    assert sum(e.x > 0 for e in on_goal) / len(on_goal) > 0.9
+    # Opponent blocks name a blocker on the other team; teammate blocks (2 in this game)
+    # credit nobody, matching the official box score.
+    team_of = {r["playerId"]: r["teamId"] for r in load("pbp_2025021012.json")["rosterSpots"]}
+    blocks = [e for e in pbp.shots if e.event_type == "block"]
+    assert sum(e.teammate_block for e in blocks) == 2
+    for e in blocks:
+        if e.teammate_block:
+            assert e.blocker_id is None
+        else:
+            assert e.blocker_id is not None and team_of[e.blocker_id] != e.shooter_team_id
+    box = parse.parse_boxscore(load("boxscore_2025021012.json"))
+    for s in box.skaters:
+        assert sum(e.blocker_id == s.nhl_player_id for e in blocks) == s.blocked_shots, s
+    with pytest.raises(parse.ParseError):
+        parse._strength("15x1", True)
+    assert parse._strength("1560", False) == ("5v6", True)  # home pulled its goalie
+
+
+def test_stats_reports_cover_every_skater_and_add_up():
+    def rows(report):
+        out = []
+        start = 0
+        while True:
+            page, total = parse.parse_game_report(load(f"stats_skater_{report}_2026-03-10_{start}.json"))
+            out += page
+            start += 100
+            if start >= total:
+                return {(r["playerId"], r["gameId"]): r for r in out}
+
+    toi, summary, realtime = rows("timeonice"), rows("summary"), rows("realtime")
+    assert len(toi) == len(summary) == len(realtime) == 468
+    box = parse.parse_boxscore(load("boxscore_2025021012.json"))
+    for s in box.skaters:
+        key = (s.nhl_player_id, 2025021012)
+        t, m, r = toi[key], summary[key], realtime[key]
+        assert t["evTimeOnIce"] + t["ppTimeOnIce"] + t["shTimeOnIce"] == t["timeOnIce"] == s.toi_s
+        assert (m["goals"], m["assists"], m["shots"], m["ppGoals"]) == (s.goals, s.assists, s.shots, s.pp_goals)
+        assert r["totalShotAttempts"] == s.shots + r["missedShots"] + r["shotAttemptsBlocked"]
+        assert r["hits"] == s.hits and r["blockedShots"] == s.blocked_shots
