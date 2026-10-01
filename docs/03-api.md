@@ -25,7 +25,7 @@ FastAPI service, versioned under `/api/v1`, with an OpenAPI 3.1 spec. The Next.j
 * Times are UTC ISO-8601. The client renders them in the user's time zone.
 * Odds come back in American format with decimal alongside. Probabilities are 0–1 floats.
 
-## Public endpoints (authenticated users)
+## Endpoints (owner, authenticated)
 
 | Method & path | Purpose | Key query params |
 |---|---|---|
@@ -64,8 +64,7 @@ FastAPI service, versioned under `/api/v1`, with an OpenAPI 3.1 spec. The Next.j
 | `GET /admin/data-quality` | Open data-quality issues |
 | `GET /admin/markets` | Prop market coverage by book and game ("which markets are missing today") |
 | `GET /admin/models` · `POST /admin/models/{id}/promote` · `POST /admin/models/retrain` | Model registry and retraining |
-| `GET /admin/users` · `PATCH /admin/users/{id}` | User management |
-| `POST /admin/news` | Manual news entry (`url` and `published_at` required) |
+| `POST /admin/news` · `POST /admin/quick-entry` | Manual news entry and Quick Entry for goalie confirmations, scratches, line/PP changes and injuries (`source_url` and `published_at` required). These emit the same change events as automated feeds. |
 | `GET /admin/logs` | Structured log search (proxied from the log store) |
 
 ## Canonical prop-card payload

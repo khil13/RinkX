@@ -12,16 +12,17 @@ Each phase ends with a **test gate**. The next phase starts only when the gate p
 | **5 · Model vs market** | Pricing | Devig (multiplicative/power/Shin), edge, EV, push handling, confidence score with breakdown, calculation trail, `predictions` freezing | Odds-math property tests (no-vig sums to 1, symmetric cases); hand-checked examples; confidence components unit-tested |
 | **6 · Best Props** | Dashboard | `/props/best` with filters and sorts, empty states, prop-card drawer, SSE live updates | Sorting/filtering e2e tests; copy lint passes; no prop shown without source + timestamp |
 | **7 · Backtesting** | Performance & calibration | Walk-forward runner, grader with book settlement rules, CLV, calibration, Model Performance page, champion/challenger registry | Calibration ECE within target on held-out seasons; confidence buckets are monotonic (or weights are revised); losing months are visible in the UI |
-| **8 · Alerts & news** | Alerts, news, correlation, parlay | Alert CRUD and evaluator, in-app + email + web push, news ingestion (licensed feed + admin entry), correlation estimation, Parlay Builder | Alert fires exactly once per condition in an integration test; correlations carry `n_obs`/CI; parlays with insufficient data fall back to independence and say so |
+| **8 · Alerts & news** | Alerts, news, correlation, parlay | Alert CRUD and evaluator, in-app + email + web push, news ingestion (Quick Entry + optional feed), correlation estimation, Parlay Builder | Alert fires exactly once per condition in an integration test; correlations carry `n_obs`/CI; parlays with insufficient data fall back to independence and say so |
 | **9 · Mobile polish** | iPhone-first refinement | Card layouts, bottom sheets, PWA, performance budget | Lighthouse mobile ≥ 90; Playwright suite on the iPhone 15 profile; manual check on a device |
-| **10 · Production** | Launch | Vercel + Render/Fly, managed Postgres/Redis, Sentry, backups/PITR, admin dashboard, legal review of data licenses, responsible-gaming copy review | Load test (p95 < 300 ms on cached reads); restore-from-backup drill; staging soak of one full slate with `synthetic` forbidden |
+| **10 · Production** | Personal deployment | Vercel (web) + one VM running Docker Compose (API, worker, Postgres, Redis, Caddy), nightly DB dumps to object storage, owner-only auth allowlist, admin health page | Restore-from-backup drill; one full live slate run in prod with `synthetic` forbidden; an unauthenticated request is rejected |
 
 ## Decisions needed from the product owner
 
-These affect cost and legality, so they need answers before or during the phases noted:
+Decided: **personal use** (single owner, no redistribution; see `01-architecture.md` §0).
+
+Still open:
 
 1. **Odds vendor and budget** (needed by Phase 4). The default recommendation is The Odds API, with a paid tier sized by the quota math in `04-data-sources.md`.
-2. **Lineup / goalie / injury feed** (needed by Phase 3 for live accuracy). Options are a licensed feed (SportsDataIO / Rotowire / Daily Faceoff partnership) or admin entry from official sources at the start.
-3. **Commercial intent.** Free personal use and a paid product have different licensing requirements for NHL data and odds data.
-4. **Target jurisdictions** (needed by Phase 4). This decides which sportsbooks to display and the legal-age and responsible-gaming copy.
-5. **Auth providers** (needed by Phase 0). The default is email magic link + Google + Apple.
+2. **Lineup / goalie / injury feed** (needed by Phase 3). The default is the free Quick Entry screen plus automatic post-game reconstruction from shift charts. A paid personal-tier feed is optional.
+3. **Your jurisdiction and sportsbooks** (needed by Phase 4). Lines are shown only for the books you can actually use, which also saves odds-API credits.
+4. **Hosting** (needed by Phase 10). The default is a small VM. Running on a home machine also works.

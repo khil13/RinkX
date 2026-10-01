@@ -2,6 +2,20 @@
 
 RinkX is a research tool for NHL player-prop markets. It answers **"why does the model project this player at this number?"** It does not answer "what should I bet?" Every number on screen has to trace back to a source, a timestamp and a model version.
 
+## 0. Scope: personal use
+
+RinkX is a **single-owner, personal-use** tool. It is not a public or commercial product. That decision drives several simplifications across these docs:
+
+| Area | Personal-use decision |
+|---|---|
+| Users | One owner account (`role=admin`). No sign-up, user management or multi-tenant concerns. The `users` table stays so alerts and parlays have an owner. |
+| Auth | Still required, because the app is internet-reachable and calls paid APIs. Sign-in is restricted to an allowlist containing only the owner's email. |
+| Licensing | Free sources used within their personal / non-commercial terms. Nothing is redistributed or shared publicly. If that ever changes, revisit `04-data-sources.md`. |
+| Scale | One slate (≤ 16 games/day) and one viewer. No horizontal scaling, CDN tuning or load tests. |
+| Cost | Infrastructure targets about $10–25/month plus the odds API subscription. |
+
+The data-integrity rules below **do not** relax for personal use.
+
 ## 1. Non-negotiable product rules
 
 These are enforced in code (schema constraints, API contracts and CI tests), not only in copy.
@@ -109,29 +123,34 @@ Clients get updates over **Server-Sent Events** (`GET /api/v1/stream`). SSE is s
 
 ## 5. Security and auth
 
-* **Auth.js (NextAuth v5)** handles email magic links plus Google and Apple sign-in. The Next.js server mints a short-lived (5 min) EdDSA-signed JWT for API calls. FastAPI verifies it against a JWKS. Roles are `user` and `admin`.
+* **Auth.js (NextAuth v5)** with an email magic link (optionally Google), restricted by `ALLOWED_EMAILS` to the owner. The Next.js server mints a short-lived (5 min) signed JWT for API calls, which FastAPI verifies. The owner account has `role=admin`.
 * API keys for odds, news and other vendors live only in worker and API environment secrets and never reach the browser.
-* Rate limiting in Redis (token bucket) per user and IP. Admin routes require the `admin` role plus a re-auth within 12 h.
-* Postgres access goes through least-privilege roles: `api_ro` (read only, plus writes to alerts and parlays), `worker_rw`, and `migrator`.
-* Audit logging covers admin actions (manual news entry, model promotion, user changes).
+* Basic IP rate limiting on the auth and API edges to blunt scanning, since the app is public-facing even with a single user.
+* Postgres is not exposed to the internet. The API and workers reach it over the private Docker network.
+* Admin actions (manual news entry, model promotion) are logged with timestamps, for your own audit trail.
 
 ## 6. Responsible-use layer
 
-* A persistent footer says: *"Statistical estimates, not guarantees. Must be of legal age in your jurisdiction."* It links to responsible-gambling resources for the user's region (e.g. 1-800-GAMBLER in the US, ConnexOntario in Ontario).
+* A persistent footer says: *"Statistical estimates, not guarantees."* It links to responsible-gambling resources (e.g. 1-800-GAMBLER in the US, ConnexOntario in Ontario).
 * An optional session reminder and a "cool-off" mode (`users.rg_settings`) hide pricing and edge views for a chosen period.
 * Parlay Builder always shows a variance warning, and the combined probability sits next to the payout.
 * No affiliate deep links or "bet now" buttons in v1. The sportsbook column is informational.
 
 ## 7. Deployment
 
-| Layer | MVP | Scale-up path |
-|---|---|---|
-| Web | Vercel | Vercel |
-| API + workers | Render or Fly.io (Docker), 1 API + 2 worker + 1 beat | AWS ECS Fargate with autoscaling queues |
-| Postgres | Managed (Neon / Supabase / RDS) with PITR | RDS with a read replica for the API |
-| Redis | Upstash / Render Redis | ElastiCache |
-| Object storage | Cloudflare R2 / S3 | S3 |
-| Observability | Sentry (web + API), structured JSON logs, OpenTelemetry traces, uptime pings | Grafana stack |
-| CI/CD | GitHub Actions: lint, typecheck, unit tests, schema smoke test against Postgres 16, copy lint, OpenAPI → TS client drift check | plus a nightly backtest regression |
+Sized for one user. Everything except the web app runs on **one small Linux VM** with Docker Compose.
 
-Environments: `dev` (synthetic data allowed), `staging` (real data, synthetic forbidden), `prod`.
+| Layer | Choice | Notes |
+|---|---|---|
+| Web | Vercel (Hobby plan, which is for personal non-commercial projects) | Free |
+| API + worker + beat | Docker Compose on one VM (e.g. Hetzner, DigitalOcean or Fly.io; 2 vCPU / 4 GB) | Celery runs as **one worker process with priority queues**, not separate fleets |
+| Postgres 16 | Container on the same VM, nightly `pg_dump` to object storage | Managed Postgres (Neon / Supabase free tier) is a fine alternative if you'd rather not run backups |
+| Redis | Container on the same VM | |
+| Object storage | Cloudflare R2 or Backblaze B2 | Raw payloads, model artifacts, DB dumps. Cents per month. |
+| TLS / ingress | Caddy (automatic HTTPS) in front of the API | |
+| Observability | Structured JSON logs, the in-app admin health page, a free uptime ping, Sentry free tier | No tracing stack |
+| CI | GitHub Actions: lint, typecheck, unit tests, schema smoke test against Postgres 16, copy lint, OpenAPI → TS client drift check, nightly backtest regression | Free for this volume |
+
+It can also run entirely on a home machine (`docker compose up`). The only cost is that alerts don't fire while the machine is off.
+
+Environments: `dev` (local, synthetic data allowed) and `prod` (VM, synthetic data forbidden). There is no separate staging environment.
