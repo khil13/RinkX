@@ -9,6 +9,7 @@ on:
     paths:
       - ".github/workflows/record-nhl-fixtures.yml"
       - "pipeline/tests/fixtures/nhl/REQUEST"
+      - "scripts/record_nhl_fixtures.py"
   workflow_dispatch:
 
 permissions:
@@ -89,6 +90,13 @@ jobs:
              '{recorded_at: $at, source: "NHL public API (api-web.nhle.com, api.nhle.com/stats)", note: "Unmodified responses (pretty-printed) used only as parser test fixtures.", files: $files}' \
              > "$out/index.json"
           ls -la "$out"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Fetch play-by-play, shift charts and stats-API game reports
+        run: python scripts/record_nhl_fixtures.py
 
       - name: Commit fixtures
         run: |
