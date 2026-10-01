@@ -1,5 +1,5 @@
 {
-  "recorded_at": "2026-10-01T19:48:35Z",
+  "recorded_at": "2026-10-01T22:12:45Z",
   "source": "NHL public API (api-web.nhle.com, api.nhle.com/stats)",
   "note": "Unmodified responses (pretty-printed) used only as parser test fixtures.",
   "files": [
@@ -90,6 +90,98 @@
     {
       "file": "player_8476932.json",
       "url": "https://api-web.nhle.com/v1/player/8476932/landing"
+    },
+    {
+      "file": "pbp_2025021012.json",
+      "url": "https://api-web.nhle.com/v1/gamecenter/2025021012/play-by-play"
+    },
+    {
+      "file": "shifts_2025021012.json",
+      "url": "https://api.nhle.com/stats/rest/en/shiftcharts?cayenneExp=gameId%3D2025021012"
+    },
+    {
+      "file": "stats_skater_summary_2026-03-10_0.json",
+      "url": "https://api.nhle.com/stats/rest/en/skater/summary?isAggregate=false&isGame=true&start=0&limit=100&sort=%5B%7B%22property%22%3A%22playerId%22%2C%22direction%22%3A%22ASC%22%7D%2C%7B%22property%22%3A%22gameId%22%2C%22direction%22%3A%22ASC%22%7D%5D&cayenneExp=gameDate%3E%3D%222026-03-10%22%20and%20gameDate%3C%3D%222026-03-10%2023%3A59%3A59%22"
+    },
+    {
+      "file": "stats_skater_summary_2026-03-10_100.json",
+      "url": "https://api.nhle.com/stats/rest/en/skater/summary?isAggregate=false&isGame=true&start=100&limit=100&sort=%5B%7B%22property%22%3A%22playerId%22%2C%22direction%22%3A%22ASC%22%7D%2C%7B%22property%22%3A%22gameId%22%2C%22direction%22%3A%22ASC%22%7D%5D&cayenneExp=gameDate%3E%3D%222026-03-10%22%20and%20gameDate%3C%3D%222026-03-10%2023%3A59%3A59%22"
+    },
+    {
+      "file": "stats_skater_summary_2026-03-10_200.json",
+      "url": "https://api.nhle.com/stats/rest/en/skater/summary?isAggregate=false&isGame=true&start=200&limit=100&sort=%5B%7B%22property%22%3A%22playerId%22%2C%22direction%22%3A%22ASC%22%7D%2C%7B%22property%22%3A%22gameId%22%2C%22direction%22%3A%22ASC%22%7D%5D&cayenneExp=gameDate%3E%3D%222026-03-10%22%20and%20gameDate%3C%3D%222026-03-10%2023%3A59%3A59%22"
+    },
+    {
+      "file": "stats_skater_summary_2026-03-10_300.json",
+      "url": "https://api.nhle.com/stats/rest/en/skater/summary?isAggregate=false&isGame=true&start=300&limit=100&sort=%5B%7B%22property%22%3A%22playerId%22%2C%22direction%22%3A%22ASC%22%7D%2C%7B%22property%22%3A%22gameId%22%2C%22direction%22%3A%22ASC%22%7D%5D&cayenneExp=gameDate%3E%3D%222026-03-10%22%20and%20gameDate%3C%3D%222026-03-10%2023%3A59%3A59%22"
+    },
+    {
+      "file": "stats_skater_summary_2026-03-10_400.json",
+      "url": "https://api.nhle.com/stats/rest/en/skater/summary?isAggregate=false&isGame=true&start=400&limit=100&sort=%5B%7B%22property%22%3A%22playerId%22%2C%22direction%22%3A%22ASC%22%7D%2C%7B%22property%22%3A%22gameId%22%2C%22direction%22%3A%22ASC%22%7D%5D&cayenneExp=gameDate%3E%3D%222026-03-10%22%20and%20gameDate%3C%3D%222026-03-10%2023%3A59%3A59%22"
+    },
+    {
+      "file": "stats_skater_timeonice_2026-03-10_0.json",
+      "url": "https://api.nhle.com/stats/rest/en/skater/timeonice?isAggregate=false&isGame=true&start=0&limit=100&sort=%5B%7B%22property%22%3A%22playerId%22%2C%22direction%22%3A%22ASC%22%7D%2C%7B%22property%22%3A%22gameId%22%2C%22direction%22%3A%22ASC%22%7D%5D&cayenneExp=gameDate%3E%3D%222026-03-10%22%20and%20gameDate%3C%3D%222026-03-10%2023%3A59%3A59%22"
+    },
+    {
+      "file": "stats_skater_timeonice_2026-03-10_100.json",
+      "url": "https://api.nhle.com/stats/rest/en/skater/timeonice?isAggregate=false&isGame=true&start=100&limit=100&sort=%5B%7B%22property%22%3A%22playerId%22%2C%22direction%22%3A%22ASC%22%7D%2C%7B%22property%22%3A%22gameId%22%2C%22direction%22%3A%22ASC%22%7D%5D&cayenneExp=gameDate%3E%3D%222026-03-10%22%20and%20gameDate%3C%3D%222026-03-10%2023%3A59%3A59%22"
+    },
+    {
+      "file": "stats_skater_timeonice_2026-03-10_200.json",
+      "url": "https://api.nhle.com/stats/rest/en/skater/timeonice?isAggregate=false&isGame=true&start=200&limit=100&sort=%5B%7B%22property%22%3A%22playerId%22%2C%22direction%22%3A%22ASC%22%7D%2C%7B%22property%22%3A%22gameId%22%2C%22direction%22%3A%22ASC%22%7D%5D&cayenneExp=gameDate%3E%3D%222026-03-10%22%20and%20gameDate%3C%3D%222026-03-10%2023%3A59%3A59%22"
+    },
+    {
+      "file": "stats_skater_timeonice_2026-03-10_300.json",
+      "url": "https://api.nhle.com/stats/rest/en/skater/timeonice?isAggregate=false&isGame=true&start=300&limit=100&sort=%5B%7B%22property%22%3A%22playerId%22%2C%22direction%22%3A%22ASC%22%7D%2C%7B%22property%22%3A%22gameId%22%2C%22direction%22%3A%22ASC%22%7D%5D&cayenneExp=gameDate%3E%3D%222026-03-10%22%20and%20gameDate%3C%3D%222026-03-10%2023%3A59%3A59%22"
+    },
+    {
+      "file": "stats_skater_timeonice_2026-03-10_400.json",
+      "url": "https://api.nhle.com/stats/rest/en/skater/timeonice?isAggregate=false&isGame=true&start=400&limit=100&sort=%5B%7B%22property%22%3A%22playerId%22%2C%22direction%22%3A%22ASC%22%7D%2C%7B%22property%22%3A%22gameId%22%2C%22direction%22%3A%22ASC%22%7D%5D&cayenneExp=gameDate%3E%3D%222026-03-10%22%20and%20gameDate%3C%3D%222026-03-10%2023%3A59%3A59%22"
+    },
+    {
+      "file": "stats_skater_realtime_2026-03-10_0.json",
+      "url": "https://api.nhle.com/stats/rest/en/skater/realtime?isAggregate=false&isGame=true&start=0&limit=100&sort=%5B%7B%22property%22%3A%22playerId%22%2C%22direction%22%3A%22ASC%22%7D%2C%7B%22property%22%3A%22gameId%22%2C%22direction%22%3A%22ASC%22%7D%5D&cayenneExp=gameDate%3E%3D%222026-03-10%22%20and%20gameDate%3C%3D%222026-03-10%2023%3A59%3A59%22"
+    },
+    {
+      "file": "stats_skater_realtime_2026-03-10_100.json",
+      "url": "https://api.nhle.com/stats/rest/en/skater/realtime?isAggregate=false&isGame=true&start=100&limit=100&sort=%5B%7B%22property%22%3A%22playerId%22%2C%22direction%22%3A%22ASC%22%7D%2C%7B%22property%22%3A%22gameId%22%2C%22direction%22%3A%22ASC%22%7D%5D&cayenneExp=gameDate%3E%3D%222026-03-10%22%20and%20gameDate%3C%3D%222026-03-10%2023%3A59%3A59%22"
+    },
+    {
+      "file": "stats_skater_realtime_2026-03-10_200.json",
+      "url": "https://api.nhle.com/stats/rest/en/skater/realtime?isAggregate=false&isGame=true&start=200&limit=100&sort=%5B%7B%22property%22%3A%22playerId%22%2C%22direction%22%3A%22ASC%22%7D%2C%7B%22property%22%3A%22gameId%22%2C%22direction%22%3A%22ASC%22%7D%5D&cayenneExp=gameDate%3E%3D%222026-03-10%22%20and%20gameDate%3C%3D%222026-03-10%2023%3A59%3A59%22"
+    },
+    {
+      "file": "stats_skater_realtime_2026-03-10_300.json",
+      "url": "https://api.nhle.com/stats/rest/en/skater/realtime?isAggregate=false&isGame=true&start=300&limit=100&sort=%5B%7B%22property%22%3A%22playerId%22%2C%22direction%22%3A%22ASC%22%7D%2C%7B%22property%22%3A%22gameId%22%2C%22direction%22%3A%22ASC%22%7D%5D&cayenneExp=gameDate%3E%3D%222026-03-10%22%20and%20gameDate%3C%3D%222026-03-10%2023%3A59%3A59%22"
+    },
+    {
+      "file": "stats_skater_realtime_2026-03-10_400.json",
+      "url": "https://api.nhle.com/stats/rest/en/skater/realtime?isAggregate=false&isGame=true&start=400&limit=100&sort=%5B%7B%22property%22%3A%22playerId%22%2C%22direction%22%3A%22ASC%22%7D%2C%7B%22property%22%3A%22gameId%22%2C%22direction%22%3A%22ASC%22%7D%5D&cayenneExp=gameDate%3E%3D%222026-03-10%22%20and%20gameDate%3C%3D%222026-03-10%2023%3A59%3A59%22"
+    },
+    {
+      "file": "stats_skater_faceoffwins_2026-03-10_0.json",
+      "url": "https://api.nhle.com/stats/rest/en/skater/faceoffwins?isAggregate=false&isGame=true&start=0&limit=100&sort=%5B%7B%22property%22%3A%22playerId%22%2C%22direction%22%3A%22ASC%22%7D%2C%7B%22property%22%3A%22gameId%22%2C%22direction%22%3A%22ASC%22%7D%5D&cayenneExp=gameDate%3E%3D%222026-03-10%22%20and%20gameDate%3C%3D%222026-03-10%2023%3A59%3A59%22"
+    },
+    {
+      "file": "stats_skater_faceoffwins_2026-03-10_100.json",
+      "url": "https://api.nhle.com/stats/rest/en/skater/faceoffwins?isAggregate=false&isGame=true&start=100&limit=100&sort=%5B%7B%22property%22%3A%22playerId%22%2C%22direction%22%3A%22ASC%22%7D%2C%7B%22property%22%3A%22gameId%22%2C%22direction%22%3A%22ASC%22%7D%5D&cayenneExp=gameDate%3E%3D%222026-03-10%22%20and%20gameDate%3C%3D%222026-03-10%2023%3A59%3A59%22"
+    },
+    {
+      "file": "stats_skater_faceoffwins_2026-03-10_200.json",
+      "url": "https://api.nhle.com/stats/rest/en/skater/faceoffwins?isAggregate=false&isGame=true&start=200&limit=100&sort=%5B%7B%22property%22%3A%22playerId%22%2C%22direction%22%3A%22ASC%22%7D%2C%7B%22property%22%3A%22gameId%22%2C%22direction%22%3A%22ASC%22%7D%5D&cayenneExp=gameDate%3E%3D%222026-03-10%22%20and%20gameDate%3C%3D%222026-03-10%2023%3A59%3A59%22"
+    },
+    {
+      "file": "stats_skater_faceoffwins_2026-03-10_300.json",
+      "url": "https://api.nhle.com/stats/rest/en/skater/faceoffwins?isAggregate=false&isGame=true&start=300&limit=100&sort=%5B%7B%22property%22%3A%22playerId%22%2C%22direction%22%3A%22ASC%22%7D%2C%7B%22property%22%3A%22gameId%22%2C%22direction%22%3A%22ASC%22%7D%5D&cayenneExp=gameDate%3E%3D%222026-03-10%22%20and%20gameDate%3C%3D%222026-03-10%2023%3A59%3A59%22"
+    },
+    {
+      "file": "stats_skater_faceoffwins_2026-03-10_400.json",
+      "url": "https://api.nhle.com/stats/rest/en/skater/faceoffwins?isAggregate=false&isGame=true&start=400&limit=100&sort=%5B%7B%22property%22%3A%22playerId%22%2C%22direction%22%3A%22ASC%22%7D%2C%7B%22property%22%3A%22gameId%22%2C%22direction%22%3A%22ASC%22%7D%5D&cayenneExp=gameDate%3E%3D%222026-03-10%22%20and%20gameDate%3C%3D%222026-03-10%2023%3A59%3A59%22"
+    },
+    {
+      "file": "stats_goalie_summary_2026-03-10_0.json",
+      "url": "https://api.nhle.com/stats/rest/en/goalie/summary?isAggregate=false&isGame=true&start=0&limit=100&sort=%5B%7B%22property%22%3A%22playerId%22%2C%22direction%22%3A%22ASC%22%7D%2C%7B%22property%22%3A%22gameId%22%2C%22direction%22%3A%22ASC%22%7D%5D&cayenneExp=gameDate%3E%3D%222026-03-10%22%20and%20gameDate%3C%3D%222026-03-10%2023%3A59%3A59%22"
     }
   ]
 }
