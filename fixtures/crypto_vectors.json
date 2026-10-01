@@ -1,0 +1,32 @@
+{
+  "passphrase": "correct horse battery staple café",
+  "wrong_passphrase": "correct horse battery staple cafe",
+  "data_key_b64": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+  "keyfile": {
+    "v": 1,
+    "kdf": "PBKDF2-SHA256",
+    "iterations": 1000,
+    "salt": "ZGVmZ2hpamtsbW5vcHFycw==",
+    "wrapped_key": "oErDs9l6DlSqLoK8GVI0bk23UDsZ6EuqfTdzs7FptSWZQk7g/Y5g3w==",
+    "key_check": "fnjspUKq5Eb2w95M7Gvt/g=="
+  },
+  "file": {
+    "path": "admin/health.json",
+    "envelope": {
+      "v": 1,
+      "alg": "AES-256-GCM",
+      "iv": "yMnKy8zNzs/Q0dLT",
+      "ct": "aloFuvKt2RoPHnfbcmqENtqlnsFqANAGwYtVw+Cih8u54kPF/XtPiAjdgQfZem6O//9+1eFu1W03Oivw1TNlBr3d0mYffF+8gcwMICULfWw5TbVpEu5Y8A=="
+    },
+    "plaintext": {
+      "data": {
+        "hello": "rinkx",
+        "n": 3,
+        "unicode": "Šimon Nemec"
+      },
+      "meta": {
+        "v": 1
+      }
+    }
+  }
+}

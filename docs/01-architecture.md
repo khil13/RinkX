@@ -44,7 +44,7 @@ flowchart LR
     subgraph Actions["GitHub Actions (scheduled + on-demand)"]
       PIPE["rinkx pipeline (Python)<br/>ingest → diff → features → models<br/>→ price → alerts → publish"]
     end
-    STORE[("Release 'store'<br/>rinkx.db.age<br/>(encrypted SQLite)")]
+    STORE[("Release 'store'<br/>rinkx-*.db.enc<br/>(encrypted SQLite)")]
     ISSUES["Issue forms<br/>Quick Entry"]
     PAGES["GitHub Pages<br/>static app + encrypted JSON"]
     CFG["config/*.yml<br/>alerts · books · budget"]
@@ -68,7 +68,7 @@ flowchart LR
 | Component | Tech | Responsibility |
 |---|---|---|
 | **Pipeline** | Python 3.12 package `rinkx` with a CLI (`python -m rinkx run --stage ...`) | Ingestion, change detection, features, models, pricing, alerts, grading, publishing. Runs only inside GitHub Actions or locally. |
-| **Data store** | One **SQLite** file ([`db/schema.sql`](../db/schema.sql)), encrypted with `age`, kept as a GitHub **Release asset** | System of record. Each run downloads the newest version and uploads a new one. The last 10 versions are kept as backups. Release assets live outside git history, so the repo doesn't bloat. |
+| **Data store** | One **SQLite** file ([`db/schema.sql`](../db/schema.sql)), encrypted with AES-256-GCM (`STORE_KEY`), kept as a GitHub **Release asset** | System of record. Each run downloads the newest version and uploads a new one. The last 10 versions are kept as backups. Release assets live outside git history, so the repo doesn't bloat. |
 | **Analytics** | pandas / polars, numpy, scipy, statsmodels, LightGBM; DuckDB for heavy backtest queries (it reads SQLite directly) | Modeling and backtesting on the Actions runner (4 vCPU / 16 GB for public repos). |
 | **Site** | Vite + React + TypeScript + Tailwind + Recharts + TanStack Query, `HashRouter` | Static SPA on Pages. Fetches encrypted JSON files and decrypts them in the browser with WebCrypto. No server code. |
 | **Quick Entry** | GitHub Issue forms + a workflow on `issues: opened` | The "write" path. You confirm a goalie, scratch, line change or injury from the GitHub iPhone app, with a mandatory source URL. |
@@ -78,15 +78,16 @@ flowchart LR
 
 | Workflow | Trigger | Does |
 |---|---|---|
-| `pregame.yml` | cron every 10 min, 15:00–03:59 UTC (11 am–midnight ET); `workflow_dispatch` | Exits in under 30 s if no game starts within 8 h. Otherwise: goalies, injuries, odds (budget-aware), game status → recompute affected projections → reprice → alerts → publish if the bundle changed. |
-| `hourly.yml` | cron at minute 17 | Schedule, rosters, news, odds on non-game days at a low cadence. |
-| `nightly.yml` | cron 09:37 UTC (5:37 am ET) | Final boxscores + PBP, shift-chart lineups, grading and CLV, rolling features, correlations, store backup rotation. |
-| `weekly.yml` | Monday 10:13 UTC | Model retraining, walk-forward backtest, calibration report. Champion promotion stays manual (via an issue form). |
+| `pipeline.yml` | Several cron schedules + `workflow_dispatch` + pushes to `main` | **One workflow for all scheduled work**, which gives a single "Run workflow" button and a single place where runs queue. The run decides its stages from the time and the slate: |
+| ↳ game-day window | every 10 min, 15:00–03:59 UTC (11 am–midnight ET) | Exits in under 30 s if no game starts within 8 h. Otherwise: goalies, injuries, odds (budget-aware), game status → recompute affected projections → reprice → alerts → publish if the bundle changed. |
+| ↳ hourly | minute 17 | Schedule, rosters, news, odds on non-game days at a low cadence. *(Phase 0 runs only this, and only publishes.)* |
+| ↳ nightly | 09:37 UTC (5:37 am ET) | Final boxscores + PBP, shift-chart lineups, grading and CLV, rolling features, correlations. |
+| ↳ weekly | Monday 10:13 UTC | Model retraining, walk-forward backtest, calibration report. Champion promotion stays manual (via an issue form). |
 | `quick-entry.yml` | `issues: opened` with label `quick-entry` | Validates that the author is the repo owner, writes the row (`provenance='manual'`, `source_ref` = your URL), recomputes affected projections, publishes, then closes the issue with a summary comment. |
 | `keepalive.yml` | weekly | Re-enables the scheduled workflows through the API. GitHub silently disables schedules in public repos after 60 days without repository activity, and pipeline runs don't count as activity. |
 | `ci.yml` | push / PR | Lint, typecheck, unit tests, schema tests, copy lint, contract tests. |
 
-**Serialization.** Every workflow that touches the store shares `concurrency: { group: rinkx-store, cancel-in-progress: false }`, so two runs never write the store at once. GitHub keeps only the newest pending run in a group. That is fine here, because the next run does a full refresh anyway.
+**Serialization.** `pipeline.yml` and `quick-entry.yml` share `concurrency: { group: rinkx-store, cancel-in-progress: false }`, so two runs never write the store at once. GitHub keeps only the newest pending run in a group. That is fine here, because the next run does a full refresh anyway.
 
 **Timing honesty.** Scheduled runs are commonly delayed by 5–30 minutes under GitHub load, and occasionally skipped. RinkX is therefore a **near-live** tool, not real-time:
 * The UI always shows "Updated N min ago" from the manifest.
@@ -135,9 +136,9 @@ The repo, the Release asset and the Pages site are all **publicly downloadable**
 
 | Asset | Protection |
 |---|---|
-| Data store (`rinkx.db.age`) | `age` encryption. The private identity lives only in the Actions secret `STORE_AGE_KEY`. **Keep an offline copy of that key; losing it loses the store.** |
+| Data store (`rinkx-*.db.enc`) | AES-256-GCM with a random 256-bit key in the Actions secret `STORE_KEY`. **Keep an offline copy of that key; losing it loses the store.** A store that fails to decrypt stops the run. The pipeline never silently starts a fresh one. |
 | Published data files | AES-256-GCM with a random 256-bit data key (Actions secret `DATA_KEY`). `keyfile.json` holds that key wrapped with a key derived from your passphrase (PBKDF2-SHA256, 600k iterations). Your passphrase never leaves your device and is never stored in the repo. |
-| Unlock on your devices | You enter the passphrase once per device. The browser stores the derived key in IndexedDB as a **non-extractable** CryptoKey. "Lock" clears it. |
+| Unlock on your devices | Keys are generated in the browser on the Setup page ([`setup.md`](setup.md)), so no command-line tools are needed. You enter the passphrase once per device. The browser stores the derived key in IndexedDB as a **non-extractable** CryptoKey. "Lock" clears it. |
 | Passphrase strength | All of the protection rests on it. Use a long passphrase (5+ random words). The keyfile is public, so a weak passphrase can be brute-forced offline. |
 | API keys | Actions secrets only (`ODDS_API_KEY`, `NTFY_TOPIC`, ...). The ntfy topic is a long random name, which acts as its password. Never in the bundle or the repo. |
 | Quick Entry | The workflow acts only on issues opened by the repo owner, and anyone else's issues are ignored. Issue contents are public, but that information (a goalie confirmation plus a public source URL) is already public. |

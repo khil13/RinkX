@@ -135,4 +135,4 @@ The TypeScript implementation is tested against **shared fixture vectors** gener
 | Create or edit alerts | Edit `config/alerts.yml` in the GitHub app. It syncs into the `alerts` table on the next run. |
 | Choose books / odds budget | `config/books.yml`, `config/budget.yml` |
 | Promote a model | Issue form "Promote model" (owner only) → the workflow flips champion status and attaches the backtest report |
-| Force refresh | **Actions → pregame → Run workflow** in the GitHub app |
+| Force refresh | **Actions → pipeline → Run workflow** in the GitHub app |

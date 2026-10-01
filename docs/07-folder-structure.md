@@ -19,6 +19,7 @@ RinkX/
 │   ├── rinkx/
 │   │   ├── __main__.py                # CLI: run --stage ingest|model|price|alerts|grade|publish|all
 │   │   ├── config.py
+│   │   ├── crypto.py                  # AES-256-GCM files + store, PBKDF2/AES-KW keyfile (mirrors web/src/lib/crypto.ts)
 │   │   ├── store/                     # download/decrypt/upload of the Release asset; SQLite access; migrations
 │   │   ├── ingestion/
 │   │   │   ├── adapters/              # nhl_web.py, nhl_stats.py, moneypuck.py, odds_api.py
@@ -35,7 +36,6 @@ RinkX/
 │   │   ├── publish/
 │   │   │   ├── schemas.py             # Pydantic models for every published file (the data contract)
 │   │   │   ├── build.py               # store -> JSON bundle
-│   │   │   ├── crypto.py              # AES-256-GCM file encryption, keyfile generation
 │   │   │   └── guards.py              # refuse to publish synthetic rows in prod
 │   │   └── fixtures/synthetic/        # clearly labeled synthetic generators (dev/tests only)
 │   └── tests/
@@ -60,14 +60,14 @@ RinkX/
 │   ├── public/                        # manifest.webmanifest, icons (PWA)
 │   └── tests/                         # Vitest + Playwright (iPhone 15 viewport)
 ├── fixtures/
-│   └── parlay_vectors.json            # shared Python <-> TS test vectors
+│   ├── crypto_vectors.json            # shared Python <-> TS crypto test vectors
+│   └── parlay_vectors.json            # shared Python <-> TS parlay test vectors (Phase 8)
 ├── scripts/
-│   ├── make_keyfile.py                # one-time: wrap DATA_KEY with your passphrase (run locally)
 │   ├── lint_copy.py                   # banned-language check
 │   └── backfill/                      # historical season loaders
 └── .github/
     ├── ISSUE_TEMPLATE/                # quick-entry forms: goalie, lineup, injury, news, promote-model
-    └── workflows/                     # ci, pregame, hourly, nightly, weekly, quick-entry, keepalive
+    └── workflows/                     # ci, pipeline (all schedules), quick-entry, keepalive
 ```
 
 **Why the browser does no modeling:** all statistics and odds math live in Python, in one implementation. The site only formats published numbers. The one exception is parlay combination, which is checked against shared Python-generated test vectors.

@@ -6,7 +6,9 @@ RinkX answers **"why does the model project this player at this number?"** It do
 
 ## Status
 
-**Design phase complete. Implementation starts at Phase 0/1.** No application code yet.
+**Phase 0 complete:** pipeline skeleton, encrypted store and site, deploy workflow, Setup/Unlock flow. No data sources are connected yet; Phase 1 adds the NHL schedule.
+
+**First time?** Follow [docs/setup.md](docs/setup.md).
 
 ## Design package
 
@@ -20,15 +22,32 @@ RinkX answers **"why does the model project this player at this number?"** It do
 | [06 · UI](docs/06-ui.md) | Design language, navigation, routes, wireframes, iPhone requirements |
 | [07 · Folder structure](docs/07-folder-structure.md) | Repo layout |
 | [08 · Roadmap](docs/08-roadmap.md) | Phases 0–10 with test gates; open decisions |
+| [Setup](docs/setup.md) | One-time setup from your phone |
 
 ## How it runs
 
 Everything runs on GitHub, at $0 hosting cost. **GitHub Actions** fetches data, runs the models and builds the site on a schedule. **GitHub Pages** serves it. The data store is an encrypted SQLite file kept as a Release asset, and every data file on the site is encrypted. Only your passphrase unlocks it. See [docs/01-architecture.md](docs/01-architecture.md).
 
-## Validate the schema
+## Local development
 
 ```bash
-python db/tests/test_schema.py   # -> "schema tests: 10 passed"
+# pipeline (Python 3.11+)
+cd pipeline && python -m venv .venv && .venv/bin/pip install -e ".[dev]" && cd ..
+pipeline/.venv/bin/rinkx dev-setup                      # local keys in .rinkx/ (gitignored)
+pipeline/.venv/bin/rinkx run --out web/public/data      # build a local encrypted bundle
+
+# web
+cd web && npm install && npm run dev                    # unlock with: rinkx-local-dev-passphrase
+```
+
+## Tests
+
+```bash
+cd pipeline && .venv/bin/pytest -q && .venv/bin/ruff check . && .venv/bin/mypy   # pipeline
+python db/tests/test_schema.py                                                      # schema constraints
+python scripts/lint_copy.py                                                         # banned betting language
+cd web && npm run typecheck && npm test                                             # web unit + crypto interop
+cd web && RINKX_PYTHON=../pipeline/.venv/bin/python npm run e2e                     # browser end-to-end
 ```
 
 ## Responsible use
