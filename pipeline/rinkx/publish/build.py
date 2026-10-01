@@ -8,16 +8,18 @@ import os
 import shutil
 import sqlite3
 import tempfile
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 from rinkx import __version__, crypto
 from rinkx.config import ConfigError, Settings
-from rinkx.publish import guards
+from rinkx.ingestion.nhl.jobs import current_season
+from rinkx.ingestion.runs import last_success
+from rinkx.publish import guards, views
 from rinkx.publish.schemas import BuildInfo, Envelope, FeedStatus, FileEntry, Manifest, Meta
 from rinkx.store.db import schema_version
-from rinkx.timeutil import iso, parse_iso
+from rinkx.timeutil import iso, parse_iso, slate_date
 
 # Feeds the app depends on, the data_sources.category that serves each one, and how old the
 # last successful fetch may be before the UI flags it as stale.
@@ -51,7 +53,7 @@ def feed_statuses(conn: sqlite3.Connection, now: datetime) -> list[FeedStatus]:
     for code, name, category, max_age in FEEDS:
         last_ok = conn.execute(
             "SELECT max(r.finished_at) FROM ingestion_runs r JOIN data_sources s ON s.id = r.source_id "
-            "WHERE s.category = ? AND s.is_enabled = 1 AND r.status = 'succeeded'",
+            "WHERE s.category = ? AND s.is_enabled = 1 AND r.status IN ('succeeded', 'partial')",
             (category,),
         ).fetchone()[0]
         last_any = conn.execute(
@@ -60,7 +62,17 @@ def feed_statuses(conn: sqlite3.Connection, now: datetime) -> list[FeedStatus]:
             "ORDER BY r.finished_at DESC LIMIT 1",
             (category,),
         ).fetchone()
-        if last_ok is None:
+        if last_ok is None and last_any is not None and last_any[0] == "failed":
+            out.append(
+                FeedStatus(
+                    code=code,
+                    name=name,
+                    state="failed",
+                    last_success_at=None,
+                    reason="Fetch failed; no successful fetch yet",
+                )
+            )
+        elif last_ok is None:
             out.append(
                 FeedStatus(
                     code=code, name=name, state="unavailable", last_success_at=None, reason="No successful fetch yet"
@@ -115,6 +127,33 @@ def _health(conn: sqlite3.Connection, store_asset: str | None, build: BuildInfo)
     }
 
 
+SLATE_DAYS_BACK = 3
+SLATE_DAYS_AHEAD = 3
+
+
+def _league_files(conn: sqlite3.Connection, today: date) -> dict[str, tuple[Any, str | None]]:
+    """Slates for a week around today, their games, teams, and players."""
+    out: dict[str, tuple[Any, str | None]] = {}
+    season = current_season(conn, today)
+    # An empty slate must mean "no games that day", never "we have no schedule data".
+    # Until the schedule has been fetched successfully, publish no slates at all.
+    if last_success(conn, "nhl.schedule") is None:
+        return out
+    for offset in range(-SLATE_DAYS_BACK, SLATE_DAYS_AHEAD + 1):
+        d = (today + timedelta(days=offset)).isoformat()
+        oldest = conn.execute("SELECT min(fetched_at) FROM games WHERE game_date = ?", (d,)).fetchone()[0]
+        out[f"slate/{d}.json"] = (views.slate(conn, d), oldest)
+        for (gid,) in conn.execute("SELECT nhl_game_id FROM games WHERE game_date = ?", (d,)).fetchall():
+            out[f"games/{gid}.json"] = (views.game_detail(conn, gid), oldest)
+    if conn.execute("SELECT 1 FROM teams LIMIT 1").fetchone():
+        out["teams.json"] = (views.teams(conn, season, today.isoformat()), None)
+    if conn.execute("SELECT 1 FROM players LIMIT 1").fetchone():
+        out["players/index.json"] = (views.players_index(conn), None)
+        for (pid,) in conn.execute("SELECT nhl_player_id FROM players WHERE is_active = 1").fetchall():
+            out[f"players/{pid}.json"] = (views.player(conn, pid, season), None)
+    return out
+
+
 def _write(root: Path, rel: str, payload: dict[str, Any]) -> None:
     path = root / rel
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -137,7 +176,9 @@ def build_bundle(
     *,
     now: datetime,
     store_asset: str | None,
+    today: date | None = None,
 ) -> Manifest:
+    today = today or slate_date(now)
     if settings.env == "prod":
         guards.assert_no_synthetic(conn)
 
@@ -164,22 +205,23 @@ def build_bundle(
         _write(staging, KEYFILE, keyfile)
 
         synthetic = bool(guards.synthetic_row_counts(conn))
-        encrypted: dict[str, Any] = {
-            "admin/health.json": _health(conn, store_asset, build),
+        sources = [r[0] for r in conn.execute("SELECT code FROM data_sources WHERE is_enabled = 1 ORDER BY code")]
+        encrypted: dict[str, tuple[Any, str | None]] = {
+            "admin/health.json": (_health(conn, store_asset, build), None),
         }
-        for rel, data in encrypted.items():
+        encrypted.update(_league_files(conn, today))
+        for rel, (data, oldest) in encrypted.items():
             env = Envelope(
                 data=data,
                 meta=Meta(
                     generated_at=iso(now),
                     data_status="synthetic" if synthetic else "live",
-                    oldest_input_at=None,
-                    sources=[],
+                    oldest_input_at=oldest,
+                    sources=sources,
                     model_versions={},
                 ),
             )
-            enc_rel = rel + ".enc"
-            _write(staging, enc_rel, crypto.encrypt_json(env.model_dump(mode="json"), rel, data_key))
+            _write(staging, rel + ".enc", crypto.encrypt_json(env.model_dump(mode="json"), rel, data_key))
 
     for path in sorted(staging.rglob("*")):
         if path.is_file():
@@ -193,6 +235,7 @@ def build_bundle(
         env=settings.env,
         configured=configured,
         missing_setup=missing,
+        slate_date=today.isoformat(),
         build=build,
         feeds=feed_statuses(conn, now),
         files=files,

@@ -47,7 +47,7 @@ def test_configured_run_publishes_encrypted_bundle(tmp_path: Path, keys):
     data_key = crypto.unwrap_keyfile(keyfile, PASSPHRASE)
     env = crypto.decrypt_json(json.loads((out / "admin/health.json.enc").read_text()), "admin/health.json", data_key)
     assert env["meta"]["data_status"] == "live"
-    assert env["data"]["store"]["schema_version"] == 1
+    assert env["data"]["store"]["schema_version"] >= 2
     assert "Auston" not in (out / "admin/health.json.enc").read_text()
 
     # Second run pulls what the first pushed.
@@ -117,3 +117,52 @@ def test_refuses_to_overwrite_foreign_directory(tmp_path: Path, keys):
     with pytest.raises(ConfigError, match="refusing"):
         run(make_settings(tmp_path, keys), out, now=NOW)
     assert (out / "important.txt").exists()
+
+
+def test_publishes_league_files_from_replayed_nhl_data(tmp_path: Path, keys):
+    from dataclasses import replace
+
+    from rinkx.config import REPO_ROOT
+
+    settings = replace(
+        make_settings(tmp_path, keys, env="prod"),
+        sources=frozenset({"nhl"}),
+        fixtures_dir=REPO_ROOT / "pipeline/tests/fixtures/nhl",
+        today=datetime(2026, 3, 10).date(),
+        boxscore_limit=100,
+    )
+    out = tmp_path / "data"
+    run(settings, out)  # real clock: ingestion timestamps are real, so feeds are fresh
+    m = read_manifest(out)
+    assert m["slate_date"] == "2026-03-10"
+    assert {f["code"]: f["state"] for f in m["feeds"]}["schedule"] == "ok"
+    files = set(m["files"])
+    assert {"slate/2026-03-10.json.enc", "teams.json.enc", "players/index.json.enc"} <= files
+    assert "games/2025021012.json.enc" in files
+
+    key = keys["data_key"]
+
+    def read(rel: str) -> dict:
+        return crypto.decrypt_json(json.loads((out / f"{rel}.enc").read_text()), rel, key)
+
+    slate = read("slate/2026-03-10.json")
+    assert slate["meta"]["sources"] == ["nhl_web_boxscore", "nhl_web_schedule"]
+    games = slate["data"]["games"]
+    assert len(games) == 13
+    bos = next(g for g in games if g["id"] == 2025021012)
+    assert (bos["home"]["team"]["abbrev"], bos["home"]["score"], bos["away"]["score"]) == ("BOS", 2, 1)
+    assert bos["home"]["record"]["as_of"] == "2026-03-10"
+    assert bos["home"]["goalie"] is None and bos["home"]["goalie_reason"] == "not_connected"
+    assert bos["environment"] is None and bos["environment_reason"] == "not_connected"
+
+    game = read("games/2025021012.json")["data"]
+    assert game["boxscore"]["goalies"][0]["name"] in ("Joonas Korpisalo", "Jeremy Swayman", "Darcy Kuemper")
+    assert sum(s["g"] for s in game["boxscore"]["skaters"]) == 3
+    assert game["home"]["metrics"] is None and game["home"]["metrics_reason"] == "insufficient_sample"
+
+    other = next(g for g in games if g["id"] != 2025021012)
+    assert read(f"games/{other['id']}.json")["data"]["boxscore_reason"] == "data_unavailable"
+
+    swayman = read("players/8480280.json")["data"]
+    assert swayman["player"]["name"] == "Jeremy Swayman"
+    assert swayman["totals"]["w"] == 1 and swayman["games"][0]["sv"] == 15

@@ -13,10 +13,11 @@ DB_DIR = REPO_ROOT / "db"
 
 def test_migrate_fresh_db(tmp_path: Path):
     conn = connect(tmp_path / "a.db")
-    assert migrate(conn, DB_DIR) == 1
-    assert schema_version(conn) == 1
+    latest = 1 + len(list((DB_DIR / "migrations").glob("[0-9][0-9][0-9][0-9]_*.sql")))
+    assert migrate(conn, DB_DIR) == latest
+    assert schema_version(conn) == latest
     assert conn.execute("SELECT count(*) FROM markets").fetchone()[0] == 19
-    assert migrate(conn, DB_DIR) == 1  # idempotent
+    assert migrate(conn, DB_DIR) == latest  # idempotent
 
 
 def test_migrate_refuses_unknown_db(tmp_path: Path):
@@ -30,6 +31,7 @@ def test_migrations_applied_in_order(tmp_path: Path):
     db_dir = tmp_path / "db"
     (db_dir / "migrations").mkdir(parents=True)
     (db_dir / "schema.sql").write_text((DB_DIR / "schema.sql").read_text())
+    # Exercise numbering with a private migration set (independent of the repo's migrations).
     (db_dir / "migrations/0002_add_note.sql").write_text("ALTER TABLE teams ADD COLUMN note TEXT;")
     conn = connect(tmp_path / "a.db")
     assert migrate(conn, db_dir) == 2

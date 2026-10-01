@@ -45,6 +45,7 @@ def main() -> None:
         "RINKX_STORE_DIR": str(tmp / "remote"),
         "RINKX_WORKDIR": str(tmp / "work"),
         "RINKX_DB_DIR": str(REPO / "db"),
+        "RINKX_SOURCES": "none",
     }
 
     # Configured site: production keyfile parameters (600k iterations), prod env.

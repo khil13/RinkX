@@ -41,6 +41,7 @@ class Manifest(Strict):
     env: Literal["dev", "prod"]
     configured: bool
     missing_setup: list[str]
+    slate_date: str  # the "today" the site should open on (Eastern date, 6 am rollover)
     build: BuildInfo
     feeds: list[FeedStatus]
     files: dict[str, FileEntry]

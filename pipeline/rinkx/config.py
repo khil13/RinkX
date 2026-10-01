@@ -10,6 +10,7 @@ import base64
 import binascii
 import os
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 from typing import Literal
 
@@ -47,6 +48,10 @@ class Settings:
     github_repository: str | None
     workdir: Path
     db_dir: Path
+    sources: frozenset[str]  # ingestion sources to run: "nhl", or empty ("none")
+    fixtures_dir: Path | None  # serve recorded API responses instead of the network (tests/dev)
+    today: date | None  # override the slate date (tests/dev)
+    boxscore_limit: int  # max box scores fetched per run (raise for a one-off backfill)
 
     @classmethod
     def from_env(cls, environ: dict[str, str] | None = None) -> Settings:
@@ -69,6 +74,10 @@ class Settings:
             github_repository=e.get("GITHUB_REPOSITORY"),
             workdir=Path(e.get("RINKX_WORKDIR", REPO_ROOT / ".rinkx/work")),
             db_dir=Path(e.get("RINKX_DB_DIR", REPO_ROOT / "db")),
+            sources=frozenset(x for x in e.get("RINKX_SOURCES", "nhl").split(",") if x and x != "none"),
+            fixtures_dir=Path(e["RINKX_FIXTURES"]) if e.get("RINKX_FIXTURES") else None,
+            today=date.fromisoformat(e["RINKX_TODAY"]) if e.get("RINKX_TODAY") else None,
+            boxscore_limit=int(e.get("RINKX_BOXSCORE_LIMIT", "40")),
         )
 
     def require_data_key(self) -> bytes:

@@ -10,6 +10,8 @@ from datetime import datetime
 from pathlib import Path
 
 from rinkx.config import Settings
+from rinkx.ingestion.http import Fetcher, HttpFetcher, ReplayFetcher
+from rinkx.ingestion.nhl.jobs import NhlOptions, run_nhl
 from rinkx.publish.build import build_bundle, missing_setup
 from rinkx.publish.schemas import Manifest
 from rinkx.store import remote
@@ -18,8 +20,7 @@ from rinkx.timeutil import utcnow
 
 log = logging.getLogger("rinkx")
 
-# Stages are added phase by phase (ingest, features, models, price, alerts, grade).
-STAGES: tuple[str, ...] = ("publish",)
+# Stages are added phase by phase: ingest (Phase 1), then features, models, price, alerts, grade.
 
 
 @dataclass
@@ -40,7 +41,7 @@ def run(settings: Settings, out_dir: Path, *, push: bool = True, now: datetime |
         with tempfile.TemporaryDirectory() as tmp:
             conn = connect(Path(tmp) / "empty.db")
             migrate(conn, settings.db_dir)
-            manifest = build_bundle(conn, out_dir, settings, now=now, store_asset=None)
+            manifest = build_bundle(conn, out_dir, settings, now=now, store_asset=None, today=settings.today)
             conn.close()
         return RunResult(manifest, None, None)
 
@@ -56,7 +57,7 @@ def run(settings: Settings, out_dir: Path, *, push: bool = True, now: datetime |
         version = migrate(conn, settings.db_dir)
         log.info("schema version %d", version)
         _run_stages(conn, settings, now)
-        manifest = build_bundle(conn, out_dir, settings, now=now, store_asset=pulled)
+        manifest = build_bundle(conn, out_dir, settings, now=now, store_asset=pulled, today=settings.today)
         pushed = None
         if push:
             snap = settings.workdir / "rinkx.snapshot.db"
@@ -70,4 +71,6 @@ def run(settings: Settings, out_dir: Path, *, push: bool = True, now: datetime |
 
 
 def _run_stages(conn: sqlite3.Connection, settings: Settings, now: datetime) -> None:
-    """Placeholder until Phase 1 adds ingestion. Publishing is handled by `run` itself."""
+    if "nhl" in settings.sources:
+        fetcher: Fetcher = ReplayFetcher(settings.fixtures_dir) if settings.fixtures_dir is not None else HttpFetcher()
+        run_nhl(conn, fetcher, now, NhlOptions(today=settings.today, boxscore_limit=settings.boxscore_limit))
