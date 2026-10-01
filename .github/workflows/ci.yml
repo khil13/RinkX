@@ -26,6 +26,15 @@ jobs:
         working-directory: pipeline
       - run: python db/tests/test_schema.py
       - run: python scripts/lint_copy.py
+      # Run the pipeline exactly as pipeline.yml does: a regular (non-editable) install, from the
+      # repo root, prod env, no keys. Catches anything that only works from an editable install.
+      - name: Smoke-test the installed pipeline like production
+        run: |
+          python -m venv /tmp/prod
+          /tmp/prod/bin/pip install -q ./pipeline
+          RINKX_ENV=prod /tmp/prod/bin/python -m rinkx run --out /tmp/site-data
+          test -f /tmp/site-data/manifest.json
+          python -c "import json; m=json.load(open('/tmp/site-data/manifest.json')); assert m['configured'] is False, m"
 
   web:
     runs-on: ubuntu-latest

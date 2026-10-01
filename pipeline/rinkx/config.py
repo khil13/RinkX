@@ -14,14 +14,34 @@ from datetime import date
 from pathlib import Path
 from typing import Literal
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-
-Env = Literal["dev", "prod"]
-Backend = Literal["github", "local"]
-
 
 class ConfigError(RuntimeError):
     """A required setting is missing or malformed."""
+
+
+def find_repo_root(start: Path | None = None, environ: dict[str, str] | None = None) -> Path:
+    """The RinkX checkout the pipeline operates on (it needs db/, config/ and .rinkx/).
+
+    Resolved from RINKX_REPO_ROOT, else by walking up from the working directory, else from
+    this file's location (editable installs). Never from site-packages: a regular
+    `pip install ./pipeline` puts the code there, far from the repository files.
+    """
+    e = os.environ if environ is None else environ
+    if e.get("RINKX_REPO_ROOT"):
+        return Path(e["RINKX_REPO_ROOT"]).resolve()
+    for base in (start or Path.cwd(), Path(__file__).resolve().parent):
+        for d in (base, *base.parents):
+            if (d / "db/schema.sql").is_file() and (d / "pipeline").is_dir():
+                return d
+    raise ConfigError(
+        "cannot find the RinkX repository (db/schema.sql); run from inside the checkout or set RINKX_REPO_ROOT"
+    )
+
+
+REPO_ROOT = find_repo_root()
+
+Env = Literal["dev", "prod"]
+Backend = Literal["github", "local"]
 
 
 def _decode_key(name: str, value: str | None) -> bytes | None:
