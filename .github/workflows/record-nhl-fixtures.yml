@@ -64,6 +64,10 @@ jobs:
           if [ -n "$game" ]; then
             get "boxscore_$game" "$web/gamecenter/$game/boxscore"
             get "landing_$game"  "$web/gamecenter/$game/landing"
+            # Both teams' season rosters, so every player in that box score is resolvable.
+            for abbrev in $(jq -r '.awayTeam.abbrev, .homeTeam.abbrev' "$out/boxscore_$game.json"); do
+              get "roster_${abbrev}_20252026" "$web/roster/$abbrev/20252026"
+            done
           fi
 
           # One skater and one goalie from the recorded roster.
