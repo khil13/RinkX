@@ -1,0 +1,77 @@
+# 04 · Data-Source Strategy
+
+**Policy.** No scraping that violates a site's terms of service or robots.txt. Each source is registered in `data_sources` with its tier and license notes, and gets an adapter in `backend/rinkx/ingestion/adapters/` that can be disabled with a flag. Terms change, so **re-check each source's current terms before enabling it in production**. The notes below reflect the general situation as of this writing, not legal advice.
+
+If a needed category has no compliant source, the app shows **"Data unavailable"** for it. It never fills the gap with guesses.
+
+## Summary matrix
+
+| Need | Free | Paid | Optional / manual |
+|---|---|---|---|
+| Schedules, scores, rosters | **NHL Web API** | Sportradar NHL, SportsDataIO | — |
+| Box-score stats, TOI splits | **NHL Web + Stats APIs** | Sportradar, SportsDataIO | — |
+| Play-by-play / shot locations | **NHL Web API** (play-by-play feed) | Sportradar | NHL EDGE tracking data, if exposed |
+| Advanced stats (xG, CF, HD) | **Computed in-house** from PBP; **MoneyPuck** downloadable data (attribution) | Evolving-Hockey (subscription, research use) | Natural Stat Trick (manual research only, no scraping) |
+| Line combinations & PP units | Derived from NHL shift charts (actual deployment, post-game) | Licensed lineup feed (e.g. Daily Faceoff partnership, SportsDataIO, Rotowire) | Admin entry with mandatory source URL |
+| Starting goalies | NHL game feed once the game starts (actual) | Licensed feed (Daily Faceoff / Rotowire / SportsDataIO) | Admin entry from official team announcements, with URL |
+| Injuries / scratches / suspensions | NHL roster status (limited); NHL Department of Player Safety announcements (official) | Sportradar, SportsDataIO, Rotowire news feed | Admin entry with URL |
+| Prop lines (multi-book) | — | **The Odds API**, OpticOdds, SportsGameOdds, OddsJam API, Sportradar Odds | — |
+| Game lines (ML, total) | — | Same odds vendor | — |
+| Historical odds / closing lines | Our own snapshots from day one | The Odds API historical endpoints (paid plans), OpticOdds / SportsGameOdds historical | — |
+| Venue coordinates | Public geodata (compiled once, static file) | — | — |
+
+## Free sources
+
+### NHL Web API — `api-web.nhle.com/v1` and `api.nhle.com/stats/rest`
+* **Provides:** schedule by date, standings, rosters, player landing pages and game logs, boxscores with TOI and PP/SH splits, play-by-play with coordinates and strength state, and shift charts (`/stats/rest/en/shiftcharts`). Stats REST also covers skater/goalie/team summaries, realtime stats (hits, blocks) and TOI breakdowns.
+* **Caveats:** public but **undocumented**, with no SLA, and endpoints change between seasons. NHL data is the league's property. Light personal or non-commercial use is common. **Get a legal review before commercial launch**, and if that review says no, move to a licensed provider (Sportradar is the NHL's official data partner).
+* **Engineering:** we keep raw payloads in object storage, rate-limit politely (≤ 2 req/s), cache aggressively, and run contract tests that alert when a response shape changes.
+
+### MoneyPuck data downloads
+* **Provides:** shot-level data with xG, season skater/goalie/team/line tables back to 2008.
+* **Caveats:** free to use with attribution under MoneyPuck's stated terms. Confirm commercial terms before monetizing. Used for **historical backfill and xG validation**. The long-term plan is an in-house xG model so live inference doesn't depend on a third party.
+
+### In-house derivations (no third-party dependency)
+* xG model (logistic regression / GBM on shot distance, angle, type, rebound, rush and strength), trained on NHL PBP.
+* Corsi/Fenwick, high-danger counts, on-ice rates, rest/travel, and actual line deployment reconstructed from shift charts.
+* Arena scorekeeper bias factors for hits, blocks and SOG, estimated from home/away differentials.
+
+## Paid sources (recommended budget order)
+
+1. **Odds vendor (required for any market feature).** Recommendation: **The Odds API** as the starting point. It covers NHL player props (shots on goal, goals, assists, points, PP points, blocked shots, saves, anytime/first goal scorer) for US books on paid tiers, and offers historical snapshots. Credits are metered per market × region, which is why polling cadence is quota-aware. Alternatives with deeper prop coverage and lower latency, at higher cost: **OpticOdds**, **SportsGameOdds**, **OddsJam API**. Hits props in particular are offered by fewer books and vendors, so expect "Data unavailable" more often.
+2. **Lineups + starting goalies + injuries/news.** This is the most important accuracy input after odds. Options: **SportsDataIO NHL** (injuries, starting goalies, depth charts), **Rotowire** (licensed news and injury feed), and a **Daily Faceoff** data partnership (line combos, PP units, goalie confirmations). Daily Faceoff has no public API, so it requires a licensing agreement. Its site is not scraped.
+3. **Sportradar NHL** (official league partner): replaces the unofficial NHL API for commercial scale and adds an SLA.
+4. **Evolving-Hockey** (subscription): reference for validating our own GAR-style and xG numbers. Its terms restrict redistribution, so it is **never served in the app**.
+
+## Optional / manual
+
+* **Natural Stat Trick, HockeyViz, AllThreeZones:** valuable for research, but no API, and automated collection would violate their terms. Used only manually by the modeling team for sanity checks, or under explicit permission.
+* **Official team and league announcements** (press releases, official team social accounts): an admin can enter items through `POST /admin/news` with a required URL. Social media APIs (X/Bluesky) can be added later under their API terms.
+* **NHL EDGE** puck and player tracking: integrate if and when it's available through a sanctioned endpoint.
+
+## MVP recommendation
+
+| Phase | Sources | Approx. monthly cost |
+|---|---|---|
+| 1–3 (no markets) | NHL Web API, MoneyPuck, in-house derivations | $0 |
+| 4–6 (markets) | + The Odds API paid tier sized to quota math (see below) | vendor-dependent, typically tens to low hundreds of USD |
+| Pre-launch | + Lineups/goalies/injuries feed; legal review of NHL data usage | vendor quote |
+
+**Quota math for odds** (to size the plan): roughly 8 games/day × 10 prop markets × 1 region = 80 credits per refresh. At 12 refreshes/day that's ~960/day, or ~29k/month. Event-level props are billed per event and market, so check the vendor's current pricing formula before buying a tier.
+
+## Ingestion contract
+
+Every adapter implements:
+
+```python
+class SourceAdapter(Protocol):
+    code: str                                  # matches data_sources.code
+    def fetch(self, window: FetchWindow) -> RawPayload: ...      # raw JSON/CSV, stored to object storage
+    def parse(self, raw: RawPayload) -> list[Record]: ...        # typed, validated (Pydantic)
+    def upsert(self, records: list[Record], db) -> ChangeSet: ... # idempotent; returns diffs -> change events
+```
+
+Every record must carry `source_id`, `source_ref`, `fetched_at`, `provenance` and `quality`, or validation rejects it. Parse failures go to `data_quality_issues`. They never become silent zeros.
+
+### Entity resolution
+Player names differ across vendors ("Mitch Marner" vs "Mitchell Marner"). Odds vendors key on names, and the NHL uses numeric IDs. A `player_aliases` mapping table (added in Phase 4) resolves vendor names to `players.id` using exact match, then a curated alias table, then fuzzy match restricted to the game's two rosters. A fuzzy match below the confidence threshold goes to an admin review queue. Unresolved lines are **not shown**, so a line is never attached to the wrong player.
