@@ -1,5 +1,5 @@
 {
-  "recorded_at": "2026-10-01T19:39:31Z",
+  "recorded_at": "2026-10-01T19:45:45Z",
   "source": "NHL public API (api-web.nhle.com, api.nhle.com/stats)",
   "note": "Unmodified responses (pretty-printed) used only as parser test fixtures.",
   "files": [
@@ -50,6 +50,14 @@
     {
       "file": "landing_2025021012.json",
       "url": "https://api-web.nhle.com/v1/gamecenter/2025021012/landing"
+    },
+    {
+      "file": "roster_LAK_20252026.json",
+      "url": "https://api-web.nhle.com/v1/roster/LAK/20252026"
+    },
+    {
+      "file": "roster_BOS_20252026.json",
+      "url": "https://api-web.nhle.com/v1/roster/BOS/20252026"
     },
     {
       "file": "player_8477503.json",
