@@ -1,72 +1,73 @@
 # 07 · Repository Layout
 
-A monorepo with two deployables (the `frontend` web app and the `backend` API + workers) and a shared database schema.
+A monorepo with a Python pipeline (runs in GitHub Actions) and a static web app (served by GitHub Pages).
 
 ```
 RinkX/
 ├── README.md
-├── docs/                          # this design package
+├── docs/                              # design package
 ├── db/
-│   ├── schema.sql                 # reference DDL (becomes Alembic baseline in Phase 1)
-│   └── tests/schema_smoke.sql
-├── backend/
-│   ├── pyproject.toml             # uv-managed; ruff, mypy, pytest config
-│   ├── alembic.ini
-│   ├── migrations/                # Alembic versions
+│   ├── schema.sql                     # SQLite schema (system of record)
+│   ├── migrations/                    # numbered .sql files, applied in order; PRAGMA user_version tracks them
+│   └── tests/test_schema.py
+├── config/
+│   ├── alerts.yml                     # your alert definitions
+│   ├── books.yml                      # sportsbooks you use (others are ignored to save credits)
+│   └── budget.yml                     # monthly odds-API credit budget, cadence windows
+├── pipeline/
+│   ├── pyproject.toml                 # uv-managed; ruff, mypy, pytest
 │   ├── rinkx/
-│   │   ├── config.py              # pydantic-settings; ALLOW_SYNTHETIC per environment
-│   │   ├── db/                    # SQLAlchemy models, session, repositories
+│   │   ├── __main__.py                # CLI: run --stage ingest|model|price|alerts|grade|publish|all
+│   │   ├── config.py
+│   │   ├── store/                     # download/decrypt/upload of the Release asset; SQLite access; migrations
 │   │   ├── ingestion/
-│   │   │   ├── adapters/          # nhl_web.py, nhl_stats.py, moneypuck.py, odds_api.py, lineups_*.py, news_*.py
-│   │   │   ├── resolve.py         # player/team entity resolution
-│   │   │   ├── diff.py            # change detection -> events
-│   │   │   └── quality.py         # validation rules -> data_quality_issues
-│   │   ├── features/              # point-in-time feature builders
-│   │   ├── models/                # toi, shots, scoring, physical, goalie, game_sim, calibrate
-│   │   ├── pricing/               # odds math, devig, edge, confidence
+│   │   │   ├── adapters/              # nhl_web.py, nhl_stats.py, moneypuck.py, odds_api.py
+│   │   │   ├── quick_entry.py         # parse + validate issue-form submissions
+│   │   │   ├── resolve.py             # vendor name -> player id
+│   │   │   ├── diff.py                # change detection -> change events
+│   │   │   └── quality.py             # validation -> data_quality_issues
+│   │   ├── features/                  # point-in-time feature builders
+│   │   ├── models/                    # toi, shots, scoring, physical, goalie, game_sim, calibrate
+│   │   ├── pricing/                   # odds math, devig, edge, confidence
 │   │   ├── correlation/
 │   │   ├── backtest/
-│   │   ├── registry/
-│   │   ├── alerts/
-│   │   ├── events/                # Redis Streams producer/consumer, event schemas
-│   │   ├── api/
-│   │   │   ├── main.py            # FastAPI app factory
-│   │   │   ├── deps.py            # auth (JWT/JWKS), db session, rate limit
-│   │   │   ├── schemas/           # Pydantic response models (envelope + meta)
-│   │   │   └── routers/           # games, players, props, goalies, lines, news, model, parlay, alerts, stream, admin
-│   │   ├── workers/
-│   │   │   ├── celery_app.py      # queues: critical (goalies/lineups), odds, stats, models, maintenance
-│   │   │   ├── schedules.py       # adaptive beat schedule
-│   │   │   └── tasks/
-│   │   └── fixtures/synthetic/    # clearly-labeled synthetic generators (dev/test only)
+│   │   ├── alerts/                    # evaluator + ntfy sender
+│   │   ├── publish/
+│   │   │   ├── schemas.py             # Pydantic models for every published file (the data contract)
+│   │   │   ├── build.py               # store -> JSON bundle
+│   │   │   ├── crypto.py              # AES-256-GCM file encryption, keyfile generation
+│   │   │   └── guards.py              # refuse to publish synthetic rows in prod
+│   │   └── fixtures/synthetic/        # clearly labeled synthetic generators (dev/tests only)
 │   └── tests/
-│       ├── unit/                  # odds math, distributions, devig, confidence
-│       ├── contract/              # recorded vendor payloads -> parser expectations
-│       ├── leakage/               # point-in-time guarantees
-│       └── api/                   # endpoint tests against Postgres (testcontainers)
-├── frontend/
-│   ├── package.json               # Next.js 15, TS strict, Tailwind, Recharts, TanStack Query, Auth.js
+│       ├── unit/                      # odds math, distributions, devig, confidence, crypto round-trip
+│       ├── contract/                  # recorded vendor payloads -> parser expectations
+│       └── leakage/                   # point-in-time guarantees
+├── web/
+│   ├── package.json                   # Vite, React 19, TS strict, Tailwind, Recharts, TanStack Query, React Router
 │   ├── src/
-│   │   ├── app/                   # routes per 06-ui.md
+│   │   ├── routes/                    # pages per 06-ui.md (HashRouter)
 │   │   ├── components/
-│   │   │   ├── ui/                # primitives: Panel, DataChip, StatNumber, Table, Sheet
-│   │   │   ├── props/             # PropCard, ExplainPanel, DistributionBars, HitRateStrip
-│   │   │   ├── games/             # GameCard, LineupGrid, GoalieStatus
-│   │   │   └── charts/            # LineMoveChart, ReliabilityDiagram, PnLChart, ShotMap
+│   │   │   ├── ui/                    # Panel, DataChip, StatNumber, Table, Sheet
+│   │   │   ├── props/                 # PropCard, ExplainPanel, DistributionBars, HitRateStrip
+│   │   │   ├── games/                 # GameCard, LineupGrid, GoalieStatus
+│   │   │   └── charts/                # LineMoveChart, ReliabilityDiagram, PnLChart, ShotMap
 │   │   ├── lib/
-│   │   │   ├── api/               # generated OpenAPI client + query hooks
-│   │   │   ├── sse.ts             # stream subscription -> query invalidation
-│   │   │   └── format.ts          # odds/probability/time formatting
+│   │   │   ├── data/                  # manifest polling, fetch + decrypt, generated types
+│   │   │   ├── crypto.ts              # WebCrypto PBKDF2 / AES-KW / AES-GCM
+│   │   │   ├── parlay.ts              # copula combiner (tested against Python vectors)
+│   │   │   └── format.ts
 │   │   └── styles/
-│   └── tests/                     # Vitest + Playwright (iPhone 15 viewport project)
-├── infra/
-│   ├── docker-compose.yml         # postgres, redis, api, worker, beat, web (local dev)
-│   ├── docker/                    # Dockerfiles
-│   └── deploy/                    # Render/Fly config; later Terraform
+│   ├── public/                        # manifest.webmanifest, icons (PWA)
+│   └── tests/                         # Vitest + Playwright (iPhone 15 viewport)
+├── fixtures/
+│   └── parlay_vectors.json            # shared Python <-> TS test vectors
 ├── scripts/
-│   ├── lint_copy.py               # banned-language check
-│   └── backfill/                  # historical season loaders
-└── .github/workflows/             # ci.yml, nightly-backtest.yml
+│   ├── make_keyfile.py                # one-time: wrap DATA_KEY with your passphrase (run locally)
+│   ├── lint_copy.py                   # banned-language check
+│   └── backfill/                      # historical season loaders
+└── .github/
+    ├── ISSUE_TEMPLATE/                # quick-entry forms: goalie, lineup, injury, news, promote-model
+    └── workflows/                     # ci, pregame, hourly, nightly, weekly, quick-entry, keepalive
 ```
 
-**Why Python owns all data and modeling:** the statistical stack (scipy, statsmodels, LightGBM, PyMC) lives there, and it means a single implementation of the odds math. The frontend never computes probabilities. It only formats what the API returns, so the web app and backtests can't disagree.
+**Why the browser does no modeling:** all statistics and odds math live in Python, in one implementation. The site only formats published numbers. The one exception is parlay combination, which is checked against shared Python-generated test vectors.

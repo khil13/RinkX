@@ -2,155 +2,161 @@
 
 RinkX is a research tool for NHL player-prop markets. It answers **"why does the model project this player at this number?"** It does not answer "what should I bet?" Every number on screen has to trace back to a source, a timestamp and a model version.
 
-## 0. Scope: personal use
+## 0. Scope and hosting decisions
 
-RinkX is a **single-owner, personal-use** tool. It is not a public or commercial product. That decision drives several simplifications across these docs:
-
-| Area | Personal-use decision |
+| Decision | Choice |
 |---|---|
-| Users | One owner account (`role=admin`). No sign-up, user management or multi-tenant concerns. The `users` table stays so alerts and parlays have an owner. |
-| Auth | Still required, because the app is internet-reachable and calls paid APIs. Sign-in is restricted to an allowlist containing only the owner's email. |
-| Licensing | Free sources used within their personal / non-commercial terms. Nothing is redistributed or shared publicly. If that ever changes, revisit `04-data-sources.md`. |
-| Scale | One slate (≤ 16 games/day) and one viewer. No horizontal scaling, CDN tuning or load tests. |
-| Cost | Infrastructure targets about $10–25/month plus the odds API subscription. |
+| Audience | **Personal use, single owner.** No sign-ups, no user management, nothing commercial. |
+| Hosting | **GitHub only.** GitHub Actions does all computing on a schedule. GitHub Pages serves a static site. No servers, no database server. |
+| Repo visibility | **Public** (`khil13/RinkX`). Pages is free for public repos and Actions minutes are unlimited on standard runners. |
+| Data privacy | Because the site and repo are public, **all data is encrypted**, both at rest and on the published site. Only someone with your passphrase can read it (§5). |
+| Cost | $0 for hosting. The only paid item is the odds API subscription. |
 
-The data-integrity rules below **do not** relax for personal use.
+GitHub Pages terms allow personal, non-commercial sites. They prohibit using Pages to run a business or SaaS, and prohibit "get-rich-quick schemes". A personal research tool that makes no guarantees fits within that.
 
 ## 1. Non-negotiable product rules
 
-These are enforced in code (schema constraints, API contracts and CI tests), not only in copy.
+These are enforced in code (schema constraints, build checks, CI tests), not only in copy.
 
 | Rule | Enforcement |
 |---|---|
-| No fabricated data (lines, injuries, stats, results) | Every external row requires `source_id` + `fetched_at`. Injuries and news also require a `source_ref` URL (`NOT NULL`). |
-| Mock data is always labeled | Only `provenance = 'synthetic'` may hold mock rows. The API sets `meta.data_status = "synthetic"` and the UI shows a persistent banner. Production config refuses synthetic rows outright. |
+| No fabricated data (lines, injuries, stats, results) | Every external row requires `source_id` + `fetched_at`. Injuries and news also require a non-empty source URL (a `CHECK` constraint). |
+| Mock data is always labeled | Mock rows must have `provenance = 'synthetic'`. **The publish step aborts the production deploy if any synthetic row exists.** Local dev builds show a fixed SYNTHETIC banner. |
 | Missing ≠ zero | Missing inputs go into `player_projections.missing_inputs`. Projections below a data-quality floor are not published and show **"Insufficient data"**. |
-| Unavailable markets say so | If no book offers a market, the API returns `null` with `reason: "data_unavailable"` and the UI shows **"Data unavailable"**. |
-| No "lock / guaranteed / free money / can't lose" | A copy lint in CI fails the build on banned terms in UI strings and API text fields. |
-| Losing periods are never hidden | Model Performance reads from immutable `predictions` + `model_results`. There is no delete path for published predictions. |
-| No leakage in evaluation | Each projection stores `as_of`. Features are computed point-in-time, and backtests are walk-forward only. |
+| Unavailable markets say so | Absent markets publish as `null` with `reason: "data_unavailable"` and render **"Data unavailable"**. |
+| Stale data is visible | Each feed's last successful fetch is in the public `manifest.json`. The UI shows **"Live data unavailable"** or a stale badge when a feed is older than its threshold, or when the whole site hasn't been rebuilt recently. |
+| No "lock / guaranteed / free money / can't lose" | A copy lint in CI fails the build on banned terms. |
+| Losing periods are never hidden | Published predictions are immutable. SQLite triggers block UPDATE and DELETE on them. |
+| No leakage in evaluation | Projections store `as_of`. Features are point-in-time, and backtests are walk-forward only. |
 
-## 2. High-level topology
+## 2. Topology
 
 ```mermaid
 flowchart LR
-  subgraph Sources["External sources (see 04-data-sources)"]
+  subgraph Sources["External sources"]
     NHL[NHL Web/Stats API]
     MP[MoneyPuck CSVs]
-    ODDS[Odds API vendor]
-    NEWS[Licensed news / injuries feed]
-    LINES[Lineup / goalie feed]
+    ODDS[Odds API]
   end
 
-  subgraph Workers["Python workers (Celery)"]
-    ING[Ingestion adapters]
-    DQ[Data-quality checks]
-    FEAT[Feature builder<br/>point-in-time]
-    MODEL[Projection models]
-    PRICE[Pricing engine<br/>devig · edge · confidence]
-    ALERT[Alert evaluator]
-    GRADE[Grader + backtester]
+  subgraph GH["GitHub (public repo khil13/RinkX)"]
+    direction TB
+    subgraph Actions["GitHub Actions (scheduled + on-demand)"]
+      PIPE["rinkx pipeline (Python)<br/>ingest → diff → features → models<br/>→ price → alerts → publish"]
+    end
+    STORE[("Release 'store'<br/>rinkx.db.age<br/>(encrypted SQLite)")]
+    ISSUES["Issue forms<br/>Quick Entry"]
+    PAGES["GitHub Pages<br/>static app + encrypted JSON"]
+    CFG["config/*.yml<br/>alerts · books · budget"]
   end
 
-  subgraph Core["State"]
-    PG[(PostgreSQL)]
-    RD[(Redis<br/>cache · broker · pub/sub)]
-    OBJ[(Object storage<br/>model artifacts)]
-  end
+  PHONE["You: iPhone / desktop browser<br/>passphrase → decrypt locally"]
+  PUSH["ntfy push"]
 
-  API[FastAPI<br/>REST + SSE]
-  WEB[Next.js app<br/>Vercel]
-
-  Sources --> ING --> PG
-  ING -- change events --> RD
-  RD --> FEAT --> MODEL --> PRICE --> PG
-  PRICE -- projection.updated --> RD
-  RD --> ALERT --> PG
-  GRADE --> PG
-  MODEL <--> OBJ
-  PG --> API
-  RD --> API
-  API <--> WEB
+  Sources --> PIPE
+  STORE <-->|download / upload new version| PIPE
+  ISSUES -->|issues: opened| PIPE
+  CFG --> PIPE
+  PIPE -->|deploy-pages| PAGES
+  PIPE --> PUSH --> PHONE
+  PAGES --> PHONE
+  PHONE -->|GitHub app| ISSUES
 ```
 
 ### Components
 
 | Component | Tech | Responsibility |
 |---|---|---|
-| **Web** | Next.js 15 (App Router) + TypeScript + Tailwind + Recharts + TanStack Query | UI (server components for data-heavy pages). Auth (Auth.js). Talks to the API through a generated typed client. |
-| **API** | FastAPI (Python 3.12), Pydantic v2, SQLAlchemy 2 (async) | Read APIs, parlay analysis, alerts CRUD, admin, and an SSE stream for live updates. Stateless and horizontally scalable. |
-| **Workers** | Celery 5 + Redis broker, Celery Beat | Ingestion, feature building, projection, pricing, grading, retraining. Separate queues by priority. |
-| **Model library** | `rinkx.models` (numpy, scipy, statsmodels, LightGBM, PyMC optional) | Pure Python and importable by both workers and notebooks. No web dependencies. |
-| **Database** | PostgreSQL 16 | System of record. Schema in [`db/schema.sql`](../db/schema.sql), migrations via Alembic. |
-| **Cache / bus** | Redis 7 | Response cache, Celery broker, Redis Streams for change events, pub/sub for SSE fan-out. |
-| **Object storage** | S3-compatible | Serialized models, backtest reports, raw ingestion payloads (kept for audit and replay). |
+| **Pipeline** | Python 3.12 package `rinkx` with a CLI (`python -m rinkx run --stage ...`) | Ingestion, change detection, features, models, pricing, alerts, grading, publishing. Runs only inside GitHub Actions or locally. |
+| **Data store** | One **SQLite** file ([`db/schema.sql`](../db/schema.sql)), encrypted with `age`, kept as a GitHub **Release asset** | System of record. Each run downloads the newest version and uploads a new one. The last 10 versions are kept as backups. Release assets live outside git history, so the repo doesn't bloat. |
+| **Analytics** | pandas / polars, numpy, scipy, statsmodels, LightGBM; DuckDB for heavy backtest queries (it reads SQLite directly) | Modeling and backtesting on the Actions runner (4 vCPU / 16 GB for public repos). |
+| **Site** | Vite + React + TypeScript + Tailwind + Recharts + TanStack Query, `HashRouter` | Static SPA on Pages. Fetches encrypted JSON files and decrypts them in the browser with WebCrypto. No server code. |
+| **Quick Entry** | GitHub Issue forms + a workflow on `issues: opened` | The "write" path. You confirm a goalie, scratch, line change or injury from the GitHub iPhone app, with a mandatory source URL. |
+| **Alerts** | `config/alerts.yml` → evaluated each run → **ntfy** push | Notifications to your phone. |
 
-## 3. Event-driven recalculation (live updates)
+## 3. Workflows and update cadence
 
-Recalculation is driven by **input changes**, not by a clock alone.
-
-```
-ingest ──► diff vs. last state ──► emit change event ──► resolve affected projections ──► recompute ──► reprice ──► push
-```
-
-| Change event | Example | Affected scope |
+| Workflow | Trigger | Does |
 |---|---|---|
-| `goalie.status_changed` | G2 confirmed instead of G1 | All goalie props for that team. All skater props for the **opponent** (opposing-goalie quality). Game sim for that game. |
-| `lineup.role_changed` | Player moves PP2 → PP1 | That player's projections, the player's old and new linemates, and the team's PP-point props. |
-| `availability.changed` | Player ruled out | The player is removed. Teammates' TOI is redistributed, then their props are recomputed. |
-| `odds.line_changed` | Shots 4.5 → 3.5 | Repricing only (no re-projection). Edge, confidence and alerts update. |
-| `odds.game_line_changed` | Game total 6.0 → 6.5 | Game environment, then all props in that game. |
-| `game.status_changed` | Postponed / started | Freeze or void projections. Pregame predictions lock at puck drop. |
+| `pregame.yml` | cron every 10 min, 15:00–03:59 UTC (11 am–midnight ET); `workflow_dispatch` | Exits in under 30 s if no game starts within 8 h. Otherwise: goalies, injuries, odds (budget-aware), game status → recompute affected projections → reprice → alerts → publish if the bundle changed. |
+| `hourly.yml` | cron at minute 17 | Schedule, rosters, news, odds on non-game days at a low cadence. |
+| `nightly.yml` | cron 09:37 UTC (5:37 am ET) | Final boxscores + PBP, shift-chart lineups, grading and CLV, rolling features, correlations, store backup rotation. |
+| `weekly.yml` | Monday 10:13 UTC | Model retraining, walk-forward backtest, calibration report. Champion promotion stays manual (via an issue form). |
+| `quick-entry.yml` | `issues: opened` with label `quick-entry` | Validates that the author is the repo owner, writes the row (`provenance='manual'`, `source_ref` = your URL), recomputes affected projections, publishes, then closes the issue with a summary comment. |
+| `keepalive.yml` | weekly | Re-enables the scheduled workflows through the API. GitHub silently disables schedules in public repos after 60 days without repository activity, and pipeline runs don't count as activity. |
+| `ci.yml` | push / PR | Lint, typecheck, unit tests, schema tests, copy lint, contract tests. |
 
-Each recompute writes a **new** `player_projections` row that `supersedes` the old one, so the UI can show *"Projection updated: 3.6 → 4.1 (moved to PP1)"* with both versions.
+**Serialization.** Every workflow that touches the store shares `concurrency: { group: rinkx-store, cancel-in-progress: false }`, so two runs never write the store at once. GitHub keeps only the newest pending run in a group. That is fine here, because the next run does a full refresh anyway.
 
-**Polling cadence.** Adaptive by time to puck drop, and capped by vendor quotas. Every job logs `quota_remaining`.
+**Timing honesty.** Scheduled runs are commonly delayed by 5–30 minutes under GitHub load, and occasionally skipped. RinkX is therefore a **near-live** tool, not real-time:
+* The UI always shows "Updated N min ago" from the manifest.
+* Close to puck drop, you can force a refresh with **Run workflow** in the GitHub app (`workflow_dispatch`).
+* Quick Entry issues trigger immediately (event-driven, not cron).
 
-| Feed | > 24 h out | 24 h – 3 h | 3 h – lock | Live |
-|---|---|---|---|---|
-| Starting goalies | 2 h | 30 min | 5 min | — |
-| Lineups / PP units | 6 h | 1 h | 10 min | — |
-| Injuries / news | 30 min | 15 min | 5 min | 15 min |
-| Prop lines | 6 h | 30 min | 5–10 min (quota-dependent) | off |
-| Game status / scores | daily | 1 h | 5 min | 1 min |
+### Change-driven recalculation
 
-Clients get updates over **Server-Sent Events** (`GET /api/v1/stream`). SSE is simpler than WebSockets, works through Vercel and CDNs, and handles one-way server-to-client traffic. TanStack Query invalidates the matching queries when an event arrives.
+Inside each run:
 
-## 4. Request path and caching
+```
+ingest → diff against store → change events → resolve affected projections → recompute → reprice → alerts → publish
+```
 
-* Hot read endpoints (`/games/today`, `/props/best`) are cached in Redis with event-driven invalidation (a projection update for game G purges the keys tagged `game:G`) and a 60 s TTL as a backstop.
-* Each response carries a `meta` block: `generated_at`, the oldest `fetched_at` among its inputs, `sources[]` and `data_status ∈ {live, stale, unavailable, synthetic}`. A feed counts as `stale` when its age passes the threshold for its tier above. The UI then shows a stale-data badge and does not hide the value.
+| Change | Affected scope |
+|---|---|
+| Goalie confirmed / changed | That team's goalie props, all opponent skater props, and the game sim |
+| Line / PP unit change | The player, old and new linemates, and team PP props |
+| Player ruled out | Remove the player, redistribute TOI, recompute teammates |
+| Prop line moved | Reprice only |
+| Game total / ML moved | Game environment → all props in the game |
+| Game started / postponed | Lock or void pregame predictions |
 
-## 5. Security and auth
+Each recompute inserts a new `player_projections` row that `supersedes` the old one, so the UI shows *"Projection updated: 3.6 → 4.1 (moved to PP1)"*.
 
-* **Auth.js (NextAuth v5)** with an email magic link (optionally Google), restricted by `ALLOWED_EMAILS` to the owner. The Next.js server mints a short-lived (5 min) signed JWT for API calls, which FastAPI verifies. The owner account has `role=admin`.
-* API keys for odds, news and other vendors live only in worker and API environment secrets and never reach the browser.
-* Basic IP rate limiting on the auth and API edges to blunt scanning, since the app is public-facing even with a single user.
-* Postgres is not exposed to the internet. The API and workers reach it over the private Docker network.
-* Admin actions (manual news entry, model promotion) are logged with timestamps, for your own audit trail.
+### Odds credit budget
+
+`config/budget.yml` sets a monthly credit budget for the odds API. The scheduler spends it where it matters: a light pass in the morning, then the last 3 hours before each game. It covers only the markets and books listed in `config/books.yml`. Each run logs `quota_remaining`, and if the budget runs low, the refresh cadence stretches out. The app still works without odds: projections and hit rates show, and market fields read "Data unavailable".
+
+## 4. Published site and data bundle
+
+Each publish builds the SPA and a **data bundle** of JSON files, then deploys both with `actions/deploy-pages`. Nothing is committed to git.
+
+```
+/                       app shell (public, no data)
+/data/manifest.json     public: build time, schema version, per-feed last-success times, file hashes
+/data/keyfile.json      public: PBKDF2 salt + iterations + the data key wrapped by your passphrase
+/data/*.json.enc        everything else, AES-256-GCM encrypted
+```
+
+The data contract is in [`03-api.md`](03-api.md). The site polls `manifest.json` every 2 minutes while open and refetches only the files whose hashes changed.
+
+## 5. Security model
+
+The repo, the Release asset and the Pages site are all **publicly downloadable**, so confidentiality comes entirely from encryption.
+
+| Asset | Protection |
+|---|---|
+| Data store (`rinkx.db.age`) | `age` encryption. The private identity lives only in the Actions secret `STORE_AGE_KEY`. **Keep an offline copy of that key; losing it loses the store.** |
+| Published data files | AES-256-GCM with a random 256-bit data key (Actions secret `DATA_KEY`). `keyfile.json` holds that key wrapped with a key derived from your passphrase (PBKDF2-SHA256, 600k iterations). Your passphrase never leaves your device and is never stored in the repo. |
+| Unlock on your devices | You enter the passphrase once per device. The browser stores the derived key in IndexedDB as a **non-extractable** CryptoKey. "Lock" clears it. |
+| Passphrase strength | All of the protection rests on it. Use a long passphrase (5+ random words). The keyfile is public, so a weak passphrase can be brute-forced offline. |
+| API keys | Actions secrets only (`ODDS_API_KEY`, `NTFY_TOPIC`, ...). The ntfy topic is a long random name, which acts as its password.. Never in the bundle or the repo. |
+| Quick Entry | The workflow acts only on issues opened by the repo owner, and anyone else's issues are ignored. Issue contents are public, but that information (a goalie confirmation plus a public source URL) is already public. |
+| Odds vendor terms | Raw odds are never published in readable form. They exist only inside the encrypted store and bundle, for your personal use. |
+
+What this does **not** hide: the app's code (the repo is public anyway), the fact that the site exists, and the timing and size of updates from `manifest.json`.
 
 ## 6. Responsible-use layer
 
-* A persistent footer says: *"Statistical estimates, not guarantees."* It links to responsible-gambling resources (e.g. 1-800-GAMBLER in the US, ConnexOntario in Ontario).
-* An optional session reminder and a "cool-off" mode (`users.rg_settings`) hide pricing and edge views for a chosen period.
-* Parlay Builder always shows a variance warning, and the combined probability sits next to the payout.
-* No affiliate deep links or "bet now" buttons in v1. The sportsbook column is informational.
+* A persistent footer says: *"Statistical estimates, not guarantees."* It links to responsible-gambling resources (e.g. 1-800-GAMBLER in the US, ConnexOntario in Ontario), and also carries the data attribution (NHL, MoneyPuck).
+* An optional cool-off setting (stored on the device) hides pricing and edge views for a chosen period.
+* Parlay Builder always shows a variance warning.
+* No "bet now" links. The sportsbook columns are informational.
 
-## 7. Deployment
+## 7. Environments and local development
 
-Sized for one user. Everything except the web app runs on **one small Linux VM** with Docker Compose.
-
-| Layer | Choice | Notes |
+| Environment | Where | Data |
 |---|---|---|
-| Web | Vercel (Hobby plan, which is for personal non-commercial projects) | Free |
-| API + worker + beat | Docker Compose on one VM (e.g. Hetzner, DigitalOcean or Fly.io; 2 vCPU / 4 GB) | Celery runs as **one worker process with priority queues**, not separate fleets |
-| Postgres 16 | Container on the same VM, nightly `pg_dump` to object storage | Managed Postgres (Neon / Supabase free tier) is a fine alternative if you'd rather not run backups |
-| Redis | Container on the same VM | |
-| Object storage | Cloudflare R2 or Backblaze B2 | Raw payloads, model artifacts, DB dumps. Cents per month. |
-| TLS / ingress | Caddy (automatic HTTPS) in front of the API | |
-| Observability | Structured JSON logs, the in-app admin health page, a free uptime ping, Sentry free tier | No tracing stack |
-| CI | GitHub Actions: lint, typecheck, unit tests, schema smoke test against Postgres 16, copy lint, OpenAPI → TS client drift check, nightly backtest regression | Free for this volume |
+| `dev` | Your machine: `python -m rinkx run --local` + `npm run dev` | Local SQLite. Synthetic fixtures allowed and bannered. |
+| `prod` | GitHub Actions + Pages | Encrypted store. Synthetic rows block the deploy. |
 
-It can also run entirely on a home machine (`docker compose up`). The only cost is that alerts don't fire while the machine is off.
-
-Environments: `dev` (local, synthetic data allowed) and `prod` (VM, synthetic data forbidden). There is no separate staging environment.
+Everything also runs locally with no GitHub dependency, which makes debugging easy and keeps an exit path open if you ever want a server.

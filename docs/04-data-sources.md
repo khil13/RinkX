@@ -27,7 +27,7 @@ If a needed category has no compliant source, the app shows **"Data unavailable"
 ### NHL Web API — `api-web.nhle.com/v1` and `api.nhle.com/stats/rest`
 * **Provides:** schedule by date, standings, rosters, player landing pages and game logs, boxscores with TOI and PP/SH splits, play-by-play with coordinates and strength state, and shift charts (`/stats/rest/en/shiftcharts`). Stats REST also covers skater/goalie/team summaries, realtime stats (hits, blocks) and TOI breakdowns.
 * **Caveats:** public but **undocumented**, with no SLA, and endpoints change between seasons. NHL data is the league's property. Personal, non-commercial use with polite request rates is the intended posture. If RinkX ever became shared or commercial, it would need a licensed provider (Sportradar is the NHL's official data partner).
-* **Engineering:** we keep raw payloads in object storage, rate-limit politely (≤ 2 req/s), cache aggressively, and run contract tests that alert when a response shape changes.
+* **Engineering:** raw payloads are kept (compressed, encrypted) as Release assets for replay. We rate-limit politely (≤ 2 req/s), cache aggressively, and run contract tests that alert when a response shape changes.
 
 ### MoneyPuck data downloads
 * **Provides:** shot-level data with xG, season skater/goalie/team/line tables back to 2008.
@@ -42,7 +42,7 @@ If a needed category has no compliant source, the app shows **"Data unavailable"
 
 1. **Odds vendor (required for any market feature).** Recommendation: **The Odds API** as the starting point. It covers NHL player props (shots on goal, goals, assists, points, PP points, blocked shots, saves, anytime/first goal scorer) for US books on paid tiers, and offers historical snapshots. Credits are metered per market × region, which is why polling cadence is quota-aware. Alternatives with deeper prop coverage and lower latency, at higher cost: **OpticOdds**, **SportsGameOdds**, **OddsJam API**. Hits props in particular are offered by fewer books and vendors, so expect "Data unavailable" more often.
 2. **Lineups + starting goalies + injuries/news.** This is the most important accuracy input after odds. Data partnerships (e.g. Daily Faceoff) aren't realistic for one person, so the personal-use plan is:
-   * **Default (free):** a fast **Quick Entry** admin screen. Paste the official source URL (team PR account, NHL.com, a beat reporter) and pick goalie / scratch / line change / injury. It takes about 10 seconds per item, and the source and timestamp are stored as for any other row. Post-game lines are reconstructed automatically from NHL shift charts.
+   * **Default (free):** **Quick Entry** via GitHub Issue forms, from the GitHub iPhone app or a button in RinkX. Paste the official source URL (team PR account, NHL.com, a beat reporter) and pick goalie / scratch / line change / injury. It takes about 10 seconds per item, and the source and timestamp are stored as for any other row. Post-game lines are reconstructed automatically from NHL shift charts.
    * **Optional paid upgrade:** a **SportsDataIO** or **Rotowire** subscription tier that allows personal use, if manual entry gets tedious. Daily Faceoff's site is still not scraped.
 3. **Sportradar NHL:** not needed for personal use. Listed only as the path if the project ever went commercial.
 4. **Evolving-Hockey** (subscription): reference for validating our own GAR-style and xG numbers. Its terms restrict redistribution, so it is **never served in the app**.
@@ -50,7 +50,7 @@ If a needed category has no compliant source, the app shows **"Data unavailable"
 ## Optional / manual
 
 * **Natural Stat Trick, HockeyViz, AllThreeZones:** valuable for research, but no API, and automated collection would violate their terms. Used only manually by the modeling team for sanity checks, or under explicit permission.
-* **Official team and league announcements** (press releases, official team social accounts): an admin can enter items through `POST /admin/news` with a required URL. Social media APIs (X/Bluesky) can be added later under their API terms.
+* **Official team and league announcements** (press releases, official team social accounts): you can enter items through a Quick Entry issue form, which requires a URL. Social media APIs (X/Bluesky) can be added later under their API terms.
 * **NHL EDGE** puck and player tracking: integrate if and when it's available through a sanctioned endpoint.
 
 ## MVP recommendation

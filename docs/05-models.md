@@ -206,7 +206,7 @@ The breakdown is always displayed. Confidence buckets (50–59, 60–69, …) ar
 **Walk-forward, never random splits.**
 ```
 train: [season_start_2015 ... day d−1]  →  predict day d   (expanding window, recency-weighted)
-retrain models weekly · refit calibrators monthly · features computed at as_of = prediction time
+retrain models weekly (weekly.yml on an Actions runner) · refit calibrators monthly · features computed at as_of = prediction time
 ```
 * **Leakage checklist** (tested in CI on a fixture season):
   * No same-game stats in features.
@@ -232,7 +232,7 @@ retrain models weekly · refit calibrators monthly · features computed at as_of
 
 **Calibration.** Isotonic regression per market (Platt scaling for low-sample markets), fit on out-of-fold walk-forward predictions. It is applied only if it improves held-out Brier, and the calibration map is stored in `model_versions.calibrator`.
 
-**Promotion gate** (champion/challenger): a challenger needs ≥ 2,000 out-of-sample predictions for the market, a lower log loss with a paired bootstrap p < 0.05, an ECE no worse than the champion's, and no confidence-bucket inversion. Promotion is a manual admin action with the report attached.
+**Promotion gate** (champion/challenger): a challenger needs ≥ 2,000 out-of-sample predictions for the market, a lower log loss with a paired bootstrap p < 0.05, an ECE no worse than the champion's, and no confidence-bucket inversion. Promotion is a manual action (a "Promote model" issue form) with the report attached. Model artifacts are stored as Release assets and referenced by `model_versions.artifact_uri`.
 
 **Retraining schedule.** Weekly feature and model refresh, monthly calibrator refresh, and a full re-tune each off-season. Drift monitors (feature PSI, rolling Brier vs. backtest) raise admin alerts.
 

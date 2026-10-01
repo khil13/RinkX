@@ -12,21 +12,23 @@ RinkX answers **"why does the model project this player at this number?"** It do
 
 | Doc | Contents |
 |---|---|
-| [01 · Architecture](docs/01-architecture.md) | Product rules, system topology, event-driven recalculation, caching, security, deployment |
+| [01 · Architecture](docs/01-architecture.md) | Product rules, GitHub Actions + Pages topology, workflows and cadence, encryption and security |
 | [02 · Database](docs/02-database.md) | Entity map, table groups, design decisions. DDL in [`db/schema.sql`](db/schema.sql) |
-| [03 · API](docs/03-api.md) | REST + SSE endpoints, response envelope, canonical prop-card payload, parlay analysis |
+| [03 · Data contract](docs/03-api.md) | Static encrypted data contract, prop-card payload, parlay math, Quick Entry write path |
 | [04 · Data sources](docs/04-data-sources.md) | Free / paid / optional sources, licensing posture, ingestion contract |
 | [05 · Models](docs/05-models.md) | TOI, shots, scoring, goalie, game simulation, devig & edge, confidence, correlation, walk-forward validation |
 | [06 · UI](docs/06-ui.md) | Design language, navigation, routes, wireframes, iPhone requirements |
-| [07 · Folder structure](docs/07-folder-structure.md) | Monorepo layout |
+| [07 · Folder structure](docs/07-folder-structure.md) | Repo layout |
 | [08 · Roadmap](docs/08-roadmap.md) | Phases 0–10 with test gates; open decisions |
+
+## How it runs
+
+Everything runs on GitHub, at $0 hosting cost. **GitHub Actions** fetches data, runs the models and builds the site on a schedule. **GitHub Pages** serves it. The data store is an encrypted SQLite file kept as a Release asset, and every data file on the site is encrypted. Only your passphrase unlocks it. See [docs/01-architecture.md](docs/01-architecture.md).
 
 ## Validate the schema
 
 ```bash
-createdb rinkx
-psql -v ON_ERROR_STOP=1 -d rinkx -f db/schema.sql
-psql -v ON_ERROR_STOP=1 -d rinkx -f db/tests/schema_smoke.sql   # -> "schema smoke test: OK"
+python db/tests/test_schema.py   # -> "schema tests: 10 passed"
 ```
 
 ## Responsible use
