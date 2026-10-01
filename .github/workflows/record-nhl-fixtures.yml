@@ -68,6 +68,15 @@ jobs:
             for abbrev in $(jq -r '.awayTeam.abbrev, .homeTeam.abbrev' "$out/boxscore_$game.json"); do
               get "roster_${abbrev}_20252026" "$web/roster/$abbrev/20252026"
             done
+            # Players in the box score who are missing from those rosters (trades, retirements):
+            # the pipeline looks them up individually, so record their player pages too.
+            jq -r '[.forwards[],.defensemen[],.goalies[]] | .[].id' "$out"/roster_*_20252026.json | sort -u > /tmp/rostered
+            # (a for-loop, not a piped while-loop, so `get` updates the index in this shell)
+            jq -r '.playerByGameStats[] | (.forwards + .defense + .goalies)[] | .playerId' "$out/boxscore_$game.json" \
+              | sort -u > /tmp/boxed
+            for pid in $(comm -23 /tmp/boxed /tmp/rostered); do
+              get "player_$pid" "$web/player/$pid/landing"
+            done
           fi
 
           # One skater and one goalie from the recorded roster.
