@@ -23,6 +23,7 @@ daily on all loaded history, and the Model Tests page (`/#/models`) shows the re
 | Blocked shots, Hits | shrunk rate per hour × ice time | opponent, home/road, arena scorekeeping (home-game vs road-game totals) |
 | Goalie saves, goals against | shots against ~ NB(league × own defence × opponent offence); saves/GA ~ binomial on a shrunk save % | own defence, opponent offence |
 
+* **When the test runs:** daily, or sooner when the number of completed games has grown by 10% (or the last test lacked history and new games have arrived). That way a backfill shows up the same day.
 * **Point-in-time state** (`state.py`). Games are replayed in date order. Every game is predicted from the
   state *before* its date, then learned from. The live site calls the same feature functions on the
   state after the last completed game, so the backtest and the live projections run the same code.

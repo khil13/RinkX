@@ -92,6 +92,7 @@ def record_evaluation(conn: sqlite3.Connection, report: dict[str, Any], now: dat
                         "k_sv": K_SV,
                         "m_grid": fit.M_GRID,
                         "burn_in_days": fit.BURN_IN_DAYS,
+                        "n_games": report.get("n_games"),
                     }
                 ),
                 json.dumps({"status": report["status"], "stats": stats, "choices": choices}),
@@ -139,6 +140,7 @@ def latest_report(conn: sqlite3.Connection) -> tuple[dict[str, Any] | None, str 
         report["choices"].update(m["choices"])
         report["tune"] = cfg.get("tune")
         report["history"] = cfg.get("history")
+        report["n_games"] = cfg.get("n_games")
         report["test"] = {"from": r[2], "to": r[3]} if r[2] else None
     return report, rows[0][4]
 
@@ -864,9 +866,17 @@ def prune(conn: sqlite3.Connection, today: date) -> int:
     return n + cur.rowcount
 
 
-def _needs_evaluation(conn: sqlite3.Connection, now: datetime) -> bool:
-    _, created = latest_report(conn)
-    return created is None or now - parse_iso(created) >= EVAL_MAX_AGE
+EVAL_GROWTH = 1.10  # re-test early once completed games grow by 10% (e.g. during a backfill)
+
+
+def _needs_evaluation(conn: sqlite3.Connection, now: datetime, n_games: int) -> bool:
+    report, created = latest_report(conn)
+    if report is None or created is None or now - parse_iso(created) >= EVAL_MAX_AGE:
+        return True
+    tested = int(report.get("n_games") or 0)
+    if report.get("status") != "ok" and n_games > tested:
+        return True  # it couldn't test before; more history has arrived since
+    return n_games >= tested * EVAL_GROWTH
 
 
 def run_models(
@@ -882,11 +892,12 @@ def run_models(
     games = history.load(conn)
     st = State()
     learned = False
-    if force_eval or _needs_evaluation(conn, now):
+    if force_eval or _needs_evaluation(conn, now, len(games)):
         with ingestion_run(conn, src, "models.evaluate") as run:
             tables = fit.collect(walk(games, st))
             learned = True
             report = fit.evaluate(tables)
+            report["n_games"] = len(games)
             record_evaluation(conn, report, now)
             run.rows_read = sum(len(t) for t in tables.values())
             run.meta["passed"] = sorted(s for s, e in report["stats"].items() if e.get("passed"))
