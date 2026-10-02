@@ -41,6 +41,12 @@ daily on all loaded history, and the Model Tests page (`/#/models`) shows the re
 * **Version 1.1 adds the game model** (`models/game_sim.py`). It covers win probability (moneyline,
   goalie win), overtime chance, team and game goal totals, goalie shutout, and first goal scorer. Each
   is published only if it passes its own walk-forward test (§11). See §6 for the formulas.
+* **Version 1.2 adds a playoff factor** for every skater stat and for goalie shots against. It is
+  the league-wide playoff vs regular-season rate, learned from earlier playoff games only and shrunk
+  toward no effect (200 skater-hours, or 40 team-games). Outside the playoffs it is 1.0. A tuning
+  window with no playoff games can't judge it, so it is kept by default and the walk-forward test
+  decides, as usual, whether each stat is published. Real-data motivation: in the 1.1 test (mid-March
+  through the playoffs), hits were projected about 8% low.
 * **Not modeled yet:** saves + win, which needs a joint model of the goalie's saves and the result.
 
 ## Module layout

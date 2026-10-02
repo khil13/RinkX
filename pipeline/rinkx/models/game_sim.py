@@ -269,7 +269,10 @@ def evaluate(
     test_start: str,
 ) -> None:
     """Adds team_goals / win / shutout / first_goal entries and the game choice to `report`."""
-    entries = {s: {"label": LABELS[s], "family": "game_sim", "n_tune": 0, "n_test": 0} for s in GAME_STATS}
+    units = {"team_goals": "team-games", "win": "games", "shutout": "goalie starts", "first_goal": "player-games"}
+    entries = {
+        s: {"label": LABELS[s], "family": "game_sim", "unit": units[s], "n_tune": 0, "n_test": 0} for s in GAME_STATS
+    }
     report["stats"].update(entries)
     if game is None or len(game) == 0:
         for e in entries.values():

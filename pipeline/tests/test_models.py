@@ -328,3 +328,22 @@ def test_retest_when_history_grows(tmp_path):
     assert not project._needs_evaluation(conn, soon, n)  # nothing new: no re-test
     assert project._needs_evaluation(conn, soon, n + 1)  # couldn't test before; new games arrived
     assert project._needs_evaluation(conn, NOW + timedelta(hours=21), n)  # daily re-test
+
+
+def test_playoff_factor_is_learned_point_in_time(tmp_path):
+    conn, _ = synth.build(str(tmp_path / "po.db"), days=120, seed=6)
+    cutoff = (START + timedelta(days=100)).isoformat()
+    conn.execute("UPDATE games SET game_type = 'O' WHERE game_date >= ?", (cutoff,))
+    conn.execute(
+        "UPDATE player_game_stats SET hits = hits * 3 / 2 WHERE game_id IN (SELECT id FROM games WHERE game_type = 'O')"
+    )
+    conn.commit()
+    rows = [r for r in walk(history.load(conn)) if r.kind == "skater"]
+    regular = [r for r in rows if r.date < cutoff]
+    first_day = [r for r in rows if r.date == cutoff]
+    late = [r for r in rows if r.date >= (START + timedelta(days=115)).isoformat()]
+    assert all(r.features["po.hits"] == 1.0 for r in regular)  # never applied in regular-season games
+    assert all(r.features["po.hits"] == 1.0 for r in first_day)  # no playoff games seen yet: no effect
+    po = np.mean([r.features["po.hits"] for r in late])
+    assert 1.15 < po < 1.5  # learned from earlier playoff games, shrunk toward 1
+    assert abs(np.mean([r.features["po.shots"] for r in late]) - 1.0) < 0.1  # shots weren't changed
