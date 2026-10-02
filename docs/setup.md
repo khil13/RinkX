@@ -80,6 +80,10 @@ Each alert fires at most once per game. Without the secret, alerts still appear 
 
 There is no automatic news feed. To record a news item, open **Issues → New issue → Quick Entry: news** (or **+ Add news** on the News page). Give it a headline, a category, a player and/or team, and the **source link**. It shows on the News page and the player's page, and can trigger a `news` alert. News doesn't change projections: to take a player out of the projections, use **Mark a player out**.
 
+### On your phone (Phase 9)
+
+Open the site in Safari (iPhone) or Chrome (Android), unlock it, then choose **Share → Add to Home Screen** (or **Install app**). It opens full screen like an app. If the phone is offline, it shows the last data it loaded. **Settings** (under More) sets decimal odds, your time zone, or a cool-off that hides every price on that phone for a while.
+
 ### Changing the passphrase
 
 Run the Setup page again with a new passphrase, but **keep your existing STORE_KEY secret unchanged**. Replace DATA_KEY with the new one and commit the new keyfile. The store is untouched because it uses STORE_KEY. Every device must unlock again.

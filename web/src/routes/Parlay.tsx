@@ -1,5 +1,5 @@
 import { Link } from "react-router";
-import { american, SIDE_LABEL } from "../components/Lines";
+import { odds, SIDE_LABEL } from "../components/Lines";
 import { pct } from "../components/Projections";
 import { Notice, Panel, Spinner } from "../components/ui";
 import { useEncrypted } from "../lib/data/fetch";
@@ -80,7 +80,7 @@ export function Parlay() {
                   <span>
                     <span className="num mr-2 text-xs text-muted">{i + 1}</span>
                     <span className="font-semibold">{l.subject}</span> {legText(l)}{" "}
-                    <span className="num font-semibold">{american(l.price)}</span>
+                    <span className="num font-semibold">{odds(l.price)}</span>
                     <span className="block text-xs text-muted">
                       {l.away} @ {l.home} · {longDate(l.start_time_utc.slice(0, 10))} {clock(l.start_time_utc)} ·{" "}
                       {l.book_name} · model {pct(l.p_model)}
@@ -121,12 +121,12 @@ export function Parlay() {
                 </div>
                 <div>
                   <dt className="text-xs text-muted">Fair odds</dt>
-                  <dd>{r.fair_decimal ? american(toAmerican(r.fair_decimal)) : "—"}</dd>
+                  <dd>{r.fair_decimal ? odds(toAmerican(r.fair_decimal)) : "—"}</dd>
                 </div>
                 <div>
                   <dt className="text-xs text-muted">Legs' prices multiplied</dt>
                   <dd>
-                    {american(toAmerican(r.offered_decimal))}{" "}
+                    {odds(toAmerican(r.offered_decimal))}{" "}
                     <span className="text-xs text-muted">(EV {signedPct(r.ev)})</span>
                   </dd>
                 </div>

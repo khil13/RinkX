@@ -59,8 +59,8 @@ test("not-remembered key is gone after reload", async ({ page }) => {
 
 test("unbuilt pages show no sample data", async ({ page }) => {
   await unlock(page);
-  await page.goto(`${CONFIGURED}#/settings`);
-  await expect(page.getByText(/Not built yet\. This page arrives in Phase 9/)).toBeVisible();
+  await page.goto(`${CONFIGURED}#/goalies`);
+  await expect(page.getByText(/Not built yet\. This page arrives in Phase \d+/)).toBeVisible();
 });
 
 test("setup page generates keys the Python pipeline accepts", async ({ page }) => {
@@ -141,6 +141,7 @@ test("daily slate shows real games with records, rest and honest gaps", async ({
 test("game page: box score, context, and missing data labeled", async ({ page }) => {
   await unlock(page);
   await page.goto(`${CONFIGURED}#/games/2025021012`);
+  await expect(page.getByRole("heading", { name: "Box score" })).toBeVisible(); // the page chunk has loaded
   await expect(page.getByText("Final/OT")).toBeVisible();
   await expect(page.getByText("1 – 2")).toBeVisible();
   await expect(page.getByRole("link", { name: "Jeremy Swayman" }).first()).toBeVisible();
@@ -423,4 +424,87 @@ test("news page without any entries says how news gets in", async ({ page }) => 
   await page.goto(`${CONFIGURED}#/news`);
   await expect(page.getByText(/There is no automatic news feed/)).toBeVisible();
   await expect(page.getByText(/No alerts have fired in the last 14 days/)).toBeVisible();
+});
+
+test("phone: tab bar, More bottom sheet, and the prop card as a bottom sheet", async ({ page, isMobile }) => {
+  test.skip(!isMobile, "phone layout only");
+  await unlock(page, true, MODELS);
+  const tabs = page.getByRole("navigation", { name: "Tabs" });
+  for (const t of ["Slate", "Best", "Search", "Parlay", "More"]) await expect(tabs.getByText(t, { exact: true })).toBeVisible();
+  await tabs.getByRole("button", { name: "More" }).click();
+  const sheet = page.getByRole("dialog", { name: "More" });
+  await expect(sheet).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(sheet).toBeHidden();
+  await tabs.getByRole("button", { name: "More" }).click();
+  await page.getByRole("button", { name: "Close menu" }).click({ position: { x: 10, y: 10 } });
+  await expect(sheet).toBeHidden();
+  await tabs.getByRole("button", { name: "More" }).click();
+  await sheet.getByRole("link", { name: "Settings" }).click();
+  await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
+  await expect(sheet).toBeHidden();
+
+  await page.goto(`${MODELS}#/props`);
+  await page.getByRole("list", { name: "Props" }).getByRole("listitem").first().getByRole("button").click();
+  const card = page.getByRole("dialog", { name: "Prop card" });
+  await expect(card).toBeVisible();
+  const box = (await card.boundingBox())!;
+  const vh = page.viewportSize()!.height;
+  expect(Math.abs(box.y + box.height - vh)).toBeLessThanOrEqual(2); // anchored to the bottom edge
+});
+
+test("settings: decimal odds and time zone apply everywhere and persist", async ({ page }) => {
+  await unlock(page, true, MODELS);
+  await page.goto(`${MODELS}#/props/best`);
+  const first = page.getByRole("list", { name: "Props" }).getByRole("listitem").first();
+  await expect(first).toContainText("−140");
+  await page.goto(`${MODELS}#/settings`);
+  await page.getByLabel(/^Decimal/).check();
+  await page.getByLabel("UTC").check();
+  await page.goto(`${MODELS}#/props/best`);
+  await expect(first).toContainText("1.71");
+  await expect(first).not.toContainText("−140");
+  await expect(first).toContainText("UTC");
+  await page.reload();
+  await expect(first).toContainText("1.71");
+  await page.goto(`${MODELS}#/settings`);
+  await page.getByLabel(/^American/).check();
+  await page.goto(`${MODELS}#/props/best`);
+  await expect(first).toContainText("−140");
+});
+
+test("cool-off hides props, prices and parlays on this device, and can't be ended early", async ({ page }) => {
+  await unlock(page, true, MODELS);
+  await page.goto(`${MODELS}#/settings`);
+  page.once("dialog", (d) => void d.accept());
+  await page.getByRole("button", { name: "24 hours" }).click();
+  await expect(page.getByText(/Cool-off is on until .*It can be extended but not ended early/)).toBeVisible();
+  for (const route of ["#/props", "#/props/best", "#/parlay"]) {
+    await page.goto(MODELS + route);
+    await expect(page.getByText(/Cool-off is on until/)).toBeVisible();
+    await expect(page.getByRole("list", { name: "Props" })).toHaveCount(0);
+  }
+  await page.goto(`${MODELS}#/games/2025029999`);
+  await expect(page.getByText(/Prices are hidden during your cool-off/).first()).toBeVisible();
+  await expect(page.getByRole("table", { name: "T00 projections" })).toBeVisible(); // stats and projections stay
+  await page.goto(`${MODELS}#/settings`);
+  await expect(page.getByRole("button", { name: "Extend: 24 hours" })).toBeVisible();
+});
+
+test("home-screen app: manifest and icons, and it opens offline after a visit", async ({ page, context }) => {
+  await page.goto(MODELS);
+  const manifest = await (await page.request.get(`${MODELS}manifest.webmanifest`)).json();
+  expect(manifest.display).toBe("standalone");
+  const pngs = manifest.icons.filter((i: { type: string }) => i.type === "image/png");
+  expect(pngs.map((i: { sizes: string }) => i.sizes)).toEqual(expect.arrayContaining(["192x192", "512x512"]));
+  for (const i of [...pngs, { src: "apple-touch-icon.png" }]) {
+    expect((await page.request.get(MODELS + i.src)).status()).toBe(200);
+  }
+  await page.evaluate(() => navigator.serviceWorker.ready);
+  await page.reload(); // now controlled by the worker, which caches what it fetches
+  await expect(page.getByLabel("Passphrase")).toBeVisible();
+  await context.setOffline(true);
+  await page.reload();
+  await expect(page.getByLabel("Passphrase")).toBeVisible();
+  await context.setOffline(false);
 });

@@ -77,7 +77,7 @@ export function Setup({ manifest }: { manifest: Manifest | undefined }) {
   const keyfileText = gen ? JSON.stringify(gen.keyfile, null, 2) + "\n" : "";
 
   return (
-    <div className="mx-auto flex max-w-2xl flex-col gap-4 p-4 sm:p-6">
+    <main className="mx-auto flex max-w-2xl flex-col gap-4 p-4 sm:p-6">
       <div>
         <div className="text-2xl font-bold tracking-widest text-accent">RINKX · Setup</div>
         <p className="mt-1 text-sm text-muted">
@@ -181,6 +181,6 @@ export function Setup({ manifest }: { manifest: Manifest | undefined }) {
           </Step>
         </ol>
       )}
-    </div>
+    </main>
   );
 }

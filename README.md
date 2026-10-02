@@ -27,7 +27,14 @@ Losing stretches stay visible. Model 1.3 also prices game and team totals the wa
 - **News:** a Quick Entry form records news with its source link; it shows on the News and player pages.
 - **Parlay builder:** combines legs using correlations measured from past games, each with its sample size and 95% interval. Pairs without enough data are treated as independent, and the page says so.
 
-Injuries are still marked *not connected yet* (there's no free injury feed; use Quick Entry). Next: Phase 9 (mobile polish).
+**Phase 9: on your phone.** The site installs as a home-screen app: tap Share → Add to Home Screen, and it opens offline with the last data it loaded.
+
+- The tab bar is Slate · Best · Search · Parlay · More.
+- Prop cards and the More menu open as bottom sheets.
+- **Settings** sets odds format (American or decimal), time zone, and a **cool-off** that hides every price and prop on that device for a day to a month. It can't be ended early.
+- Pages load on demand, and CI enforces a download budget.
+
+Injuries are still marked *not connected yet* (there's no free injury feed; use Quick Entry). Next: Phase 10 (hardening: backups, restore drill, staleness alerts).
 
 **Speed up the backfill:** Actions → pipeline → Run workflow → set *Games to load this run* to 400. The models need loaded history before they can pass their test, so nothing is projected until then.
 
