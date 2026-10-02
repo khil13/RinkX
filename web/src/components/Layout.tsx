@@ -29,7 +29,8 @@ export const NAV: NavItem[] = [
 
 const TABS = ["/", "/games", "/props/best", "/players"];
 const exact = (to: string) => to === "/" || to === "/props";
-const BUILT_PHASE = 3; // pages up to this roadmap phase exist
+// Pages that exist; the rest show their roadmap phase in the nav.
+export const BUILT_ROUTES = new Set(["/", "/games", "/props", "/props/best", "/players", "/models", "/admin"]);
 
 function navClass({ isActive }: { isActive: boolean }) {
   return `flex items-center justify-between rounded-md px-3 py-2 text-sm ${
@@ -74,7 +75,7 @@ export function Layout() {
           {NAV.map((n) => (
             <NavLink key={n.to} to={n.to} end={exact(n.to)} className={navClass}>
               {n.label}
-              {n.phase > BUILT_PHASE && <span className="num text-[10px] text-muted/60">P{n.phase}</span>}
+              {!BUILT_ROUTES.has(n.to) && <span className="num text-[10px] text-muted/60">P{n.phase}</span>}
             </NavLink>
           ))}
         </nav>

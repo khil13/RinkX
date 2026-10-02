@@ -573,3 +573,48 @@ export interface GameLines {
   fetched_at: string | null;
   reason: "not_connected" | "no_lines_yet" | null;
 }
+
+// ---- Phase 6: Best Props (pipeline/rinkx/publish/best.py) ----
+
+export interface PropRow {
+  prediction_id: number;
+  subject:
+    | { type: "player"; id: number; name: string; team: string | null; position: string }
+    | { type: "game"; name: string; team: null };
+  game: { id: number; date: string; start_time_utc: string; home: string; away: string };
+  market: string;
+  market_label: string;
+  kind: "over_under" | "yes_no" | "moneyline";
+  book: string;
+  book_name: string;
+  source: string;
+  line: number | null;
+  over_price: number | null;
+  under_price: number | null;
+  /** the side RinkX leans, or null (no lean) */
+  lean: "over" | "under" | "yes" | "no" | "home" | "away" | null;
+  /** the side the numbers below describe (the lean, or the better side) */
+  side_scored: string;
+  price: number | null;
+  p_model: number;
+  p_market: number | null;
+  market_is_novig: boolean;
+  edge: number | null;
+  ev: number | null;
+  confidence: number | null;
+  confidence_parts: NonNullable<Pricing["confidence_parts"]> | null;
+  calculation: string[];
+  data_quality: number | null;
+  missing_inputs: string[];
+  line_seen_at: string;
+  line_changed_at: string;
+  priced_at: string;
+}
+
+export interface BestProps {
+  generated_at: string;
+  books: string[];
+  open_lines: number;
+  rows: PropRow[];
+  reason: "not_connected" | "no_lines" | "not_priced" | null;
+}

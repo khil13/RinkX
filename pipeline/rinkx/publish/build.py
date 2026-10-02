@@ -15,7 +15,7 @@ from typing import Any
 from rinkx import __version__, crypto
 from rinkx.config import ConfigError, Settings
 from rinkx.ingestion.nhl.jobs import current_season
-from rinkx.publish import guards, lines, projections, views
+from rinkx.publish import best, guards, lines, projections, views
 from rinkx.publish.schemas import BuildInfo, Envelope, FeedStatus, FileEntry, Manifest, Meta
 from rinkx.store.db import schema_version
 from rinkx.timeutil import iso, parse_iso, slate_date
@@ -131,7 +131,7 @@ SLATE_DAYS_BACK = 3
 SLATE_DAYS_AHEAD = 3
 
 
-def _league_files(conn: sqlite3.Connection, today: date) -> dict[str, tuple[Any, str | None]]:
+def _league_files(conn: sqlite3.Connection, today: date, now: datetime) -> dict[str, tuple[Any, str | None]]:
     """Slates for a week around today, their games, teams, and players."""
     out: dict[str, tuple[Any, str | None]] = {}
     season = current_season(conn, today)
@@ -146,6 +146,7 @@ def _league_files(conn: sqlite3.Connection, today: date) -> dict[str, tuple[Any,
         for (gid,) in conn.execute("SELECT nhl_game_id FROM games WHERE game_date = ?", (d,)).fetchall():
             out[f"games/{gid}.json"] = (views.game_detail(conn, gid), oldest)
     out["models.json"] = (projections.models_report(conn), None)
+    out["props/best.json"] = (best.best_props(conn, now), None)
     if conn.execute("SELECT 1 FROM teams LIMIT 1").fetchone():
         out["teams.json"] = (views.teams(conn, season, today.isoformat()), None)
     if conn.execute("SELECT 1 FROM players LIMIT 1").fetchone():
@@ -219,7 +220,7 @@ def build_bundle(
         encrypted: dict[str, tuple[Any, str | None]] = {
             "admin/health.json": (_health(conn, store_asset, build), None),
         }
-        encrypted.update(_league_files(conn, today))
+        encrypted.update(_league_files(conn, today, now))
         for rel, (data, oldest) in encrypted.items():
             env = Envelope(
                 data=data,

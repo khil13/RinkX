@@ -35,7 +35,7 @@ def test_configured_run_publishes_encrypted_bundle(tmp_path: Path, keys):
     result = run(make_settings(tmp_path, keys), out, now=NOW)
     m = read_manifest(out)
     assert m["configured"] is True and m["missing_setup"] == []
-    assert set(m["files"]) == {"keyfile.json", "admin/health.json.enc", "models.json.enc"}
+    assert set(m["files"]) == {"keyfile.json", "admin/health.json.enc", "models.json.enc", "props/best.json.enc"}
     assert result.store_pulled is None and result.store_pushed is not None
 
     # Every expected feed is reported, and with no data sources connected all are unavailable.

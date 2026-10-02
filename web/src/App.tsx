@@ -6,6 +6,7 @@ import { SessionProvider, useSession } from "./lib/session";
 import { Admin } from "./routes/Admin";
 import { Dashboard } from "./routes/Dashboard";
 import { Game } from "./routes/Game";
+import { BestProps } from "./routes/BestProps";
 import { Games } from "./routes/Games";
 import { Models } from "./routes/Models";
 import { Placeholder } from "./routes/Placeholder";
@@ -13,10 +14,13 @@ import { Player, Players } from "./routes/Players";
 import { Setup } from "./routes/Setup";
 import { Unlock } from "./routes/Unlock";
 
+// Keep in sync with BUILT_ROUTES in components/Layout.tsx (the nav's "coming in phase N" tags).
 const BUILT: Record<string, () => React.ReactElement> = {
   "/": () => <Dashboard />,
   "/games": () => <Games />,
   "/players": () => <Players />,
+  "/props": () => <BestProps all />,
+  "/props/best": () => <BestProps />,
   "/models": () => <Models />,
   "/admin": () => <Admin />,
 };

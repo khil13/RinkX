@@ -44,7 +44,7 @@ Each file gets a fresh random IV. The file path is bound in as GCM additional da
 | `manifest.json` *(public)* | — | Build time, schema version, `slate_date` (Eastern date the site opens on, 6 am rollover), per-feed `last_success_at` and status, file list with SHA-256 hashes |
 | `slate/{date}.json.enc` | `GET /games/today` | Games with teams, records, L10, venue, start time, goalies (projected/confirmed + source), environment (total, ML, implied team totals), rest/B2B/travel, injury counts, PP1 units, team metrics |
 | `games/{id}.json.enc` | `GET /games/{id}` + `/games/{id}/props` | Full game detail, lineups (ES + PP/PK), injuries, every priced prop card for the game |
-| `props/best/{date}.json.enc` | `GET /props/best` | Flattened rows for the Best Props table. Filtering and sorting happen in the browser. |
+| `props/best.json.enc` | `GET /props/best`, `/props` | *(Phase 6)* One row per open line for upcoming games: the latest frozen prediction, priced against a current projection. Filtering and sorting happen in the browser. |
 | `props/{prediction_id}.json.enc` | `GET /props/{id}` + `/explain` + `/history` | Prop card (shape below), explain trail, projection revisions |
 | `lines/{game_id}.json.enc` | `GET /lines/compare`, `/lines/movement` | Per prop: book-by-book current lines, movement series, best price, consensus |
 | `players/index.json.enc` | `GET /players?q=` | Compact search index (id, name, team, position) |
@@ -148,6 +148,18 @@ The TypeScript implementation is tested against **shared fixture vectors** gener
 - Each row carries `lean`: the best priced side across books (book, side, line, price, edge, EV, confidence), or `null`.
 
 `players/{id}.lines` gives the same data for the player's next game with lines, plus each book's `movement[]` (line_movements). Only lines whose player resolved to an NHL id are stored, so only those are published. Slate game summaries carry `line_count`. `admin/health.odds` holds credits, the last budget plan, unmapped market keys, and unmatched player names with suggestions.
+
+## Best Props (Phase 6)
+
+`props/best.json` = `{generated_at, books, open_lines, rows[], reason}`. `reason` is `not_connected` (no odds key), `no_lines` (no open lines for upcoming games), `not_priced` (lines open, but none has a current projection) or `null`. Each row holds:
+
+- `prediction_id`, `subject` (`player` or `team`), `game`, `market` / `market_label` / `kind`;
+- `book`, `book_name`, `source` (always the vendor), `line` and `prices`;
+- `lean` (`null` unless the lean rules pass) and `side_scored` (the side the numbers describe), with its `price`, `p_model`, `p_market`, `market_is_novig`, `edge`, `ev`;
+- `confidence`, `confidence_parts` (or `null`), `calculation`, `data_quality`, `missing_inputs`;
+- `line_seen_at`, `line_changed_at`, `priced_at`.
+
+Only the latest prediction per open line is included, and only when its projection is still current. The Best Props page shows rows with a lean; the Props page shows all of them.
 
 ## Write path: Quick Entry and config
 
