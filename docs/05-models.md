@@ -47,6 +47,10 @@ daily on all loaded history, and the Model Tests page (`/#/models`) shows the re
   window with no playoff games can't judge it, so it is kept by default and the walk-forward test
   decides, as usual, whether each stat is published. Real-data motivation: in the 1.1 test (mid-March
   through the playoffs), hits were projected about 8% low.
+* **Version 1.3 settles totals the way books do.** FanDuel and BetMGM count the shootout winner as
+  one goal in game and team totals. The game-total and team-total distributions offered for pricing
+  now include it, so a regulation tie always adds exactly one goal (OT or shootout). Team goals in
+  the walk-forward test are still real goals. Checked against a 400,000-game simulation in the tests.
 * **Not modeled yet:** saves + win, which needs a joint model of the goalie's saves and the result.
 
 ## Module layout
@@ -260,12 +264,13 @@ Confidence is **not** "how much the model likes it". Edge is one of five compone
 
 **As built (Phase 5):**
 - **Model uncertainty** is approximated as `sqrt(p(1−p)/n)`, with n = games of history (5–82). Cross-book dispersion is half the spread of no-vig probabilities, plus a 1.5-point floor.
-- **Track-record multiplier** is 1.0 until Phase 7 grades predictions.
+- **Track-record multiplier** (Phase 7): once a market has 200 graded leans, realized ROI ÷ expected
+  ROI of those leans, clamped to 0.5–1.2. Below 200 it is 1.0, and the note says so.
 - **Not available yet, so scored conservatively and stated in the notes:** confirmed lineups and an injury feed.
 
 Every part carries notes explaining its score.
 
-The breakdown is always displayed. Confidence buckets (50–59, 60–69, …) are evaluated in the backtest. If higher buckets don't perform better, the weights get revised. That check is a release gate.
+The breakdown is always displayed. Confidence buckets (50–59, 60–69, …) are evaluated on graded results (Model Performance). Once at least two buckets have 30 bets, the page says whether ROI rises with confidence. If it doesn't, the weights get revised.
 
 ## 9. Hit-rate engine
 
@@ -299,8 +304,38 @@ The breakdown is always displayed. Confidence buckets (50–59, 60–69, …) ar
    baselines, and its randomized-PIT histogram is close to flat (largest bin gap within
    0.02 + 3·√(0.09/n)). It also needs at least 3,000 test rows (150 for goalies).
 5. The test knows the actual starting goalies and who dressed (`lineup_mode = lineup_oracle`). Live
-   projections don't, and they carry "goalie/lineup unconfirmed" in `missing_inputs`. The `live_tracked`
-   mode arrives with Phase 7 grading.
+   projections don't, and they carry "goalie/lineup unconfirmed" in `missing_inputs`. The
+   `live_tracked` numbers come from grading (below).
+
+**Grading and live-tracked performance (Phase 7, `grading/`).**
+1. Every run, each prediction for a finished game gets a `model_results` row: the actual stat, the
+   side that won at that line, and the outcome and profit (1 unit, at the price taken) of its lean.
+   Games from the last 3 days are graded again on each run, so NHL stat corrections flow through.
+2. **Settlement rules** (`grading/settle.py`), applied the same way to every book:
+   - Stats include overtime, never the shootout.
+   - Totals and the moneyline count the shootout winner's goal.
+   - A skater prop is void if the player doesn't play; a goalie prop is void unless he starts.
+   - First goal: if no goal comes before a shootout, every "Yes" loses.
+   - A cancelled game, or one postponed more than 48 h, voids every bet.
+3. **Closing line** is the last open price at the same line before the start (`line_movements`).
+   **CLV** = closing no-vig probability of our side × decimal price taken − 1: positive means the
+   price beat the close.
+4. **Metrics** (`grading/performance.py`, published as `performance.json`). They use one row per
+   prop: the last prediction before the game at each book, then the best-EV lean across books, so a
+   prop at two books counts once.
+   - Probability quality on every graded prop, lean or not: Brier, log loss, reliability and ECE,
+     next to the same scores for the no-vig market on the same props.
+   - Betting results on leans: record, profit, ROI with a normal 95% interval, CLV, % beating the
+     close, and cumulative profit with the worst drawdown.
+   - Splits by market, confidence bucket, month and model version.
+   - Below 100 bets the page says the sample is too small to judge.
+
+*Not built in Phase 7.*
+- A separate weekly workflow: the hourly pipeline already re-tests every 20 h and grades every run.
+- Isotonic calibrators.
+- Automated champion/challenger promotion. A model version changes only by merging code, and its
+  walk-forward test still decides what is published. Results are split by model version, so
+  versions can be compared on live bets.
 
 Results are stored in `backtest_runs`, per model family, and in `model_versions.oos_metrics`, and
 published as `models.json`.

@@ -39,6 +39,10 @@ def _simulate(lam_h: float, lam_a: float, q: float, so_home: float, playoff: boo
     home_win = (h > a) | (tie & ot_goal & ot_home) | (tie & ~ot_goal & so_home_win)
     h_tot = h + (ot_goal & ot_home)
     a_tot = a + (ot_goal & ~ot_home)
+    # Book settlement: the shootout winner is credited one goal in game and team totals.
+    so = tie & ~ot_goal
+    h_book = h_tot + (so & so_home_win)
+    a_book = a_tot + (so & ~so_home_win)
     # first goal: with both processes Poisson, the first goal is home with prob lam_h / (lam_h + lam_a)
     any_reg = (h + a) > 0
     first_home = (any_reg & (rng.random(n) < lam_h / (lam_h + lam_a))) | (~any_reg & ot_goal & ot_home)
@@ -48,8 +52,11 @@ def _simulate(lam_h: float, lam_a: float, q: float, so_home: float, playoff: boo
         "so_home": (a_tot == 0).mean(),
         "so_away": (h_tot == 0).mean(),
         "first_home": first_home.mean(),
-        "game_total_mean": (h_tot + a_tot).mean(),
         "home_total_3plus": (h_tot >= 3).mean(),
+        "book_game_total_mean": (h_book + a_book).mean(),
+        "book_game_total_6plus": (h_book + a_book >= 6).mean(),
+        "book_home_3plus": (h_book >= 3).mean(),
+        "book_away_mean": a_book.mean(),
     }
 
 
@@ -64,9 +71,13 @@ def test_closed_form_matches_simulation(playoff):
     assert o.so_away[0] == pytest.approx(sim["so_away"], abs=0.002)
     assert o.p_home_first[0] == pytest.approx(sim["first_home"], abs=0.003)
     ks = np.arange(o.game_total.shape[1])
-    assert (o.game_total[0] * ks).sum() == pytest.approx(sim["game_total_mean"], abs=0.01)
+    assert (o.game_total[0] * ks).sum() == pytest.approx(sim["book_game_total_mean"], abs=0.01)
+    assert o.game_total[0][6:].sum() == pytest.approx(sim["book_game_total_6plus"], abs=0.003)
     assert o.home_total[0][3:].sum() == pytest.approx(sim["home_total_3plus"], abs=0.003)
-    for m in (o.home_total, o.away_total, o.game_total):
+    assert o.home_total_book[0][3:].sum() == pytest.approx(sim["book_home_3plus"], abs=0.003)
+    kt = np.arange(o.away_total_book.shape[1])
+    assert (o.away_total_book[0] * kt).sum() == pytest.approx(sim["book_away_mean"], abs=0.01)
+    for m in (o.home_total, o.away_total, o.game_total, o.home_total_book, o.away_total_book):
         assert m[0].sum() == pytest.approx(1, abs=1e-6)
 
 

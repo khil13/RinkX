@@ -36,7 +36,7 @@ from rinkx.models.dist import INF, F
 from rinkx.models.history import GOALIE_STATS, SKATER_STATS
 from rinkx.models.state import HALF_LIVES, K_SV, H, Row, basis_of
 
-MODEL_VERSION = "1.2"
+MODEL_VERSION = "1.3"
 M_GRID: tuple[float, ...] = (0.25, 0.5, 1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 64.0)  # hours of ice time
 FINISH_GRID: tuple[float, ...] = (25.0, 50.0, 100.0, 200.0, 400.0, 800.0)  # shots
 BURN_IN_DAYS = 21  # the first weeks of history only build state; they are never scored

@@ -8,6 +8,7 @@ import { Dashboard } from "./routes/Dashboard";
 import { Game } from "./routes/Game";
 import { BestProps } from "./routes/BestProps";
 import { Games } from "./routes/Games";
+import { Performance } from "./routes/Performance";
 import { Models } from "./routes/Models";
 import { Placeholder } from "./routes/Placeholder";
 import { Player, Players } from "./routes/Players";
@@ -22,6 +23,7 @@ const BUILT: Record<string, () => React.ReactElement> = {
   "/props": () => <BestProps all />,
   "/props/best": () => <BestProps />,
   "/models": () => <Models />,
+  "/performance": () => <Performance />,
   "/admin": () => <Admin />,
 };
 
