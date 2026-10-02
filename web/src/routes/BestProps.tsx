@@ -4,6 +4,7 @@ import { american, ConfidenceBreakdown, pts, SIDE_LABEL } from "../components/Li
 import { pct } from "../components/Projections";
 import { Notice, Panel, Spinner } from "../components/ui";
 import { useEncrypted } from "../lib/data/fetch";
+import { legFromRow, parlayStore, useParlayLegs } from "../lib/parlayStore";
 import type { BestProps as BestPropsData, PropRow } from "../lib/data/types";
 import { clock, localTime, longDate } from "../lib/format";
 
@@ -103,6 +104,29 @@ function PropCard({ r, change, onOpen }: { r: PropRow; change: "new" | "moved" |
   );
 }
 
+function ParlayButton({ r }: { r: PropRow }) {
+  const legs = useParlayLegs();
+  const leg = legFromRow(r);
+  if (!leg) return null;
+  const inParlay = legs.some((l) => l.key === leg.key);
+  return (
+    <div className="flex items-center gap-3">
+      <button
+        type="button"
+        onClick={() => (inParlay ? parlayStore.remove(leg.key) : parlayStore.add(leg))}
+        className="min-h-9 rounded-md border border-line px-3 text-sm hover:border-accent/50"
+      >
+        {inParlay ? "Remove from parlay" : "Add to parlay"}
+      </button>
+      {legs.length > 0 && (
+        <Link to="/parlay" className="text-xs text-accent underline">
+          Parlay ({legs.length})
+        </Link>
+      )}
+    </div>
+  );
+}
+
 function Drawer({ r, onClose }: { r: PropRow; onClose: () => void }) {
   const ref = useRef<HTMLDialogElement>(null);
   useEffect(() => {
@@ -167,6 +191,7 @@ function Drawer({ r, onClose }: { r: PropRow; onClose: () => void }) {
           {localTime(r.line_changed_at)}; priced {localTime(r.priced_at)}. Prediction #{r.prediction_id} is frozen
           and will be graded after the game. Statistical estimates, not guarantees.
         </p>
+        <ParlayButton r={r} />
         {r.subject.type === "player" && (
           <Link to={`/players/${r.subject.id}`} className="text-sm text-accent underline">
             Player page: projection, Explain, hit rates

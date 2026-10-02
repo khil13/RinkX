@@ -51,7 +51,7 @@ erDiagram
 | Modeling | `model_versions`, `player_projections`, `predictions`, `model_results`, `backtest_runs`, `prop_correlations` | See below. `model_results` (Phase 7, migration 0009): one row per graded prediction with `actual_value`, the winning `result`, `void_reason`, the lean's `outcome` (`no_bet` when it had none) and `profit_units`, the closing price, and `clv`. |
 | Alerts | `alerts`, `alert_events` | Single owner, so there is no users table. Alert definitions live in `config/alerts.yml` and are synced in. A unique (alert, game) index makes each alert fire at most once per game. Saved parlays stay in the browser. |
 | Entity resolution | `player_aliases` | Maps odds-vendor player names to NHL ids |
-| News | `news`, `news_entities` | `url` is `NOT NULL`, so a news item without a source cannot be stored. |
+| News | `news`, `news_entities` | `url` is `NOT NULL`, so a news item without a source cannot be stored. Phase 8 fills them from the "Quick Entry: news" form (`provenance='manual'`, `external_id='issue-N'`). |
 
 The requested core table list maps onto this schema, except `users`, which is unnecessary with a single owner. `player_projections` stores full distributions. `predictions` stores those projections priced against a specific line.
 

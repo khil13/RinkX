@@ -59,8 +59,8 @@ test("not-remembered key is gone after reload", async ({ page }) => {
 
 test("unbuilt pages show no sample data", async ({ page }) => {
   await unlock(page);
-  await page.goto(`${CONFIGURED}#/parlay`);
-  await expect(page.getByText(/Not built yet\. This page arrives in Phase 8/)).toBeVisible();
+  await page.goto(`${CONFIGURED}#/settings`);
+  await expect(page.getByText(/Not built yet\. This page arrives in Phase 9/)).toBeVisible();
 });
 
 test("setup page generates keys the Python pipeline accepts", async ({ page }) => {
@@ -111,7 +111,7 @@ test("pages fit the screen with no horizontal page scroll", async ({ page }) => 
     expect(overflow, route || "dashboard").toBeLessThanOrEqual(0);
   }
   await unlock(page, true, MODELS);
-  for (const route of ["#/games/2025029999", "#/players/8000001", "#/models", "#/props", "#/props/best", "#/performance"]) {
+  for (const route of ["#/games/2025029999", "#/players/8000001", "#/models", "#/props", "#/props/best", "#/performance", "#/news", "#/parlay"]) {
     await page.goto(MODELS + route);
     await page.waitForLoadState("networkidle");
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
@@ -371,4 +371,56 @@ test("model performance before anything is graded says so", async ({ page }) => 
   await page.goto(`${CONFIGURED}#/performance`);
   await expect(page.getByText(/Nothing graded yet/)).toBeVisible();
   await expect(page.getByLabel("Summary")).toHaveCount(0);
+});
+
+test("parlay builder: legs from props, correlation-adjusted probability, variance warning (synthetic)", async ({ page }) => {
+  await unlock(page, true, MODELS);
+  await page.goto(`${MODELS}#/props`);
+  const cards = page.getByRole("list", { name: "Props" }).getByRole("listitem");
+  for (const name of ["Syn P8000002", "Syn P8000003"]) {
+    await cards.filter({ hasText: name }).first().getByRole("button").click();
+    const dialog = page.getByRole("dialog", { name: "Prop card" });
+    await dialog.getByRole("button", { name: "Add to parlay" }).click();
+    await expect(dialog.getByRole("button", { name: "Remove from parlay" })).toBeVisible();
+    await dialog.getByRole("button", { name: "Close" }).click();
+  }
+  await page.goto(`${MODELS}#/parlay`);
+  await expect(page.getByRole("heading", { name: "Parlay builder" })).toBeVisible();
+  await expect(page.getByText(/Parlays multiply the bookmaker's margin and the variance/)).toBeVisible();
+  await expect(page.getByRole("list", { name: "Parlay legs" }).getByRole("listitem")).toHaveCount(2);
+  const result = page.getByLabel("Parlay result");
+  await expect(result).toContainText("If independent");
+  await expect(result).toContainText("Adjusted for correlation");
+  const pairs = page.getByRole("list", { name: "Leg pairs" });
+  await expect(pairs).toContainText("teammates");
+  await expect(pairs).toContainText(/ρ [+−]0\.\d\d \(95% .* n=[\d,]+\)/);
+  await page.getByRole("button", { name: /^Remove Syn P8000003/ }).click();
+  await expect(page.getByRole("list", { name: "Parlay legs" }).getByRole("listitem")).toHaveCount(1);
+  await page.reload(); // legs persist on this device
+  await expect(page.getByRole("list", { name: "Parlay legs" }).getByRole("listitem")).toHaveCount(1);
+  await page.getByRole("button", { name: "Clear all" }).click();
+  await expect(page.getByText(/No legs yet/)).toBeVisible();
+});
+
+test("news and alerts: Quick Entry news with its source, fired alerts with delivery status (synthetic)", async ({ page }) => {
+  await unlock(page, true, MODELS);
+  await page.goto(`${MODELS}#/news`);
+  const news = page.getByRole("list", { name: "News" });
+  await expect(news).toContainText("Synthetic note: day-to-day with a minor injury");
+  await expect(news).toContainText("Source: example.org (beat reporter)");
+  await expect(news.getByRole("link", { name: "Syn P8000001" })).toBeVisible();
+  await expect(page.getByText(/Push delivery isn't set up/)).toBeVisible();
+  const fired = page.getByRole("list", { name: "Fired alerts" });
+  await expect(fired).toContainText("strong-leans");
+  await expect(fired).toContainText(/edge \+\d+\.\d pts, confidence \d+/);
+  await expect(fired).toContainText("not sent");
+  await page.goto(`${MODELS}#/players/8000001`);
+  await expect(page.getByRole("list", { name: "News" })).toContainText("Synthetic note");
+});
+
+test("news page without any entries says how news gets in", async ({ page }) => {
+  await unlock(page);
+  await page.goto(`${CONFIGURED}#/news`);
+  await expect(page.getByText(/There is no automatic news feed/)).toBeVisible();
+  await expect(page.getByText(/No alerts have fired in the last 14 days/)).toBeVisible();
 });

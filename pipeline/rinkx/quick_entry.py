@@ -37,6 +37,8 @@ SOURCE = SourceSpec(
     0.9,
 )
 OUT_REASONS = {"injury", "illness", "healthy scratch", "rest", "suspension", "personal", "other"}
+NEWS_CATEGORIES = {"injury", "lineup", "goalie", "scratch", "suspension", "coach", "rest", "transaction", "general"}
+RELIABILITY = {"official": "official", "beat reporter": "beat_reporter", "aggregator": "aggregator"}
 URL_RE = re.compile(r"^https?://\S+$")
 
 
@@ -120,7 +122,7 @@ def parse_form(body: str) -> dict[str, str]:
 
 def _norm(name: str) -> str:
     s = unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode()
-    return re.sub(r"[^a-z ]", "", s.lower()).strip()
+    return re.sub(r"[^a-z0-9 ]", "", s.lower()).strip()
 
 
 class Rejected(ValueError):
@@ -178,7 +180,7 @@ def _resolve_player(conn: sqlite3.Connection, text: str, team_ids: tuple[int, ..
     ]
     if len(hits) != 1:
         raise Rejected(
-            f"Could not identify '{text}' ({'several matches' if hits else 'no match'} on this game's teams). "
+            f"Could not identify '{text}' ({'several matches' if hits else 'no match'} on the teams searched). "
             "Use the NHL player id."
         )
     return hits[0]
@@ -200,6 +202,8 @@ def apply(conn: sqlite3.Connection, issue: Issue, source_id: int, now: datetime)
         source = _field(form, "source")
         if not URL_RE.match(source):
             raise Rejected("A source URL (http/https) is required for every entry.")
+        if kind.startswith("news"):
+            return _apply_news(conn, issue, form, source, source_id, now)
         team = _resolve_team(conn, _field(form, "team"))
         game = _resolve_game(conn, _field(form, "game"), team)
         teams = (game["home_team_id"], game["away_team_id"])
@@ -242,6 +246,56 @@ def apply(conn: sqlite3.Connection, issue: Issue, source_id: int, now: datetime)
         raise Rejected(f"Unknown Quick Entry type '{kind}'. Use one of the Quick Entry issue forms.")
     except Rejected as exc:
         return Outcome(issue, False, f"Not applied: {exc}")
+
+
+def _apply_news(
+    conn: sqlite3.Connection, issue: Issue, form: dict[str, str], source: str, source_id: int, now: datetime
+) -> Outcome:
+    """A news item with its source link, tagged to a player and/or team. Informational: it does not
+    change projections (use the player-out or goalie forms for that)."""
+    headline = _field(form, "headline")
+    if not headline:
+        raise Rejected("A headline is required.")
+    category = _field(form, "category").lower() or "general"
+    if category not in NEWS_CATEGORIES:
+        raise Rejected(f"Category must be one of: {', '.join(sorted(NEWS_CATEGORIES))}.")
+    reliability = RELIABILITY.get(_field(form, "reliability").lower(), "unverified")
+    team = _resolve_team(conn, _field(form, "team"))
+    player_text = _field(form, "player")
+    player: sqlite3.Row | None = None
+    if player_text.isdigit():
+        player = conn.execute("SELECT * FROM players WHERE nhl_player_id = ?", (int(player_text),)).fetchone()
+        if player is None:
+            raise Rejected(f"No player with NHL id {player_text}.")
+    elif player_text:
+        teams = (team,) if team else tuple(r[0] for r in conn.execute("SELECT id FROM teams"))
+        try:
+            player = _resolve_player(conn, player_text, teams, goalie=False)
+        except Rejected:
+            player = _resolve_player(conn, player_text, teams, goalie=True)
+    if player is None and team is None:
+        raise Rejected("Tag the news with a player, a team, or both.")
+    cur = conn.execute(
+        "INSERT INTO news (source_id, external_id, url, headline, summary, category, reliability, published_at, "
+        "fetched_at, provenance) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'manual')",
+        (
+            source_id,
+            f"issue-{issue.number}",
+            source,
+            headline,
+            _field(form, "details") or None,
+            category,
+            reliability,
+            issue.created_at,
+            iso(now),
+        ),
+    )
+    conn.execute(
+        "INSERT INTO news_entities (news_id, player_id, team_id) VALUES (?, ?, ?)",
+        (cur.lastrowid, player["id"] if player is not None else None, team),
+    )
+    who = player["full_name"] if player is not None else _field(form, "team").upper()
+    return Outcome(issue, True, f"Applied: {category} news for {who} added.")
 
 
 @dataclass

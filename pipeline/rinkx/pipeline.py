@@ -10,7 +10,10 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
+from rinkx.alerts import ntfy
+from rinkx.alerts.evaluate import Sender, run_alerts
 from rinkx.config import Settings
+from rinkx.correlation.estimate import run_correlations
 from rinkx.grading.grade import run_grading
 from rinkx.ingestion.http import Fetcher, HttpFetcher, ReplayFetcher
 from rinkx.ingestion.nhl.jobs import NhlOptions, run_nhl
@@ -46,6 +49,7 @@ def run(
     now: datetime | None = None,
     tracker: IssueTracker | None = None,
     odds_client: OddsClient | None = None,
+    send: Sender | None = None,
 ) -> RunResult:
     now = now or utcnow()
     settings.workdir.mkdir(parents=True, exist_ok=True)
@@ -72,7 +76,7 @@ def run(
     try:
         version = migrate(conn, settings.db_dir)
         log.info("schema version %d", version)
-        after_save = _run_stages(conn, settings, now, tracker, odds_client)
+        after_save = _run_stages(conn, settings, now, tracker, odds_client, send)
         manifest = build_bundle(conn, out_dir, settings, now=now, store_asset=pulled, today=settings.today)
         pushed = None
         if push:
@@ -104,6 +108,7 @@ def _run_stages(
     now: datetime,
     tracker: IssueTracker | None,
     odds_client: OddsClient | None = None,
+    send: Sender | None = None,
 ) -> list[Callable[[], None]]:
     """Run every stage; return follow-up actions to perform once the store is saved."""
     if "nhl" in settings.sources:
@@ -127,5 +132,9 @@ def _run_stages(
     run_models(conn, now, today, qe.reasons if qe else None)
     run_pricing(conn, now)  # model vs market for every open line with a current projection
     run_grading(conn, now, today)  # settle predictions for finished games
+    run_correlations(conn, now)  # parlay correlations, re-estimated at most every 20 h
+    if send is None and settings.ntfy_topic:
+        send = ntfy.sender(settings.ntfy_topic, settings.ntfy_server)
+    run_alerts(conn, now, send=send, site_url=settings.site_url)  # delivered before the store is saved
     conn.commit()
     return finish(conn, tracker, qe, started) if tracker is not None and qe is not None else []

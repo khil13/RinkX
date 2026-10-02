@@ -21,7 +21,13 @@ Each priced line is frozen for later grading. **Phase 6: Best Props.** **Best Pr
 - calibration next to the no-vig market;
 - results by market, confidence, month and model version.
 
-Losing stretches stay visible. Model 1.3 also prices game and team totals the way books settle them (the shootout winner counts as a goal). Injuries are still marked *not connected yet*. Next: Phase 8 (alerts, news, parlay builder).
+Losing stretches stay visible. Model 1.3 also prices game and team totals the way books settle them (the shootout winner counts as a goal). **Phase 8: alerts, news and parlays.**
+
+- **Alerts:** rules in `config/alerts.yml` (strong leans, line moves, goalie confirmations, news, a player's line) push to your phone through ntfy, at most once per game (see [setup](docs/setup.md#alerts-on-your-phone-phase-8)).
+- **News:** a Quick Entry form records news with its source link; it shows on the News and player pages.
+- **Parlay builder:** combines legs using correlations measured from past games, each with its sample size and 95% interval. Pairs without enough data are treated as independent, and the page says so.
+
+Injuries are still marked *not connected yet* (there's no free injury feed; use Quick Entry). Next: Phase 9 (mobile polish).
 
 **Speed up the backfill:** Actions → pipeline → Run workflow → set *Games to load this run* to 400. The models need loaded history before they can pass their test, so nothing is projected until then.
 

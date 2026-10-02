@@ -73,6 +73,8 @@ class Settings:
     today: date | None  # override the slate date (tests/dev)
     boxscore_limit: int  # max box scores fetched per run (raise for a one-off backfill)
     odds_api_key: str | None = None  # The Odds API (Actions secret ODDS_API_KEY); never logged
+    ntfy_topic: str | None = None  # alerts push topic (Actions secret NTFY_TOPIC); never logged
+    ntfy_server: str = "https://ntfy.sh"
 
     @classmethod
     def from_env(cls, environ: dict[str, str] | None = None) -> Settings:
@@ -100,7 +102,17 @@ class Settings:
             today=date.fromisoformat(e["RINKX_TODAY"]) if e.get("RINKX_TODAY") else None,
             boxscore_limit=int(e.get("RINKX_BOXSCORE_LIMIT", "40")),
             odds_api_key=e.get("RINKX_ODDS_API_KEY") or None,
+            ntfy_topic=e.get("RINKX_NTFY_TOPIC") or None,
+            ntfy_server=e.get("RINKX_NTFY_SERVER") or "https://ntfy.sh",
         )
+
+    @property
+    def site_url(self) -> str | None:
+        """The GitHub Pages address of this repository's site, for links in notifications."""
+        if not self.github_repository or "/" not in self.github_repository:
+            return None
+        owner, repo = self.github_repository.split("/", 1)
+        return f"https://{owner.lower()}.github.io/{repo}/"
 
     def require_data_key(self) -> bytes:
         if self.data_key is None:

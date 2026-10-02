@@ -30,7 +30,7 @@ export const NAV: NavItem[] = [
 const TABS = ["/", "/games", "/props/best", "/players"];
 const exact = (to: string) => to === "/" || to === "/props";
 // Pages that exist; the rest show their roadmap phase in the nav.
-export const BUILT_ROUTES = new Set(["/", "/games", "/props", "/props/best", "/players", "/models", "/performance", "/admin"]);
+export const BUILT_ROUTES = new Set(["/", "/games", "/props", "/props/best", "/players", "/models", "/performance", "/news", "/parlay", "/admin"]);
 
 function navClass({ isActive }: { isActive: boolean }) {
   return `flex items-center justify-between rounded-md px-3 py-2 text-sm ${

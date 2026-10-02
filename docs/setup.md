@@ -51,6 +51,7 @@ When the run finishes, reload the site and enter your passphrase. Tick **Remembe
 | DATA_KEY, STORE_KEY | Actions secrets + your password manager | **no** |
 | Passphrase | your head / password manager | **no** |
 | ODDS_API_KEY | Actions secret | **no** (redacted from every log and error) |
+| NTFY_TOPIC | Actions secret | **no**. Anyone who knows the topic can read your alerts, so make it long and random. |
 | Quick Entry issues | this repo's Issues | **yes**: they hold only what you typed and its public source link. The pipeline's reply never includes projections. |
 
 ### Sportsbook lines (Phase 4)
@@ -66,6 +67,18 @@ The next pipeline run starts fetching lines for your books (`config/books.yml`: 
 On a Game page in the app, tap **Confirm goalie** or **Mark a player out**. This opens a GitHub issue form with the game already filled in. Add the player and a **source link**, then submit. Submitting starts the pipeline. A few minutes later the projections are recalculated, the app shows *Updated after goalie confirmed: before → after*, and the issue is commented on and closed. If something didn't match (an unknown player, a game that already started, no source link), the comment says why and nothing is changed.
 
 Only issues **you** open count. Anyone else's issues are ignored and start nothing. The buttons appear only on the published site (`<you>.github.io/RinkX`). Elsewhere, open **Issues → New issue → Quick Entry** yourself.
+
+### Alerts on your phone (Phase 8)
+
+1. Install the **ntfy** app (iOS or Android) and subscribe to a topic with a long random name, e.g. `rinkx-` followed by 20 random letters. On ntfy.sh, anyone who knows a topic can read it, so treat the name like a password.
+2. Add it as the repository secret `NTFY_TOPIC`.
+3. Edit `config/alerts.yml` in the GitHub app to choose what you're alerted about. Strong leans are on by default; goalie confirmations and injury news can be switched on.
+
+Each alert fires at most once per game. Without the secret, alerts still appear in the app under **News**, marked "not sent". Notification text never goes to the Actions logs.
+
+### News (Quick Entry)
+
+There is no automatic news feed. To record a news item, open **Issues → New issue → Quick Entry: news** (or **+ Add news** on the News page). Give it a headline, a category, a player and/or team, and the **source link**. It shows on the News page and the player's page, and can trigger a `news` alert. News doesn't change projections: to take a player out of the projections, use **Mark a player out**.
 
 ### Changing the passphrase
 
