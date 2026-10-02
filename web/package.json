@@ -5,11 +5,12 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc --noEmit && vite build",
+    "build": "tsc --noEmit && vite build && node scripts/check-budget.mjs",
     "preview": "vite preview --port 4173 --strictPort",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "e2e": "vite build && ${RINKX_PYTHON:-python3} tests/e2e/prepare.py && playwright test"
+    "e2e": "vite build && ${RINKX_PYTHON:-python3} tests/e2e/prepare.py && playwright test",
+    "budget": "node scripts/check-budget.mjs"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.104.0",

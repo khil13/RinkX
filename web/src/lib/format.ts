@@ -1,3 +1,5 @@
+import { tz } from "./settings";
+
 export function minutesSince(iso: string, now: number = Date.now()): number {
   return Math.max(0, Math.floor((now - Date.parse(iso)) / 60_000));
 }
@@ -13,6 +15,7 @@ export function ago(iso: string, now: number = Date.now()): string {
 
 export function localTime(iso: string): string {
   return new Date(iso).toLocaleString(undefined, {
+    timeZone: tz(),
     month: "short",
     day: "numeric",
     hour: "numeric",
@@ -31,7 +34,12 @@ export function githubRepo(loc: Location = window.location): { owner: string; re
 }
 
 export function clock(iso: string): string {
-  return new Date(iso).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit", timeZoneName: "short" });
+  return new Date(iso).toLocaleTimeString(undefined, {
+    timeZone: tz(),
+    hour: "numeric",
+    minute: "2-digit",
+    timeZoneName: "short",
+  });
 }
 
 export function longDate(day: string): string {

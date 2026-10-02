@@ -1,4 +1,4 @@
-import { american } from "../components/Lines";
+import { odds } from "../components/Lines";
 import { DataChip, Notice, Panel, Spinner } from "../components/ui";
 import { useEncrypted } from "../lib/data/fetch";
 import type { BetRecord, GradedBet, Performance as PerformanceData } from "../lib/data/types";
@@ -155,7 +155,7 @@ function Recent({ rows }: { rows: GradedBet[] }) {
                 {SIDE_LABEL[r.side] ?? r.side}
                 {r.line !== null ? ` ${r.line}` : ""} {r.market_label}
               </span>{" "}
-              <span className="num">{american(r.price)}</span>
+              <span className="num">{odds(r.price)}</span>
             </span>
             <span className="num flex items-center gap-2 text-xs text-muted">
               {longDate(r.date)} · {r.book_name}

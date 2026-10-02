@@ -28,7 +28,7 @@ export function Unlock() {
   }
 
   return (
-    <div className="mx-auto flex min-h-full max-w-sm flex-col justify-center gap-6 p-6">
+    <main className="mx-auto flex min-h-full max-w-sm flex-col justify-center gap-6 p-6">
       <div>
         <div className="text-2xl font-bold tracking-widest text-accent">RINKX</div>
         <p className="mt-1 text-sm text-muted">This site's data is encrypted. Enter your passphrase to read it.</p>
@@ -57,6 +57,6 @@ export function Unlock() {
       <p className="text-xs text-muted">
         Decryption happens on this device. Your passphrase is never sent anywhere.
       </p>
-    </div>
+    </main>
   );
 }

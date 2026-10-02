@@ -63,3 +63,6 @@ jobs:
         working-directory: web
         env:
           RINKX_PYTHON: python
+      - name: Performance budget (gzip sizes of the built app)
+        run: npm run budget
+        working-directory: web

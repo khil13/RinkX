@@ -1,3 +1,4 @@
+import { coolOffActive, odds, useSettings } from "../lib/settings";
 import type { BookLine, GameLines, Lean, LineMarket, LineRow, Pricing } from "../lib/data/types";
 import { localTime } from "../lib/format";
 import { pct } from "./Projections";
@@ -5,10 +6,7 @@ import { pct } from "./Projections";
 /** Book series colors: categorical slots 1-2 of the validated palette, dark-surface steps. */
 const BOOK_COLORS = ["#3987e5", "#d95926"];
 
-export function american(p: number | null | undefined): string {
-  if (p === null || p === undefined) return "—";
-  return p > 0 ? `+${p}` : `−${Math.abs(p)}`;
-}
+export { odds } from "../lib/settings";
 
 function implied(p: number): number {
   return p > 0 ? 100 / (p + 100) : -p / (-p + 100);
@@ -23,7 +21,7 @@ function sides(kind: LineMarket["kind"]): [string, string] {
 function Price({ value, best }: { value: number | null; best: boolean }) {
   return (
     <span className={best ? "font-semibold text-accent" : ""} title={best ? "Best price" : undefined}>
-      {american(value)}
+      {odds(value)}
       {best && <span className="sr-only"> (best)</span>}
     </span>
   );
@@ -48,7 +46,7 @@ function LeanText({ lean }: { lean: Lean | null }) {
   if (!lean) return <span className="text-xs text-muted">No lean</span>;
   return (
     <span className="whitespace-nowrap text-xs">
-      <span className="font-semibold">{SIDE_LABEL[lean.side]}</span> {american(lean.price)}{" "}
+      <span className="font-semibold">{SIDE_LABEL[lean.side]}</span> {odds(lean.price)}{" "}
       <span className="text-muted">({lean.book_name})</span>
       <br />
       <span className="text-muted">
@@ -147,7 +145,16 @@ function modelPct(r: LineRow): string {
   return priced ? pct(priced.p_model_over) : "—";
 }
 
+function CoolOffNote() {
+  const s = useSettings();
+  return (
+    <p className="text-sm text-muted">Prices are hidden during your cool-off (until {localTime(s.coolOffUntil!)}).</p>
+  );
+}
+
 export function GameLinesPanel({ lines }: { lines: GameLines }) {
+  const cooling = coolOffActive(useSettings());
+  if (cooling) return <CoolOffNote />;
   if (lines.reason) {
     return (
       <p className="text-sm text-muted">
@@ -225,12 +232,12 @@ function Movement({ row }: { row: LineRow }) {
               {s.pts.map((p) => (
                 <circle key={p.at} cx={x(p.at)} cy={y(p.over!)} r={4} fill={s.color} stroke="#18202b" strokeWidth={2}>
                   <title>
-                    {`${s.book} · ${localTime(p.at)} · ${p.line ?? ""} ${american(p.over)} (${pct(implied(p.over!))})`}
+                    {`${s.book} · ${localTime(p.at)} · ${p.line ?? ""} ${odds(p.over)} (${pct(implied(p.over!))})`}
                   </title>
                 </circle>
               ))}
               <text x={W - 48} y={labelY.get(s.book)} className="fill-muted text-[9px]">
-                {american(last.over)}
+                {odds(last.over)}
               </text>
             </g>
           );
@@ -250,6 +257,7 @@ function Movement({ row }: { row: LineRow }) {
 }
 
 export function PlayerLinesPanel({ markets }: { markets: LineMarket[] }) {
+  if (coolOffActive(useSettings())) return <CoolOffNote />;
   return (
     <div className="grid gap-3 sm:grid-cols-2">
       {markets.map((m) =>
@@ -271,7 +279,7 @@ export function PlayerLinesPanel({ markets }: { markets: LineMarket[] }) {
                     <span className="font-sans">{x.book_name}</span>
                     <span>
                       {x.line !== r.line && <span className="text-[10px] text-muted">{x.line} </span>}
-                      {a} {american(x.over)} · {b} {american(x.under)}
+                      {a} {odds(x.over)} · {b} {odds(x.under)}
                     </span>
                   </li>
                 ))}

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router";
-import { american, ConfidenceBreakdown, pts, SIDE_LABEL } from "../components/Lines";
+import { odds, ConfidenceBreakdown, pts, SIDE_LABEL } from "../components/Lines";
 import { pct } from "../components/Projections";
 import { Notice, Panel, Spinner } from "../components/ui";
 import { useEncrypted } from "../lib/data/fetch";
@@ -84,7 +84,7 @@ function PropCard({ r, change, onOpen }: { r: PropRow; change: "new" | "moved" |
         <div className="flex flex-wrap items-baseline justify-between gap-2">
           <span className="text-sm">
             {r.lean ? betText(r) : <span className="text-muted">No lean · {betText(r)}</span>}{" "}
-            <span className="num font-semibold">{american(r.price)}</span>
+            <span className="num font-semibold">{odds(r.price)}</span>
           </span>
           <span className="num text-xs">
             edge {pts(r.edge)} pts · EV {r.ev !== null ? `${r.ev >= 0 ? "+" : "−"}${Math.abs(r.ev).toFixed(2)}u` : "—"} ·
@@ -137,7 +137,7 @@ function Drawer({ r, onClose }: { r: PropRow; onClose: () => void }) {
     <dialog
       ref={ref}
       onClose={onClose}
-      className="m-auto w-[min(36rem,calc(100vw-2rem))] rounded-lg border border-line bg-panel p-0 text-text backdrop:bg-black/60"
+      className="m-auto w-[min(36rem,calc(100vw-2rem))] rounded-lg border border-line bg-panel p-0 text-text backdrop:bg-black/60 max-sm:sheet-in max-sm:mb-0 max-sm:w-full max-sm:max-w-full max-sm:rounded-b-none max-sm:pb-[env(safe-area-inset-bottom)]"
       aria-label="Prop card"
     >
       <div className="flex max-h-[85vh] flex-col gap-3 overflow-y-auto p-4">
@@ -157,7 +157,7 @@ function Drawer({ r, onClose }: { r: PropRow; onClose: () => void }) {
         <dl className="num grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
           <dt className="text-muted">Price</dt>
           <dd>
-            {american(r.price)} at {r.book_name}
+            {odds(r.price)} at {r.book_name}
           </dd>
           <dt className="text-muted">Model</dt>
           <dd>{pct(r.p_model)}</dd>

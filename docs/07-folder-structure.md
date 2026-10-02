@@ -55,9 +55,13 @@ RinkX/
 │   │   │   ├── data/                  # manifest polling, fetch + decrypt, generated types
 │   │   │   ├── crypto.ts              # WebCrypto PBKDF2 / AES-KW / AES-GCM
 │   │   │   ├── parlay.ts              # copula combiner (tested against Python vectors)
+│   │   │   ├── parlayStore.ts         # parlay legs (on this device)
+│   │   │   ├── settings.ts            # odds format, time zone, cool-off (on this device)
 │   │   │   └── format.ts
+│   │   ├── nav.ts                     # site map: pages and the phase that builds each
 │   │   └── styles/
-│   ├── public/                        # manifest.webmanifest, icons (PWA)
+│   ├── public/                        # manifest.webmanifest, PNG/SVG icons, sw.js (network-first offline fallback)
+│   ├── scripts/                       # make-icons.mjs (icons from icon.svg), check-budget.mjs (gzip budget)
 │   └── tests/                         # Vitest + Playwright (iPhone 15 viewport)
 ├── fixtures/
 │   ├── crypto_vectors.json            # shared Python <-> TS crypto test vectors
