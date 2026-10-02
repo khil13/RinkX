@@ -5,6 +5,7 @@ import type { GameDetail, Side } from "../lib/data/types";
 import { clock, localTime, longDate, mmss, num, signed } from "../lib/format";
 import { RestChip, statusLabel } from "./Games";
 import {
+  GameOutlook,
   GoalieLine,
   MODEL_REASON_TEXT,
   QuickEntryLink,
@@ -262,9 +263,17 @@ export function Game() {
             </p>
           )}
         </Panel>
-        <Panel title="Game environment (total, moneyline)">
-          <Missing reason={g.environment_reason} />
-          <p className="mt-1 text-xs text-muted">Odds arrive in Phase 4.</p>
+        <Panel title="Game outlook (model)">
+          {g.projections.environment ? (
+            <GameOutlook env={g.projections.environment} away={g.away.team.abbrev} home={g.home.team.abbrev} />
+          ) : (
+            <p className="text-sm text-muted">
+              {done
+                ? "Projections are made before the game only."
+                : "Not projected: the game model hasn't passed its test on past games yet (see Model Tests)."}
+            </p>
+          )}
+          <p className="mt-1 text-xs text-muted">Sportsbook lines: not connected (Phase 4).</p>
         </Panel>
         <Panel title="Injuries">
           <Missing reason={g.home.injuries_reason} />

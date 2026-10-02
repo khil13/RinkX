@@ -122,6 +122,7 @@ def game_summary(conn: sqlite3.Connection, g: sqlite3.Row) -> dict[str, Any]:
         "away": _side(conn, g, False),
         "environment": None,
         "environment_reason": NOT_CONNECTED,
+        "model": projections.model_summary(conn, g["id"]),  # model win % and goals; not odds
         "fetched_at": g["fetched_at"],
     }
 

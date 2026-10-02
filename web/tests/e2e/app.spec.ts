@@ -204,6 +204,11 @@ test("synthetic league: projections, Explain, and before/after from a Quick Entr
   await expect(page.getByText("CONFIRMED", { exact: true })).toBeVisible(); // away starter, entered via Quick Entry with a source
   await expect(page.getByText(/PROJECTED · \d+%/)).toBeVisible(); // home starter, from recent starts
   await expect(page.getByText(/Lineups aren't confirmed/)).toBeVisible();
+  // Game model: team and game goal totals (tested and passed on this league), no odds involved.
+  const outlook = page.getByLabel("Game outlook");
+  await expect(outlook).toContainText("Total goals");
+  await expect(outlook).toContainText("Model only: no odds are connected");
+  await expect(home.getByText("1st G", { exact: true })).toBeVisible();
 
   await home.getByRole("link").first().click();
   await expect(page.getByText(/^Projection · vs T01/)).toBeVisible();
@@ -222,8 +227,10 @@ test("model tests page shows what passed and what was held back", async ({ page 
   await page.goto(`${MODELS}#/models`);
   await expect(page.getByRole("heading", { name: "Model tests" })).toBeVisible();
   await expect(page.getByRole("article", { name: "Shots on goal test" })).toContainText("PASSED · PUBLISHED");
-  const ga = page.getByRole("article", { name: "Goals against test" });
-  await expect(ga).toContainText("NOT PUBLISHED");
-  await expect(ga).toContainText("Did not clearly beat the simple baselines");
-  await expect(page.getByText(/First Goal: needs the game simulation/)).toBeVisible();
+  const win = page.getByRole("article", { name: "Win probability (moneyline, goalie win) test" });
+  await expect(win).toContainText("NOT PUBLISHED");
+  await expect(win).toContainText("Did not clearly beat the simple baselines");
+  await expect(win).toContainText("vs standings records (log5)");
+  await expect(page.getByRole("article", { name: "First goal scorer test" })).toContainText("PASSED · PUBLISHED");
+  await expect(page.getByText(/Saves \+ Win: needs a joint saves-and-win model/)).toBeVisible();
 });

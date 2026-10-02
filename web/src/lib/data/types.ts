@@ -153,6 +153,8 @@ export interface GameSummary {
   away: Side;
   environment: null;
   environment_reason: Reason;
+  /** Model-only game outlook (no odds); null when not projected or not tested yet. */
+  model: { p_home_win: number | null; goals_home: number | null; goals_away: number | null } | null;
   fetched_at: string;
 }
 
@@ -377,9 +379,31 @@ export interface SideProjections {
   out: { id: number; name: string; reason: string | null; source: string }[];
 }
 
+export interface TotalProjection {
+  mean: number;
+  p_ge: number[];
+  factors: Factor[];
+  reference_mean: number | null;
+}
+
+export interface GameEnvironment {
+  win: {
+    home: number;
+    away: number;
+    tied_after_regulation: number | null;
+    expected_goals: { home: number | null; away: number | null };
+    goalies: Record<string, string> | null;
+    factors: Factor[];
+    previous: { home: number; reason: string } | null;
+  } | null;
+  totals: Partial<Record<"home" | "away" | "game", TotalProjection>>;
+  computed_at: string;
+}
+
 export interface GameProjections {
   models: ModelStatus;
   reason: ModelReason | null;
+  environment: GameEnvironment | null;
   home: SideProjections;
   away: SideProjections;
 }
@@ -404,7 +428,9 @@ export interface StatTest {
   passed: boolean;
   reason: "did_not_beat_baselines" | "miscalibrated" | "insufficient_history" | null;
   log_score?: number;
-  baselines?: { season: Baseline; l10: Baseline };
+  baselines?: Record<string, Baseline>;
+  /** binary stats: Hosmer-Lemeshow p-value (small = miscalibrated) */
+  calibration_p?: number;
   pit?: number[];
   pit_max_dev?: number;
   pit_tolerance?: number;
@@ -413,11 +439,12 @@ export interface StatTest {
   choice?: {
     kind: string;
     factors: string[];
-    half_life_games: number;
-    m: number;
+    half_life_games?: number;
+    m?: number;
     size: number | null;
-    sa_size: number | null;
+    sa_size?: number | null;
     k_sv_shots: number;
+    fin_prior_shots?: number;
   } | null;
 }
 

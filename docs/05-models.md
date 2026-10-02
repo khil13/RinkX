@@ -37,8 +37,10 @@ daily on all loaded history, and the Model Tests page (`/#/models`) shows the re
 * **Goalies.** The projected starter is the goalie with most of the team's last 10 starts, and the start
   probability is his share. A Quick Entry confirmation sets it to 100%. Goalie props are projected only
   for the most likely starter. Opposing skaters' scoring uses the start-weighted mix of goalies.
-* **Not modeled in 1.0:** first goal, goalie win, saves + win, shutout and game lines. They need the game
-  simulation and are listed as "Not modeled yet".
+* **Version 1.1 adds the game model** (`models/game_sim.py`). It covers win probability (moneyline,
+  goalie win), overtime chance, team and game goal totals, goalie shutout, and first goal scorer. Each
+  is published only if it passes its own walk-forward test (§11). See §6 for the formulas.
+* **Not modeled yet:** saves + win, which needs a joint model of the goalie's saves and the result.
 
 ## Module layout
 
@@ -165,17 +167,46 @@ GA       = SA − saves
 
 ## 6. Game environment and simulation (`game_sim`)
 
-1. **Team goal expectations.** Blend (a) model team ratings (shrunk xGF/60, xGA/60 by state, goalie GSAx, home ice, rest/travel) and (b) **market-implied** team totals, solved from the no-vig game total and moneyline. The blend weight is learned walk-forward and disclosed in the Explain view. The market input is the one observed at prediction time and never the closing line.
-2. **Monte Carlo** (≈20k sims per game, vectorized):
-   per period, draw team shots (NB) and goals given shots and the goalie's save probability. Allocate shots, goals and assists to players according to their projected shares (from models 2–3). Then apply OT and shootout rules and pull-the-goalie logic.
-3. **Reconciliation:** player shares are normalized so the per-player marginals from the simulation match the dedicated models' marginals, and both stay consistent with team totals.
-4. **Outputs:** win probability (regulation/OT/SO), shutout, first-goal probabilities, and **joint** outcomes for any set of props in the same game (used by the parlay engine).
+**Built in 1.1, without odds.** Everything below is computed in closed form, so the results carry no
+simulation noise. A test checks the formulas against 400,000 simulated games.
 
-**First goal (closed-form check):** with competing Poisson scoring processes, `P(player i scores first) ≈ (λ_i / Λ) · (1 − e^(−Λ))`, where Λ is the total game goal rate. The simulation result is checked against this.
+1. **Team expected goals.**
+   `λ = league shots/game × team shots-for factor × opponent shots-against factor × league goals/shot
+   × team finishing (shrunk) × opposing goalie (start-weighted mix, shrunk save %) × home/road`.
+   Settings are tuned on the tuning window by team-goal log score: the finishing and save-% prior
+   strengths, which factors to keep, and Poisson vs negative binomial. Explain shows these factors,
+   and they multiply exactly to λ.
+2. **Regulation:** home and away goals are independent NB/Poisson counts.
+3. **Ties after 60 minutes.**
+   * Regular season: an overtime goal happens with probability `q`, the share of past tied games
+     that ended in OT. The goal is split by λ_home : λ_away. Otherwise there is a shootout, and the
+     home team wins it at the past home shootout rate. Both rates are shrunk toward 50/50.
+   * Playoffs: play continues until a goal.
+4. **Derived outputs.**
+   * Win probability, and the chance the game goes past regulation.
+   * Team and game totals, including OT goals. The shootout "goal" is never a goal.
+   * Shutout: the opponent scores in neither regulation nor OT.
+   * First goal: `P(team scores first) × (player's projected goals / team λ)`.
+   * Goalie win and shutout are priced for the projected starter only.
 
-**Environment is not a blanket boost.** A high total raises *team* goal expectations. How that reaches each player depends on the player's share of ice time and offense, and script effects can cut the other way: a heavy favorite's top line may see less TOI in a blowout.
+**Tests and baselines.**
 
----
+| Output | Baselines |
+|---|---|
+| Team goals | Each team's season-average and last-10 Poisson |
+| Win | League home-win rate, and log5 of the two teams' win % with home advantage |
+| Shutout | League shutout rate, and the goalie's season rate |
+| First goal | Equal chance per dressed skater, and season goal share |
+
+Binary outputs also need a Hosmer-Lemeshow calibration p-value above 0.01. In the synthetic tests,
+win probability usually doesn't beat the log5 record baseline by more than chance, so it is held
+back there. That is the gate working as intended, and the same will happen on real data if the
+model can't earn it.
+
+**Later (with odds, Phase 4–5):** blend the model's team totals with market-implied totals,
+weighting the two by walk-forward results, and add same-game joint probabilities for parlays.
+
+**First goal (closed-form check):** with competing Poisson scoring processes, `P(player i scores first) ≈ (λ_i / Λ) · (1 − e^(−Λ))`, where Λ is the total game goal rate.
 
 ## 7. Pricing: model vs. market
 

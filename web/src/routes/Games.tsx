@@ -117,6 +117,14 @@ function GameCard({ g }: { g: GameSummary }) {
             <Missing reason={g.home.goalie_reason} />
           )}
         </span>
+        {g.model?.p_home_win != null && (
+          <span className="num">
+            Model: {g.home.team.abbrev} {Math.round(g.model.p_home_win * 100)}%
+            {g.model.goals_home != null &&
+              g.model.goals_away != null &&
+              ` · goals ${g.model.goals_away.toFixed(1)}–${g.model.goals_home.toFixed(1)}`}
+          </span>
+        )}
         <span>
           Odds: <Missing reason={g.environment_reason} />
         </span>

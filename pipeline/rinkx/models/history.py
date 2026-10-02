@@ -38,6 +38,7 @@ class GoalieLine:
     sa: float | None
     saves: float | None
     ga: float | None
+    shutout: bool | None = None
 
 
 @dataclass
@@ -50,8 +51,24 @@ class GameRecord:
     home_team: int
     away_team: int
     neutral: bool
+    playoff: bool = False
+    # Final score without the shootout "goal" (the NHL adds 1 to the shootout winner).
+    home_goals: int | None = None
+    away_goals: int | None = None
+    ended_in: str | None = None  # 'REG' | 'OT' | 'SO'
+    first_goal_player: int | None = None  # players.id; None if no goal or no play-by-play
+    has_pbp: bool = False
+    home_so_win: bool | None = None
     skaters: list[SkaterLine] = field(default_factory=list)
     goalies: list[GoalieLine] = field(default_factory=list)
+
+    @property
+    def home_won(self) -> bool | None:
+        if self.home_goals is None or self.away_goals is None:
+            return None
+        if self.ended_in == "SO":
+            return bool(self.home_so_win)
+        return self.home_goals > self.away_goals
 
 
 def pos_group(position: str) -> str:
@@ -75,10 +92,30 @@ def load(conn: sqlite3.Connection, before: str | None = None) -> list[GameRecord
     games: dict[int, GameRecord] = {}
     for r in conn.execute(
         "SELECT g.id, g.nhl_game_id, g.game_date, g.start_time_utc, g.season_id, g.home_team_id, g.away_team_id, "
-        f"g.is_neutral_site FROM games g WHERE {cond} ORDER BY g.game_date, g.start_time_utc, g.id",
+        "g.is_neutral_site, g.game_type, g.home_score, g.away_score, g.ended_in, "
+        "(SELECT e.pbp_at FROM game_enrichment e WHERE e.game_id = g.id) "
+        f"FROM games g WHERE {cond} ORDER BY g.game_date, g.start_time_utc, g.id",
         args,
     ):
-        games[r[0]] = GameRecord(r[0], r[1], r[2], r[3], r[4], r[5], r[6], bool(r[7]))
+        rec = GameRecord(r[0], r[1], r[2], r[3], r[4], r[5], r[6], bool(r[7]), playoff=r[8] == "O", ended_in=r[11])
+        hs, aw = r[9], r[10]
+        if hs is not None and aw is not None:
+            if r[11] == "SO":  # the shootout winner's +1 is not a goal
+                rec.home_so_win = hs > aw
+                hs, aw = (hs - 1, aw) if hs > aw else (hs, aw - 1)
+            rec.home_goals, rec.away_goals = int(hs), int(aw)
+        rec.has_pbp = r[12] is not None
+        games[r[0]] = rec
+
+    for gid, shooter in conn.execute(
+        "SELECT e.game_id, e.shooter_id FROM pbp_shot_events e JOIN games g ON g.id = e.game_id "
+        f"WHERE {cond} AND e.event_type = 'goal' AND e.event_idx = (SELECT e2.event_idx FROM pbp_shot_events e2 "
+        "WHERE e2.game_id = e.game_id AND e2.event_type = 'goal' ORDER BY e2.period, e2.period_seconds, "
+        "e2.event_idx LIMIT 1)",
+        args,
+    ):
+        if gid in games:
+            games[gid].first_goal_player = shooter
 
     skaters: dict[int, list[SkaterLine]] = defaultdict(list)
     for r in conn.execute(
@@ -105,12 +142,24 @@ def load(conn: sqlite3.Connection, before: str | None = None) -> list[GameRecord
     goalies: dict[int, list[GoalieLine]] = defaultdict(list)
     for r in conn.execute(
         "SELECT s.game_id, s.player_id, s.team_id, s.opponent_team_id, s.is_home, s.started, s.toi_s, "
-        "s.shots_against, s.saves, s.goals_against FROM goalie_game_stats s JOIN games g ON g.id = s.game_id "
+        "s.shots_against, s.saves, s.goals_against, s.shutout "
+        "FROM goalie_game_stats s JOIN games g ON g.id = s.game_id "
         f"WHERE {cond} ORDER BY s.game_id, s.started DESC, s.player_id",
         args,
     ):
         goalies[r[0]].append(
-            GoalieLine(r[1], r[2], r[3], bool(r[4]), bool(r[5]), _f(r[6]), _f(r[7]), _f(r[8]), _f(r[9]))
+            GoalieLine(
+                r[1],
+                r[2],
+                r[3],
+                bool(r[4]),
+                bool(r[5]),
+                _f(r[6]),
+                _f(r[7]),
+                _f(r[8]),
+                _f(r[9]),
+                None if r[10] is None else bool(r[10]),
+            )
         )
 
     out = []

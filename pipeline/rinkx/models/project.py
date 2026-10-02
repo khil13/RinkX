@@ -21,8 +21,9 @@ from typing import Any
 import numpy as np
 
 from rinkx.ingestion.runs import SourceSpec, ingestion_run, register_source
-from rinkx.models import dist, fit, history
+from rinkx.models import dist, fit, game_sim, history
 from rinkx.models.fit import FAMILY, LABELS, MARKETS, MODEL_VERSION, Choice
+from rinkx.models.game_sim import GameChoice
 from rinkx.models.state import HALF_LIVES, K_SV, State, basis_of, walk
 from rinkx.timeutil import iso, parse_iso
 
@@ -47,6 +48,7 @@ ALGORITHMS = {
     "skater_blocks": "Empirical-Bayes block rate x ice time; Poisson/NB",
     "skater_hits": "Empirical-Bayes hit rate x ice time x arena factor; Poisson/NB",
     "goalie": "Shots against NB x shrunk save % (binomial mixture)",
+    "game_sim": "Team expected goals (shots x finishing x goalie) with OT/shootout rules; closed form",
 }
 
 
@@ -70,7 +72,8 @@ def record_evaluation(conn: sqlite3.Connection, report: dict[str, Any], now: dat
     for family in sorted(set(FAMILY.values())):
         mv = _model_version_id(conn, family)
         stats = {s: e for s, e in report["stats"].items() if e["family"] == family}
-        choices = {s: c for s, c in report["choices"].items() if s in stats}
+        # The game model's shared settings are stored under "game" with the game_sim family.
+        choices = {s: c for s, c in report["choices"].items() if s in stats or (s == "game" and family == "game_sim")}
         passed = any(e.get("passed") for e in stats.values())
         test = report.get("test") or {}
         tune = report.get("tune") or {}
@@ -284,7 +287,8 @@ def explain_skater(f: dict[str, float], ch: Choice, shots: Choice | None, ctx: d
 
 
 def _pct(v: float) -> str:
-    return f"{(v - 1) * 100:+.0f}%"
+    pct = round((v - 1) * 100)
+    return "0%" if pct == 0 else f"{pct:+d}%"
 
 
 def _context_factor(name: str, v: float, stat: str, ctx: dict[str, Any]) -> dict[str, Any]:
@@ -367,6 +371,61 @@ def explain_goalie(f: dict[str, float], ch: Choice, ctx: dict[str, Any]) -> Expl
     return Explained(factors, inputs)
 
 
+def env_factors(gf: dict[str, float], ch: GameChoice, side: str, team: str, opp: str, home: bool) -> Explained:
+    """Team expected goals = league goals per game x the factors below (exact product)."""
+    reference = gf[f"{side}.S"] / (gf[f"{side}.ff"] * gf[f"{side}.fa"]) * gf["gL"]
+    f = [
+        {
+            "name": "Shot volume",
+            "effect": gf[f"{side}.ff"] - 1,
+            "detail": f"{team} takes {_pct(gf[f'{side}.ff'])} shots vs the league average (recent games, shrunk).",
+        },
+        {
+            "name": "Opponent defence",
+            "effect": gf[f"{side}.fa"] - 1,
+            "detail": f"{opp} allows {_pct(gf[f'{side}.fa'])} shots vs the league average.",
+        },
+    ]
+    if "fin" in ch.factors:
+        v = gf[f"{side}.fin.{ch.fin}"]
+        f.append(
+            {
+                "name": "Finishing",
+                "effect": v - 1,
+                "detail": f"{team} scores on {_pct(v)} of shots vs the league (shrunk; mostly noise short-term).",
+            }
+        )
+    if "goalie" in ch.factors:
+        v = gf[f"{side}.gf.{ch.k_sv}"]
+        f.append(
+            {
+                "name": "Opposing goalie",
+                "effect": v - 1,
+                "detail": f"{opp}'s expected starter allows {_pct(v)} goals per shot vs the league.",
+            }
+        )
+    if "home" in ch.factors:
+        v = gf[f"{side}.home"]
+        f.append(
+            {
+                "name": "Home ice" if home else "Road game",
+                "effect": v - 1,
+                "detail": f"League-wide, scoring runs {_pct(v)} {'at home' if home else 'on the road'}.",
+            }
+        )
+    return Explained(f, {"reference_mean": round(reference, 5)})
+
+
+@dataclass
+class GameProjection:
+    market: str
+    side: str
+    mean: float
+    pmf: list[float]
+    inputs: dict[str, Any]
+    factors: list[dict[str, Any]]
+
+
 # ---- projecting -----------------------------------------------------------------------------
 
 
@@ -405,9 +464,23 @@ def _quality(games: float, missing: list[str]) -> float:
     return round(max(q, 0.1), 2)
 
 
-def project_game(conn: sqlite3.Connection, st: State, report: dict[str, Any], g: sqlite3.Row) -> list[Projection]:
+def _yes_no(p: float) -> tuple[list[float], dict[str, float]]:
+    p = min(max(p, 0.0), 1.0)
+    return [round(1 - p, 5), round(p, 5)], {"mean": p, "median": float(p >= 0.5), "sd": math.sqrt(p * (1 - p))}
+
+
+def project_game(
+    conn: sqlite3.Connection, st: State, report: dict[str, Any], g: sqlite3.Row
+) -> tuple[list[Projection], list[GameProjection]]:
     """Projections for one upcoming game (only stats whose model passed its test)."""
-    choices = {s: Choice.from_json(c) for s, c in report["choices"].items() if report["stats"][s].get("passed")}
+    choices = {
+        s: Choice.from_json(c)
+        for s, c in report["choices"].items()
+        if s in report["stats"] and s not in game_sim.GAME_STATS and report["stats"][s].get("passed")
+    }
+    game_passed = {s for s in game_sim.GAME_STATS if report["stats"].get(s, {}).get("passed")}
+    goals_json = report["choices"].get("goals")
+    goals_ch = Choice.from_json(goals_json) if goals_json else None
     shots_all = report["choices"].get("shots")
     shots = Choice.from_json(shots_all) if shots_all else None
     out = players_out(conn, g["id"])
@@ -420,6 +493,16 @@ def project_game(conn: sqlite3.Connection, st: State, report: dict[str, Any], g:
             names[pid] = conn.execute("SELECT full_name FROM players WHERE id = ?", (pid,)).fetchone()[0]
     arena = None if g["is_neutral_site"] else g["home_team_id"]
     projections: list[Projection] = []
+    game_projs: list[GameProjection] = []
+    env: game_sim.Outcomes | None = None
+    gf: dict[str, float] = {}
+    gch: GameChoice | None = None
+    if game_passed and "game" in report["choices"]:
+        gch = GameChoice.from_json(report["choices"]["game"])
+        gf = st.game_features(
+            g["home_team_id"], g["away_team_id"], {t: m.mix for t, m in mixes.items()}, g["season_id"]
+        ) | {"playoff": float(g["game_type"] == "O")}
+        env = game_sim.outcomes(_one(gf), gch)
     for team, home in teams.items():
         opp = g["away_team_id"] if home else g["home_team_id"]
         opp_mix = mixes[opp]
@@ -451,6 +534,47 @@ def project_game(conn: sqlite3.Connection, st: State, report: dict[str, Any], g:
             pos = history.pos_group(position)
             f = st.skater_features(pid, pos, team, opp, home, arena, opp_mix.mix, g["season_id"])
             ctx = ctx_base | {"pos": "defenceman" if pos == "D" else "forward"}
+            if env is not None and gch is not None and "first_goal" in game_passed and goals_ch is not None:
+                side = "h" if home else "a"
+                lam_t = float((env.lam_h if home else env.lam_a)[0])
+                first_t = float((env.p_home_first if home else env.p_away_first)[0])
+                lam_i = float(fit.skater_mean(_one(f), goals_ch, shots)[0])
+                share = lam_i / lam_t
+                pmf_fg, sm_fg = _yes_no(min(first_t, first_t * share))
+                fg_factors = [
+                    {
+                        "name": "His share of team goals",
+                        "effect": 0.0,
+                        "detail": f"Projects {lam_i:.2f} goals of {abbrev[team]}'s {lam_t:.2f} ({share:.0%}).",
+                    },
+                    {
+                        "name": "Team scores first",
+                        "effect": 0.0,
+                        "detail": f"{abbrev[team]} scores the first goal {first_t:.0%} of the time.",
+                    },
+                ]
+                fg_factors += env_factors(gf, gch, side, abbrev[team], abbrev[opp], home).factors
+                miss = [m for m in missing_common]
+                projections.append(
+                    Projection(
+                        pid,
+                        "skater_first_goal",
+                        "first_goal",
+                        pmf_fg,
+                        sm_fg["mean"],
+                        sm_fg["median"],
+                        sm_fg["sd"],
+                        fg_factors,
+                        {
+                            "team_scores_first": round(first_t, 4),
+                            "share_of_team_goals": round(share, 4),
+                            "expected_team_goals": round(lam_t, 3),
+                            "games_in_history": int(f["games"]),
+                        },
+                        _quality(f["games"], miss),
+                        miss,
+                    )
+                )
             for stat, ch in choices.items():
                 if ch.kind == "goalie":
                     continue
@@ -508,7 +632,88 @@ def project_game(conn: sqlite3.Connection, st: State, report: dict[str, Any], g:
                                 miss,
                             )
                         )
-    return projections
+                if env is not None and gch is not None:
+                    side = "h" if home else "a"
+                    win = float(env.p_home_win[0]) if home else 1 - float(env.p_home_win[0])
+                    so = float((env.so_home if home else env.so_away)[0])
+                    miss = ([] if mine.status == "confirmed" else ["goalie_unconfirmed"]) + ["odds_not_connected"]
+                    own = env_factors(gf, gch, side, abbrev[team], abbrev[opp], home).factors
+                    other = env_factors(gf, gch, "a" if home else "h", abbrev[opp], abbrev[team], not home).factors
+                    base_inputs = {
+                        "start_probability": round(prob, 3),
+                        "start_status": mine.status,
+                        "expected_goals_for": round(float((env.lam_h if home else env.lam_a)[0]), 3),
+                        "expected_goals_against": round(float((env.lam_a if home else env.lam_h)[0]), 3),
+                    }
+                    for stat, market, pval in (("win", "goalie_win", win), ("shutout", "goalie_shutout", so)):
+                        if stat not in game_passed:
+                            continue
+                        pm, sm = _yes_no(pval)
+                        facts = own if stat == "win" else [{**x, "name": f"{abbrev[opp]}: {x['name']}"} for x in other]
+                        projections.append(
+                            Projection(
+                                gid,
+                                market,
+                                stat,
+                                pm,
+                                sm["mean"],
+                                sm["median"],
+                                sm["sd"],
+                                facts,
+                                base_inputs | {"tied_after_regulation": round(float(env.p_tied_reg[0]), 4)},
+                                _quality(f["starts"], miss),
+                                miss,
+                            )
+                        )
+    if env is not None and gch is not None:
+        abbr_h, abbr_a = abbrev[g["home_team_id"]], abbrev[g["away_team_id"]]
+        ex_h = env_factors(gf, gch, "h", abbr_h, abbr_a, True)
+        ex_a = env_factors(gf, gch, "a", abbr_a, abbr_h, False)
+        common = {
+            "expected_goals_home": round(float(env.lam_h[0]), 3),
+            "expected_goals_away": round(float(env.lam_a[0]), 3),
+            "tied_after_regulation": round(float(env.p_tied_reg[0]), 4),
+            "ot_goal_rate": round(gf["ot_q"], 4),
+            "home_shootout_win_rate": round(gf["so_home"], 4),
+            "goalies": {("home" if teams[t] else "away"): mixes[t].status for t in teams},
+        }
+        if "win" in game_passed:
+            p_home = float(env.p_home_win[0])
+            game_projs.append(
+                GameProjection(
+                    "game_moneyline",
+                    "home",
+                    p_home,
+                    [round(1 - p_home, 5), round(p_home, 5)],
+                    common,
+                    ex_h.factors + [{**x, "name": f"{abbr_a}: {x['name']}"} for x in ex_a.factors],
+                )
+            )
+        if "team_goals" in game_passed:
+            for side, ex, mat in (("home", ex_h, env.home_total), ("away", ex_a, env.away_total)):
+                pm = mat[0]
+                game_projs.append(
+                    GameProjection(
+                        "team_total",
+                        side,
+                        float((pm * np.arange(len(pm))).sum()),
+                        _pmf_json(pm),
+                        common | ex.inputs,
+                        ex.factors,
+                    )
+                )
+            pm = env.game_total[0]
+            game_projs.append(
+                GameProjection(
+                    "game_total",
+                    "game",
+                    float((pm * np.arange(len(pm))).sum()),
+                    _pmf_json(pm),
+                    common,
+                    ex_h.factors + ex_a.factors,
+                )
+            )
+    return projections, game_projs
 
 
 def save(conn: sqlite3.Connection, game_id: int, proj: Projection, as_of: str, reason: str, now: datetime) -> bool:
@@ -555,6 +760,42 @@ def save(conn: sqlite3.Connection, game_id: int, proj: Projection, as_of: str, r
     return True
 
 
+def save_game(
+    conn: sqlite3.Connection, game_id: int, gp: GameProjection, as_of: str, reason: str, now: datetime
+) -> bool:
+    market_id = conn.execute("SELECT id FROM markets WHERE code = ?", (gp.market,)).fetchone()[0]
+    pmf_text = json.dumps({"min": 0, "p": gp.pmf}, separators=(",", ":"))
+    inputs_text = json.dumps(gp.inputs, separators=(",", ":"))
+    cur = conn.execute(
+        "SELECT id, pmf, inputs FROM game_projections WHERE game_id = ? AND market_id = ? AND side = ? "
+        "AND is_current = 1",
+        (game_id, market_id, gp.side),
+    ).fetchone()
+    if cur and cur[1] == pmf_text and cur[2] == inputs_text:
+        return False
+    if cur:
+        conn.execute("UPDATE game_projections SET is_current = 0 WHERE id = ?", (cur[0],))
+    conn.execute(
+        "INSERT INTO game_projections (game_id, market_id, side, model_version_id, computed_at, as_of, mean, pmf, "
+        "inputs, factors, trigger_reason, supersedes) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+        (
+            game_id,
+            market_id,
+            gp.side,
+            _model_version_id(conn, "game_sim"),
+            iso(now),
+            as_of,
+            round(gp.mean, 4),
+            pmf_text,
+            inputs_text,
+            json.dumps([x | {"effect": round(x["effect"], 4)} for x in gp.factors]),
+            reason,
+            cur[0] if cur else None,
+        ),
+    )
+    return True
+
+
 def _upcoming(conn: sqlite3.Connection, now: datetime, today: date) -> list[sqlite3.Row]:
     return conn.execute(
         "SELECT * FROM games WHERE game_type IN ('R','O') AND status IN ('scheduled','pregame') "
@@ -575,8 +816,22 @@ def project_upcoming(
     """Returns (projections written, games projected)."""
     written = games = 0
     for g in _upcoming(conn, now, today):
-        projs = project_game(conn, st, report, g)
+        projs, game_projs = project_game(conn, st, report, g)
         games += 1
+        keep_game = {(gp.market, gp.side) for gp in game_projs}
+        for mcode, side in conn.execute(
+            "SELECT m.code, p.side FROM game_projections p JOIN markets m ON m.id = p.market_id "
+            "WHERE p.game_id = ? AND p.is_current = 1",
+            (g["id"],),
+        ).fetchall():
+            if (mcode, side) not in keep_game:
+                conn.execute(
+                    "UPDATE game_projections SET is_current = 0 WHERE game_id = ? AND side = ? AND is_current = 1 "
+                    "AND market_id = (SELECT id FROM markets WHERE code = ?)",
+                    (g["id"], side, mcode),
+                )
+        for gp in game_projs:
+            written += save_game(conn, g["id"], gp, as_of, reasons.get(g["id"], "scheduled"), now)
         keep = {(p.player, p.market) for p in projs}
         # A player ruled out (or a market that stopped passing its test) loses its current projection.
         for pid, mcode in conn.execute(
@@ -602,7 +857,11 @@ def prune(conn: sqlite3.Connection, today: date) -> int:
         "AND id NOT IN (SELECT projection_id FROM predictions)",
         (cutoff,),
     )
-    return cur.rowcount
+    n = cur.rowcount
+    cur = conn.execute(
+        "DELETE FROM game_projections WHERE game_id IN (SELECT id FROM games WHERE game_date < ?)", (cutoff,)
+    )
+    return n + cur.rowcount
 
 
 def _needs_evaluation(conn: sqlite3.Connection, now: datetime) -> bool:

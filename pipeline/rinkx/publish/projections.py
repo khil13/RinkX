@@ -11,7 +11,7 @@ import sqlite3
 from typing import Any
 
 from rinkx.models import project
-from rinkx.models.fit import LABELS, MARKETS, MODEL_VERSION
+from rinkx.models.fit import GAME_MARKETS, LABELS, MARKETS, MODEL_VERSION
 
 P_GE_MAX = 40  # P(X >= k) published for k up to this (saves need ~40)
 MARKET_ORDER = list(MARKETS)
@@ -36,7 +36,7 @@ def _market_rows(conn: sqlite3.Connection, where: str, args: tuple[Any, ...]) ->
 
 def _market(r: sqlite3.Row, full: bool) -> dict[str, Any]:
     p = json.loads(r["pmf"])["p"]
-    tail = [round(max(0.0, 1 - sum(p[:k])), 4) for k in range(min(len(p), P_GE_MAX) + 1)]
+    tail = _p_ge(p)
     out: dict[str, Any] = {
         "market": r["market"],
         "label": r["market_name"],
@@ -70,6 +70,64 @@ def _market(r: sqlite3.Row, full: bool) -> dict[str, Any]:
 
 def _order(code: str) -> int:
     return MARKET_ORDER.index(code) if code in MARKET_ORDER else 99
+
+
+def _p_ge(p: list[float]) -> list[float]:
+    return [round(max(0.0, 1 - sum(p[:k])), 4) for k in range(min(len(p), P_GE_MAX) + 1)]
+
+
+def game_environment(conn: sqlite3.Connection, game_pk: int) -> dict[str, Any] | None:
+    """Model game environment: win probability and goal totals (no odds involved)."""
+    rows = conn.execute(
+        "SELECT gp.*, m.code AS market, old.mean AS prev_mean FROM game_projections gp "
+        "JOIN markets m ON m.id = gp.market_id LEFT JOIN game_projections old ON old.id = gp.supersedes "
+        "WHERE gp.game_id = ? AND gp.is_current = 1",
+        (game_pk,),
+    ).fetchall()
+    if not rows:
+        return None
+    out: dict[str, Any] = {"win": None, "totals": {}, "computed_at": max(r["computed_at"] for r in rows)}
+    for r in rows:
+        inputs = json.loads(r["inputs"])
+        if r["market"] == "game_moneyline":
+            out["win"] = {
+                "home": round(r["mean"], 4),
+                "away": round(1 - r["mean"], 4),
+                "tied_after_regulation": inputs.get("tied_after_regulation"),
+                "expected_goals": {
+                    "home": inputs.get("expected_goals_home"),
+                    "away": inputs.get("expected_goals_away"),
+                },
+                "goalies": inputs.get("goalies"),
+                "factors": json.loads(r["factors"]),
+                "previous": (
+                    {"home": round(r["prev_mean"], 4), "reason": REASON_TEXT[r["trigger_reason"]]}
+                    if r["prev_mean"] is not None and r["trigger_reason"] in REASON_TEXT
+                    else None
+                ),
+            }
+        else:
+            p = json.loads(r["pmf"])["p"]
+            out["totals"][r["side"]] = {
+                "mean": round(r["mean"], 3),
+                "p_ge": _p_ge(p),
+                "factors": json.loads(r["factors"]),
+                "reference_mean": inputs.get("reference_mean"),
+            }
+    return out
+
+
+def model_summary(conn: sqlite3.Connection, game_pk: int) -> dict[str, Any] | None:
+    """Compact version for slate cards."""
+    env = game_environment(conn, game_pk)
+    if env is None:
+        return None
+    t = env["totals"]
+    return {
+        "p_home_win": env["win"]["home"] if env["win"] else None,
+        "goals_home": t["home"]["mean"] if "home" in t else None,
+        "goals_away": t["away"]["mean"] if "away" in t else None,
+    }
 
 
 def model_status(conn: sqlite3.Connection) -> dict[str, Any]:
@@ -123,7 +181,7 @@ def game_projections(conn: sqlite3.Connection, g: sqlite3.Row) -> dict[str, Any]
         reason = "no_model_passed"
     else:
         reason = "outside_window"
-    return {"models": status, "reason": reason, **sides}
+    return {"models": status, "reason": reason, "environment": game_environment(conn, g["id"]), **sides}
 
 
 def _out_list(conn: sqlite3.Connection, out_players: dict[int, dict[str, Any]], team: int) -> list[dict[str, Any]]:
@@ -214,12 +272,12 @@ def models_report(conn: sqlite3.Connection) -> dict[str, Any]:
     report, created = project.latest_report(conn)
     markets = {
         m: {"stat": s, "label": conn.execute("SELECT name FROM markets WHERE code = ?", (m,)).fetchone()[0]}
-        for m, s in MARKETS.items()
+        for m, s in (MARKETS | GAME_MARKETS).items()
     }
     not_modeled = [
-        {"market": code, "label": name, "reason": "game_simulation_not_built"}
+        {"market": code, "label": name, "reason": "joint_model_not_built"}
         for code, name in conn.execute("SELECT code, name FROM markets ORDER BY id")
-        if code not in MARKETS
+        if code not in MARKETS and code not in GAME_MARKETS
     ]
     if report is None:
         return {

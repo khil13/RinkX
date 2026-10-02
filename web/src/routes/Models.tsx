@@ -3,6 +3,17 @@ import { useEncrypted } from "../lib/data/fetch";
 import type { ModelsReport, StatTest } from "../lib/data/types";
 import { longDate, localTime } from "../lib/format";
 
+const BASELINE_LABEL: Record<string, string> = {
+  season: "season average",
+  l10: "last-10 average",
+  home_rate: "home-team win rate",
+  log5_record: "standings records (log5)",
+  league_rate: "league shutout rate",
+  goalie_season_rate: "goalie's season shutout rate",
+  equal_chance: "equal chance per skater",
+  season_goal_share: "season goal share",
+};
+
 const REASON: Record<string, string> = {
   did_not_beat_baselines: "Did not clearly beat the simple baselines",
   miscalibrated: "Probabilities were not well calibrated",
@@ -17,6 +28,7 @@ const FACTOR_NAMES: Record<string, string> = {
   venue: "arena scorekeeping",
   fd: "own defence",
   fo: "opponent offence",
+  fin: "team finishing",
 };
 
 function Pit({ hist }: { hist: number[] }) {
@@ -35,7 +47,7 @@ function Pit({ hist }: { hist: number[] }) {
   );
 }
 
-function Diff({ label, b }: { label: string; b: NonNullable<StatTest["baselines"]>["season"] }) {
+function Diff({ label, b }: { label: string; b: NonNullable<StatTest["baselines"]>[string] }) {
   const d = b.model_minus_baseline;
   const better = d.lo > 0;
   return (
@@ -68,14 +80,20 @@ function StatCard({ stat, t }: { stat: string; t: StatTest }) {
       </p>
       {t.baselines && (
         <div className="flex flex-col gap-0.5">
-          <Diff label="season average" b={t.baselines.season} />
-          <Diff label="last-10 average" b={t.baselines.l10} />
+          {Object.entries(t.baselines).map(([k, b]) => (
+            <Diff key={k} label={BASELINE_LABEL[k] ?? k} b={b} />
+          ))}
         </div>
       )}
       {t.mean_pred !== undefined && (
         <p className="num text-xs">
-          <span className="text-muted">Average projected</span> {t.mean_pred.toFixed(2)}{" "}
-          <span className="text-muted">· actual</span> {t.mean_actual?.toFixed(2)}
+          <span className="text-muted">Average projected</span> {t.mean_pred.toFixed(t.mean_pred < 1 ? 3 : 2)}{" "}
+          <span className="text-muted">· actual</span> {t.mean_actual?.toFixed(t.mean_pred < 1 ? 3 : 2)}
+        </p>
+      )}
+      {t.calibration_p !== undefined && (
+        <p className="text-[11px] text-muted">
+          Calibration test p = {t.calibration_p.toFixed(3)} (below 0.01 would mean the probabilities were off).
         </p>
       )}
       {t.pit && (
@@ -89,8 +107,14 @@ function StatCard({ stat, t }: { stat: string; t: StatTest }) {
       )}
       {t.choice && (
         <p className="text-[11px] text-muted">
-          {t.choice.kind === "finish" ? "Shots × finishing rate" : t.choice.kind === "goalie" ? "Shots against × save %" : "Rate × ice time"}
-          {t.choice.kind === "goalie"
+          {t.choice.kind === "finish"
+            ? "Shots × finishing rate"
+            : t.choice.kind === "goalie"
+              ? "Shots against × save %"
+              : t.choice.kind === "game"
+                ? "Team shots × finishing × goalie, with OT/shootout rules"
+                : "Rate × ice time"}
+          {t.choice.kind === "goalie" || t.choice.kind === "game"
             ? ` · save % pulled toward league with ${t.choice.k_sv_shots} shots of weight`
             : ` · recency half-life ${t.choice.half_life_games} games`}
           {t.choice.factors.length > 0 && ` · factors kept: ${t.choice.factors.map((f) => FACTOR_NAMES[f] ?? f).join(", ")}`}
@@ -173,7 +197,7 @@ export function Models() {
         <Panel title="Not modeled yet">
           <ul className="text-sm text-muted">
             {r.not_modeled.map((m) => (
-              <li key={m.market}>{m.label}: needs the game simulation (later phase)</li>
+              <li key={m.market}>{m.label}: needs a joint saves-and-win model (later)</li>
             ))}
           </ul>
         </Panel>

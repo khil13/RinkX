@@ -1,0 +1,10 @@
+# Sportsbooks you use. Phase 4 fetches and shows lines only for these (other books are ignored,
+# which also saves odds-API credits). Edit in the GitHub app; takes effect on the next run.
+jurisdiction: NJ
+books:
+  - code: fanduel
+    name: FanDuel
+  - code: betmgm
+    name: BetMGM
+# Odds feed: not connected yet (owner's choice, 2026-10-02). Phase 4 starts on The Odds API free tier
+# once an ODDS_API_KEY secret is added.

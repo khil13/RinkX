@@ -114,11 +114,13 @@ def build(
                 (nhl_id, season, day.isoformat(), f"{day.isoformat()}T23:00:00Z", home, away, src, FETCHED),
             )
             gid = conn.execute("SELECT id FROM games WHERE nhl_game_id = ?", (nhl_id,)).fetchone()[0]
+            lines: dict[int, list[list[float]]] = {}
+            starters: dict[int, int] = {}
             for team, opp, is_home in ((home, away, 1), (away, home, 0)):
                 starter = truth.goalies[opp][0 if rng.random() < 0.7 else 1]  # opposing goalie
-                team_shots = 0
-                team_goals = 0
-                for pk, _pos, toi_min, shot_rate, sh_pct, hit_rate in roster[team]:
+                starters[opp] = starter
+                rows = []
+                for pk, pos, toi_min, shot_rate, sh_pct, hit_rate in roster[team]:
                     toi = max(5.0, rng.normal(toi_min, 2.0)) * 60
                     pp = max(0.0, rng.normal(2.0 if toi_min > 17 else 0.3, 0.5)) * 60
                     lam = shot_rate * (toi / 3600) * defence[opp] * (1.03 if is_home else 0.97)
@@ -130,36 +132,98 @@ def build(
                     ppa = int(rng.binomial(assists, min(1.0, pp / max(toi, 1) * 3)))
                     hl = hit_rate * (toi / 3600) * arena_hits[home]
                     hits = int(rng.negative_binomial(4, 4 / (4 + hl)))
-                    blocks = int(rng.poisson((2.5 if _pos == "D" else 1.0) * toi / 3600 * defence[opp] * 1.5))
+                    blocks = int(rng.poisson((2.5 if pos == "D" else 1.0) * toi / 3600 * defence[opp] * 1.5))
+                    rows.append([pk, toi, pp, goals, assists, ppg, ppa, shots, hits, blocks])
+                lines[team] = rows
+            score = {t: sum(r[3] for r in rows) for t, rows in lines.items()}
+            ended, so_winner, ot_scorer = "REG", None, None
+            if score[home] == score[away]:
+                winner = home if rng.random() < 0.52 else away
+                if rng.random() < 0.6:  # overtime goal
+                    ended = "OT"
+                    w = np.array([max(r[7], 0.1) for r in lines[winner]])
+                    ot_row = lines[winner][int(rng.choice(len(w), p=w / w.sum()))]
+                    ot_row[3] += 1
+                    ot_row[7] += 1
+                    ot_scorer = int(ot_row[0])
+                    score[winner] += 1
+                else:
+                    ended, so_winner = "SO", winner
+            events: list[tuple[float, int, int]] = []  # (game second, team, shooter)
+            for team, rows in lines.items():
+                for r in rows:
+                    n_reg = r[3] - (1 if ot_scorer == r[0] else 0)
+                    events += [(float(rng.uniform(0, 3600)), team, int(r[0])) for _ in range(n_reg)]
+            if ot_scorer is not None:
+                events.append((3600 + float(rng.uniform(0, 300)), winner, ot_scorer))
+            events.sort()
+            for idx, (sec, team, shooter) in enumerate(events):
+                period = min(int(sec // 1200) + 1, 4)
+                conn.execute(
+                    "INSERT INTO pbp_shot_events (game_id, event_idx, period, period_seconds, event_type, shooter_id, "
+                    "team_id, source_id, fetched_at) VALUES (?, ?, ?, ?, 'goal', ?, ?, ?, ?)",
+                    (gid, idx, period, int(sec - (period - 1) * 1200), shooter, team, src, FETCHED),
+                )
+            conn.execute("INSERT INTO game_enrichment (game_id, pbp_at) VALUES (?, ?)", (gid, FETCHED))
+            for team, opp, is_home in ((home, away, 1), (away, home, 0)):
+                team_shots = 0
+                for pk, toi, pp, goals, assists, ppg, ppa, shots, hits, blocks in lines[team]:
                     team_shots += shots
-                    team_goals += goals
                     conn.execute(
                         "INSERT INTO player_game_stats (player_id, game_id, team_id, opponent_team_id, is_home, toi_s, "
                         "ev_toi_s, pp_toi_s, sh_toi_s, goals, assists, pp_goals, pp_assists, shots, hits, "
                         "blocked_shots, provenance, quality, source_id, fetched_at) "
                         "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, 'synthetic', 1, ?, ?)",
-                        (pk, gid, team, opp, is_home, int(toi), int(toi - pp), int(pp), goals, assists, ppg, ppa,
-                         shots, hits, blocks, src, FETCHED),
-                    )  # fmt: skip
-                saves = team_shots - team_goals
+                        (
+                            pk,
+                            gid,
+                            team,
+                            opp,
+                            is_home,
+                            int(toi),
+                            int(toi - pp),
+                            int(pp),
+                            goals,
+                            assists,
+                            ppg,
+                            ppa,
+                            shots,
+                            hits,
+                            blocks,
+                            src,
+                            FETCHED,
+                        ),
+                    )
+                team_goals = score[team]
                 conn.execute(
                     "INSERT INTO goalie_game_stats (player_id, game_id, team_id, opponent_team_id, is_home, started, "
-                    "toi_s, shots_against, saves, goals_against, provenance, quality, source_id, fetched_at) "
-                    "VALUES (?, ?, ?, ?, ?, 1, 3600, ?, ?, ?, 'synthetic', 1, ?, ?)",
-                    (starter, gid, opp, team, 1 - is_home, team_shots, saves, team_goals, src, FETCHED),
+                    "toi_s, shots_against, saves, goals_against, shutout, provenance, quality, source_id, fetched_at) "
+                    "VALUES (?, ?, ?, ?, ?, 1, 3600, ?, ?, ?, ?, 'synthetic', 1, ?, ?)",
+                    (
+                        starters[opp],
+                        gid,
+                        opp,
+                        team,
+                        1 - is_home,
+                        team_shots,
+                        team_shots - team_goals,
+                        team_goals,
+                        int(team_goals == 0),
+                        src,
+                        FETCHED,
+                    ),
                 )
                 conn.execute(
                     "INSERT INTO team_game_stats (team_id, game_id, opponent_team_id, is_home, goals_for, shots_for, "
                     "provenance, source_id, fetched_at) VALUES (?, ?, ?, ?, ?, ?, 'synthetic', ?, ?)",
                     (team, gid, opp, is_home, team_goals, team_shots, src, FETCHED),
                 )
-            hs = conn.execute(
-                "SELECT goals_for FROM team_game_stats WHERE game_id = ? AND team_id = ?", (gid, home)
-            ).fetchone()[0]
-            aw = conn.execute(
-                "SELECT goals_for FROM team_game_stats WHERE game_id = ? AND team_id = ?", (gid, away)
-            ).fetchone()[0]
-            conn.execute("UPDATE games SET home_score = ?, away_score = ? WHERE id = ?", (hs, aw, gid))
+            hs, aw = score[home], score[away]
+            if so_winner is not None:  # the NHL adds the shootout "goal" to the final score
+                hs, aw = (hs + 1, aw) if so_winner == home else (hs, aw + 1)
+            conn.execute(
+                "UPDATE games SET home_score = ?, away_score = ?, ended_in = ? WHERE id = ?", (hs, aw, ended, gid)
+            )
     conn.commit()
     return conn, truth
 
