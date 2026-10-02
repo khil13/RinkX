@@ -66,8 +66,9 @@ The requested core table list maps onto this schema, except `users`, which is un
 5. **Data quality is first-class.** Stat rows carry `provenance` and `quality`. Projections carry `data_quality` and `missing_inputs[]`. A `data_quality_issues` queue feeds the admin dashboard.
 6. **Enrichment.** `game_enrichment` records when each game's play-by-play and stats-API reports were applied, so each runs once. Teammate-blocked shots follow the official convention, verified against the box score and stats API: they count as the shooter's blocked attempt but not as anyone's blocked shot (`is_teammate_block = 1`, `blocker_id` NULL).
 7. **Quick Entry** *(migration 0005)*. `game_availability` records a player ruled out of, or back into, one game, with a mandatory source URL. `quick_entries` logs each processed issue, so it is applied exactly once. Projections for games more than 14 days old are pruned, unless a prediction references them.
-8. **Size management.** `line_movements` stores only changes, and only for books enabled in `config/books.yml`. At season end, its rows are exported to a Parquet Release asset and pruned from SQLite. Stats and PBP tables stay small, at under 200k rows per season per table.
-9. **One champion per model family.** A partial unique index on `model_versions(model_family) WHERE status='champion'` makes promotion an atomic swap.
+8. **Game projections** *(migration 0006)*. `game_projections` holds game- and team-level outputs: moneyline win probability, team totals and the game total. It follows the same immutable supersede chain as `player_projections`.
+9. **Size management.** `line_movements` stores only changes, and only for books enabled in `config/books.yml`. At season end, its rows are exported to a Parquet Release asset and pruned from SQLite. Stats and PBP tables stay small, at under 200k rows per season per table.
+10. **One champion per model family.** A partial unique index on `model_versions(model_family) WHERE status='champion'` makes promotion an atomic swap.
 
 ## Prop catalogue (seeded)
 

@@ -31,6 +31,8 @@ K_SV: tuple[float, ...] = (500.0, 1500.0, 4000.0)  # save %: prior strength in s
 PP_STATS = frozenset({"pp_points", "pp_goals", "pp_assists"})
 VENUE_STATS = ("hits", "blocks")
 POS_TOI_FALLBACK_H = {"F": 15.5 / 60, "D": 21.0 / 60}  # only used before any game is loaded
+FIN_C: tuple[float, ...] = (150.0, 500.0, 1500.0)  # team finishing %: prior strength in shots
+EVEN_PRIOR = 10.0  # OT/shootout splits: shrink toward 50/50 by this many games
 
 
 def basis_of(stat: str) -> str:
@@ -68,6 +70,7 @@ class GoalieState:
     starts: int = 0
     season: dict[int, dict[str, list[float]]] = field(default_factory=dict)  # starts only
     recent: dict[str, deque[float]] = field(default_factory=lambda: {s: deque(maxlen=10) for s in GOALIE_STATS})
+    last_team: int | None = None
 
 
 @dataclass
@@ -92,6 +95,8 @@ class TeamState:
     nr: float = 0.0
     home_tot: dict[str, float] = field(default_factory=lambda: dict.fromkeys(VENUE_STATS, 0.0))
     road_tot: dict[str, float] = field(default_factory=lambda: dict.fromkeys(VENUE_STATS, 0.0))
+    record: dict[int, list[float]] = field(default_factory=dict)  # season -> [games, wins, goals]
+    recent_goals: deque[float] = field(default_factory=lambda: deque(maxlen=10))
 
 
 @dataclass
@@ -105,6 +110,13 @@ class League:
     sa: float = 0.0
     starter_sa: float = 0.0
     starts: float = 0.0
+    shutouts: float = 0.0  # starts that were shutouts
+    so_known: float = 0.0  # starts with a known shutout flag
+    games: float = 0.0  # final scores known
+    home_wins: float = 0.0
+    tied_reg: float = 0.0  # regular-season games tied after regulation
+    ended_ot: float = 0.0
+    so_home_wins: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -273,6 +285,73 @@ class State:
             f[f"fallback.{s}"] = fallback[s]
         return f
 
+    # ---- game level (team scoring, OT/SO, shutouts) ----------------------------------------
+
+    def goals_per_shot(self) -> float:
+        lg = self.league
+        return lg.team_tot["goals"] / lg.team_tot["shots"] if lg.team_tot["shots"] else 0.0
+
+    def team_features(
+        self, team: int, opp: int, home: bool, opp_goalies: list[tuple[int, float]], season: int, p: str
+    ) -> dict[str, float]:
+        """Expected-goal ingredients for `team` against `opp` (prefix p = 'h' or 'a')."""
+        f: dict[str, float] = {}
+        f[f"{p}.ff"] = self.team_factor(team, "shots", "for")
+        f[f"{p}.fa"] = self.team_factor(opp, "shots", "against")
+        f[f"{p}.S"] = self.team_avg("shots") * f[f"{p}.ff"] * f[f"{p}.fa"]
+        g_l = self.goals_per_shot()
+        t = self.teams.get(team)
+        for j, c in enumerate(FIN_C):
+            if t is None or g_l <= 0:
+                f[f"{p}.fin.{j}"] = 1.0
+            else:
+                f[f"{p}.fin.{j}"] = ((t.for_["goals"] + c * g_l) / (t.for_["shots"] + c)) / g_l
+        for j, k in enumerate(K_SV):
+            f[f"{p}.gf.{j}"] = self.goalie_factor(opp_goalies, k)
+        f[f"{p}.home"] = self.home_factor("goals", home)
+        rec = t.record.get(season) if t else None
+        prev = t.record.get(season - 10001) if t else None
+        league_goals = self.team_avg("goals")
+        if rec and rec[0]:
+            f[f"{p}.base_season"] = rec[2] / rec[0]
+        elif prev and prev[0]:
+            f[f"{p}.base_season"] = prev[2] / prev[0]
+        else:
+            f[f"{p}.base_season"] = league_goals
+        f[f"{p}.base_l10"] = sum(t.recent_goals) / len(t.recent_goals) if t and t.recent_goals else league_goals
+        f[f"{p}.wpct"] = rec[1] / rec[0] if rec and rec[0] else (prev[1] / prev[0] if prev and prev[0] else 0.5)
+        return f
+
+    def goalie_so_rate(self, goalie: int | None, season: int) -> float:
+        lg_rate = self.league.shutouts / self.league.so_known if self.league.so_known else 0.0
+        g = self.goalies.get(goalie) if goalie is not None else None
+        if g is None:
+            return lg_rate
+        m = self._season_mean(g.season, season, "shutout")
+        return m if m is not None else lg_rate
+
+    def game_features(
+        self,
+        home: int,
+        away: int,
+        mixes: dict[int, list[tuple[int, float]]],
+        season: int,
+    ) -> dict[str, float]:
+        lg = self.league
+        f = self.team_features(home, away, True, mixes.get(away, []), season, "h")
+        f |= self.team_features(away, home, False, mixes.get(home, []), season, "a")
+        f["gL"] = self.goals_per_shot()
+        f["ot_q"] = (lg.ended_ot + EVEN_PRIOR * 0.5) / (lg.tied_reg + EVEN_PRIOR)
+        so_games = lg.tied_reg - lg.ended_ot
+        f["so_home"] = (lg.so_home_wins + EVEN_PRIOR * 0.5) / (so_games + EVEN_PRIOR)
+        f["lg_home_win"] = (lg.home_wins + EVEN_PRIOR * 0.5) / (lg.games + EVEN_PRIOR)
+        f["lg_so"] = lg.shutouts / lg.so_known if lg.so_known else 0.0
+        for side, team in (("h", home), ("a", away)):
+            mix = mixes.get(team, [])
+            starter = max(mix, key=lambda t: t[1])[0] if mix else None
+            f[f"{side}.g_so"] = self.goalie_so_rate(starter, season)
+        return f
+
     # ---- learning ------------------------------------------------------------------------
 
     def _learn_skater(self, line: SkaterLine, season: int, date: str) -> None:
@@ -328,18 +407,45 @@ class State:
         lg = self.league
         lg.saves += line.saves
         lg.sa += line.sa
+        g.last_team = line.team
         if line.started:
             g.starts += 1
             lg.starter_sa += line.sa
             lg.starts += 1
             seas = g.season.setdefault(season, {})
-            for s, v in (("saves", line.saves), ("goals_against", line.ga)):
+            if line.shutout is not None:
+                lg.so_known += 1
+                lg.shutouts += line.shutout
+            so = None if line.shutout is None else float(line.shutout)
+            for s, v in (("saves", line.saves), ("goals_against", line.ga), ("shutout", so)):
                 if v is None:
                     continue
                 seas.setdefault(s, [0.0, 0.0])
                 seas[s][0] += v
                 seas[s][1] += 1
-                g.recent[s].append(v)
+                if s in g.recent:
+                    g.recent[s].append(v)
+
+    def _learn_result(self, game: GameRecord) -> None:
+        won = game.home_won
+        if won is None or game.home_goals is None or game.away_goals is None:
+            return
+        lg = self.league
+        lg.games += 1
+        lg.home_wins += won
+        if not game.playoff and game.ended_in in ("OT", "SO"):
+            lg.tied_reg += 1
+            if game.ended_in == "OT":
+                lg.ended_ot += 1
+            elif game.home_so_win:
+                lg.so_home_wins += 1
+        for team, goals, w in ((game.home_team, game.home_goals, won), (game.away_team, game.away_goals, not won)):
+            t = self.teams[team]
+            rec = t.record.setdefault(game.season, [0.0, 0.0, 0.0])
+            rec[0] += 1
+            rec[1] += w
+            rec[2] += goals
+            t.recent_goals.append(goals)
 
     def _learn_teams(self, game: GameRecord) -> None:
         totals: dict[int, dict[str, float | None]] = {}
@@ -384,6 +490,7 @@ class State:
         for gl in game.goalies:
             self._learn_goalie(gl, game.season)
         self._learn_teams(game)
+        self._learn_result(game)
         self.last_date = game.date
 
 
@@ -412,6 +519,13 @@ def walk(games: list[GameRecord], state: State | None = None, *, emit: bool = Tr
                     [(opp_g, 1.0)] if opp_g is not None else [],
                     game.season,
                 )
+                feats |= {
+                    "meta.game": float(game.game_id),
+                    "meta.team": float(line.team),
+                    "meta.home": float(line.home),
+                }
+                actual: dict[str, float | None] = dict(line.stats)
+                actual["first_goal"] = float(line.player == game.first_goal_player) if game.has_pbp else None
                 yield Row(
                     "skater",
                     game.game_id,
@@ -423,7 +537,7 @@ def walk(games: list[GameRecord], state: State | None = None, *, emit: bool = Tr
                     line.home,
                     line.pos,
                     feats,
-                    dict(line.stats),
+                    actual,
                 )
             for gl in game.goalies:
                 if not gl.started or gl.sa is None:
@@ -441,6 +555,35 @@ def walk(games: list[GameRecord], state: State | None = None, *, emit: bool = Tr
                     "G",
                     feats,
                     {"saves": gl.saves, "goals_against": gl.ga, "sa": gl.sa},
+                )
+            if game.home_goals is not None and game.away_goals is not None:
+                mixes = {t: [(g, 1.0)] for t, g in start.items()}
+                feats = state.game_features(game.home_team, game.away_team, mixes, game.season)
+                feats |= {
+                    "meta.game": float(game.game_id),
+                    "meta.home_team": float(game.home_team),
+                    "meta.away_team": float(game.away_team),
+                    "playoff": float(game.playoff),
+                }
+                so = {g.team: g.shutout for g in game.goalies if g.started}
+                yield Row(
+                    "game",
+                    game.game_id,
+                    date,
+                    game.season,
+                    0,
+                    game.home_team,
+                    game.away_team,
+                    True,
+                    "",
+                    feats,
+                    {
+                        "home_goals": float(game.home_goals),
+                        "away_goals": float(game.away_goals),
+                        "home_win": float(bool(game.home_won)),
+                        "h_so": None if so.get(game.home_team) is None else float(bool(so[game.home_team])),
+                        "a_so": None if so.get(game.away_team) is None else float(bool(so[game.away_team])),
+                    },
                 )
         for game in day:
             state.learn(game)

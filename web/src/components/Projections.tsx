@@ -1,11 +1,13 @@
 import { Link } from "react-router";
 import type {
   Factor,
+  GameEnvironment,
   GoalieStart,
   MarketProjection,
   ModelReason,
   ProjectedPlayer,
   SideProjections,
+  TotalProjection,
 } from "../lib/data/types";
 import { githubRepo, localTime, mmss } from "../lib/format";
 
@@ -35,7 +37,7 @@ export function pct(p: number | undefined): string {
 
 function effect(e: number): string {
   const v = Math.round(e * 100);
-  return `${v > 0 ? "+" : ""}${v}%`;
+  return v === 0 ? "0%" : `${v > 0 ? "+" : ""}${v}%`;
 }
 
 /** Link that opens a prefilled GitHub issue form; null when not on the published site. */
@@ -144,13 +146,14 @@ function Thresholds({ m }: { m: MarketProjection }) {
 }
 
 function FactorRow({ f }: { f: Factor }) {
+  const flat = Math.round(f.effect * 100) === 0;
   const up = f.effect >= 0;
   return (
     <li className="border-t border-line py-1.5 first:border-0">
       <div className="flex items-baseline justify-between gap-2">
         <span>{f.name}</span>
-        <span className={`num text-xs font-semibold ${up ? "text-over" : "text-bad"}`}>
-          {up ? "▲" : "▼"} {effect(f.effect)}
+        <span className={`num text-xs font-semibold ${flat ? "text-muted" : up ? "text-over" : "text-bad"}`}>
+          {flat ? "·" : up ? "▲" : "▼"} {effect(f.effect)}
         </span>
       </div>
       <p className="text-xs text-muted">{f.detail}</p>
@@ -172,6 +175,12 @@ const INPUT_LABELS: Record<string, string> = {
   league_save_pct: "League save %",
   start_probability: "Start probability",
   start_status: "Start status",
+  team_scores_first: "Team scores first",
+  share_of_team_goals: "His share of team goals",
+  expected_team_goals: "Team expected goals",
+  expected_goals_for: "Team expected goals",
+  expected_goals_against: "Opponent expected goals",
+  tied_after_regulation: "Goes past regulation",
 };
 
 const UNIT: Record<string, string> = { hours: "h of ice time", "PP hours": "h of PP time", shots: "shots" };
@@ -205,7 +214,7 @@ function Explain({ m }: { m: MarketProjection }) {
                 <dd className="num text-right">
                   {k.endsWith("toi_s")
                     ? mmss(v as number)
-                    : k === "start_probability"
+                    : ["start_probability", "team_scores_first", "share_of_team_goals", "tied_after_regulation"].includes(k)
                       ? pct(v as number)
                       : k === "prior_strength"
                         ? `${String(v)} ${UNIT[String(inputs.prior_strength_unit)] ?? ""}`
@@ -252,6 +261,7 @@ const GAME_COLUMNS: [string, string, "mean" | "p1"][] = [
   ["skater_shots_on_goal", "SOG", "mean"],
   ["skater_points", "1+ Pt", "p1"],
   ["skater_anytime_goal", "Goal", "p1"],
+  ["skater_first_goal", "1st G", "p1"],
   ["skater_assists", "1+ A", "p1"],
   ["skater_pp_points", "1+ PPP", "p1"],
   ["skater_hits", "Hits", "mean"],
@@ -311,6 +321,8 @@ export function SideProjectionTable({ side, abbrev }: { side: SideProjections; a
               <td colSpan={cols.length + 1} className="text-right">
                 {g.markets.goalie_saves ? `${g.markets.goalie_saves.mean.toFixed(1)} saves` : ""}
                 {g.markets.goalie_goals_against ? ` · ${g.markets.goalie_goals_against.mean.toFixed(2)} GA` : ""}
+                {g.markets.goalie_win ? ` · win ${pct(g.markets.goalie_win.p_ge[1])}` : ""}
+                {g.markets.goalie_shutout ? ` · shutout ${pct(g.markets.goalie_shutout.p_ge[1])}` : ""}
               </td>
             </tr>
           ))}
@@ -345,5 +357,94 @@ export function TestedNote({ testedAt }: { testedAt: string | null }) {
       </Link>
       {testedAt ? `, last run ${localTime(testedAt)}` : ""}). Statistical estimates, not guarantees.
     </p>
+  );
+}
+
+function TotalLine({ label, t }: { label: string; t: TotalProjection | undefined }) {
+  if (!t) return null;
+  const ks = t.p_ge
+    .map((p, k) => [k, p] as const)
+    .filter(([k, p]) => k >= 1 && p >= 0.05 && p <= 0.95)
+    .slice(0, 6);
+  return (
+    <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 border-t border-line py-1.5 text-sm">
+      <span>
+        {label} <span className="num text-muted">avg {t.mean.toFixed(2)}</span>
+      </span>
+      <span className="num flex flex-wrap gap-x-2 text-xs">
+        {ks.map(([k, p]) => (
+          <span key={k}>
+            <span className="text-muted">{k}+</span> {pct(p)}
+          </span>
+        ))}
+      </span>
+    </div>
+  );
+}
+
+/** Model-only game outlook: win probability and goal totals. No odds are involved. */
+export function GameOutlook({ env, away, home }: { env: GameEnvironment; away: string; home: string }) {
+  const w = env.win;
+  return (
+    <div className="flex flex-col gap-2" aria-label="Game outlook">
+      {w && (
+        <div>
+          <div className="num flex justify-between text-sm">
+            <span>
+              {away} {pct(w.away)}
+            </span>
+            <span>
+              {home} {pct(w.home)}
+            </span>
+          </div>
+          <div className="mt-1 flex h-2 overflow-hidden rounded bg-panel-2" role="img" aria-label={`${home} win probability ${pct(w.home)}`}>
+            <div className="bg-muted/50" style={{ width: `${w.away * 100}%` }} />
+            <div className="bg-accent" style={{ width: `${w.home * 100}%` }} />
+          </div>
+          <p className="num mt-1 text-xs text-muted">
+            Win probability incl. overtime and shootout · goes past regulation {pct(w.tied_after_regulation ?? undefined)}
+          </p>
+          {w.previous && (
+            <p className="num mt-1 rounded bg-accent/10 px-2 py-1 text-xs text-accent">
+              Updated after {w.previous.reason}: {home} {pct(w.previous.home)} → {pct(w.home)}
+            </p>
+          )}
+        </div>
+      )}
+      <div>
+        <TotalLine label={`${away} goals`} t={env.totals.away} />
+        <TotalLine label={`${home} goals`} t={env.totals.home} />
+        <TotalLine label="Total goals" t={env.totals.game} />
+      </div>
+      <details className="text-sm">
+        <summary className="cursor-pointer text-xs text-accent">Explain outlook</summary>
+        <div className="mt-2 grid gap-3 sm:grid-cols-2">
+          {(
+            [
+              [away, env.totals.away],
+              [home, env.totals.home],
+            ] as const
+          ).map(
+            ([abbrev, t]) =>
+              t && (
+                <div key={abbrev}>
+                  <p className="text-xs text-muted">
+                    {abbrev}: league-average {t.reference_mean?.toFixed(2)} goals × these factors = {t.mean.toFixed(2)}{" "}
+                    (before overtime goals)
+                  </p>
+                  <ul>
+                    {t.factors.map((f) => (
+                      <FactorRow key={f.name} f={f} />
+                    ))}
+                  </ul>
+                </div>
+              ),
+          )}
+        </div>
+      </details>
+      <p className="text-xs text-muted">
+        Model only: no odds are connected. Shootout "goals" are not counted as goals.
+      </p>
+    </div>
   );
 }
