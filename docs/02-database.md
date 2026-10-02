@@ -64,8 +64,9 @@ The requested core table list maps onto this schema, except `users`, which is un
 3. **Immutable projection history.** A recalculation sets `is_current = false` on the old row and inserts a new row with `supersedes` pointing at it. A partial unique index guarantees one current projection per (game, player, market). The chain powers the before/after display.
 4. **Point-in-time correctness.** `as_of` on projections, `observed_at`/`reported_at` on lineups, goalies and injuries, and `captured_at` on odds let the feature builder reconstruct "what we knew at time T". Walk-forward backtests depend on this.
 5. **Data quality is first-class.** Stat rows carry `provenance` and `quality`. Projections carry `data_quality` and `missing_inputs[]`. A `data_quality_issues` queue feeds the admin dashboard.
-6. **Size management.** `line_movements` stores only changes, and only for books enabled in `config/books.yml`. At season end, its rows are exported to a Parquet Release asset and pruned from SQLite. Stats and PBP tables stay small, at under 200k rows per season per table.
-7. **One champion per model family.** A partial unique index on `model_versions(model_family) WHERE status='champion'` makes promotion an atomic swap.
+6. **Enrichment.** `game_enrichment` records when each game's play-by-play and stats-API reports were applied, so each runs once. Teammate-blocked shots follow the official convention, verified against the box score and stats API: they count as the shooter's blocked attempt but not as anyone's blocked shot (`is_teammate_block = 1`, `blocker_id` NULL).
+7. **Size management.** `line_movements` stores only changes, and only for books enabled in `config/books.yml`. At season end, its rows are exported to a Parquet Release asset and pruned from SQLite. Stats and PBP tables stay small, at under 200k rows per season per table.
+8. **One champion per model family.** A partial unique index on `model_versions(model_family) WHERE status='champion'` makes promotion an atomic swap.
 
 ## Prop catalogue (seeded)
 

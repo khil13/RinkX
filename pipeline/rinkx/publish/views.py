@@ -9,6 +9,8 @@ from __future__ import annotations
 import sqlite3
 from typing import Any
 
+from rinkx.analytics import hitrates
+
 NOT_CONNECTED = "not_connected"  # the feed that would provide this isn't built yet
 INSUFFICIENT = "insufficient_sample"
 MIN_TEAM_GAMES = 5
@@ -250,6 +252,134 @@ def players_index(conn: sqlite3.Connection) -> list[dict[str, Any]]:
     return [{"id": r[0], "name": r[1], "position": r[2], "number": r[3], "team": r[4]} for r in rows]
 
 
+SKATER_LOG_SQL = """
+SELECT g.nhl_game_id, g.game_date, g.season_id, g.game_type, o.abbrev, s.is_home, s.toi_s, s.ev_toi_s, s.pp_toi_s,
+       s.sh_toi_s, s.goals, s.assists, s.points, s.primary_assists, s.secondary_assists, s.shots, s.shot_attempts,
+       s.hits, s.blocked_shots, s.pim, s.plus_minus, s.pp_goals, s.pp_assists, s.pp_points, s.faceoff_wins,
+       s.faceoff_losses
+FROM player_game_stats s JOIN games g ON g.id = s.game_id JOIN teams o ON o.id = s.opponent_team_id
+WHERE s.player_id = ? AND g.season_id IN (?, ?) ORDER BY g.start_time_utc DESC"""
+
+GOALIE_LOG_SQL = """
+SELECT g.nhl_game_id, g.game_date, g.season_id, g.game_type, o.abbrev, s.is_home, s.started, s.toi_s,
+       s.shots_against, s.saves, s.goals_against, s.decision, s.shutout
+FROM goalie_game_stats s JOIN games g ON g.id = s.game_id JOIN teams o ON o.id = s.opponent_team_id
+WHERE s.player_id = ? AND g.season_id IN (?, ?) ORDER BY g.start_time_utc DESC"""
+
+
+def _skater_game(r: sqlite3.Row) -> dict[str, Any]:
+    return {
+        "game_id": r[0],
+        "date": r[1],
+        "season": r[2],
+        "playoffs": r[3] == "O",
+        "opponent": r[4],
+        "home": bool(r[5]),
+        "toi_s": r[6],
+        "ev_toi_s": r[7],
+        "pp_toi_s": r[8],
+        "sh_toi_s": r[9],
+        "g": r[10],
+        "a": r[11],
+        "p": r[12],
+        "a1": r[13],
+        "a2": r[14],
+        "sog": r[15],
+        "icf": r[16],
+        "hits": r[17],
+        "blk": r[18],
+        "pim": r[19],
+        "pm": r[20],
+        "ppg": r[21],
+        "ppa": r[22],
+        "ppp": r[23],
+        "fow": r[24],
+        "fol": r[25],
+    }
+
+
+def _goalie_game(r: sqlite3.Row) -> dict[str, Any]:
+    return {
+        "game_id": r[0],
+        "date": r[1],
+        "season": r[2],
+        "playoffs": r[3] == "O",
+        "opponent": r[4],
+        "home": bool(r[5]),
+        "started": bool(r[6]),
+        "toi_s": r[7],
+        "sa": r[8],
+        "sv": r[9],
+        "ga": r[10],
+        "decision": r[11],
+        "shutout": bool(r[12]) if r[12] is not None else None,
+    }
+
+
+def _dnp_games(conn: sqlite3.Connection, player_pk: int, team_id: int | None, season_id: int) -> list[dict[str, Any]]:
+    """Completed games of the player's current team, since their first game for that team this season,
+    that he did not play. Listed in the log, never counted in hit-rate denominators."""
+    if team_id is None:
+        return []
+    rows = conn.execute(
+        """SELECT g.nhl_game_id, g.game_date, g.season_id,
+                  CASE WHEN g.home_team_id = ? THEN a.abbrev ELSE h.abbrev END, g.home_team_id = ?
+           FROM games g JOIN teams h ON h.id = g.home_team_id JOIN teams a ON a.id = g.away_team_id
+           WHERE g.season_id = ? AND g.status = 'final' AND ? IN (g.home_team_id, g.away_team_id)
+             AND EXISTS (SELECT 1 FROM team_game_stats t WHERE t.game_id = g.id)
+             AND g.game_date >= (SELECT min(g2.game_date) FROM player_game_stats s2 JOIN games g2 ON g2.id = s2.game_id
+                                 WHERE s2.player_id = ? AND s2.team_id = ? AND g2.season_id = ?)
+             AND NOT EXISTS (SELECT 1 FROM player_game_stats s WHERE s.game_id = g.id AND s.player_id = ?)
+             AND NOT EXISTS (SELECT 1 FROM goalie_game_stats s WHERE s.game_id = g.id AND s.player_id = ?)""",
+        (team_id, team_id, season_id, team_id, player_pk, team_id, season_id, player_pk, player_pk),
+    ).fetchall()
+    return [
+        {"game_id": r[0], "date": r[1], "season": r[2], "opponent": r[3], "home": bool(r[4]), "dnp": True} for r in rows
+    ]
+
+
+def _skater_totals(games: list[dict[str, Any]]) -> dict[str, Any] | None:
+    if not games:
+        return None
+
+    def total(k: str) -> int | None:
+        vals = [x[k] for x in games]
+        return None if any(v is None for v in vals) else sum(vals)  # incomplete -> unknown, not partial
+
+    toi = total("toi_s")
+    return {
+        "gp": len(games),
+        "g": total("g"),
+        "a": total("a"),
+        "p": total("p"),
+        "sog": total("sog"),
+        "icf": total("icf"),
+        "hits": total("hits"),
+        "blk": total("blk"),
+        "ppg": total("ppg"),
+        "ppp": total("ppp"),
+        "toi_avg_s": round(toi / len(games)) if toi is not None else None,
+        "pp_toi_avg_s": round(t / len(games)) if (t := total("pp_toi_s")) is not None else None,
+    }
+
+
+def _goalie_totals(games: list[dict[str, Any]]) -> dict[str, Any] | None:
+    if not games:
+        return None
+    sa = sum(x["sa"] or 0 for x in games)
+    toi = sum(x["toi_s"] or 0 for x in games)
+    return {
+        "gp": len(games),
+        "starts": sum(x["started"] for x in games),
+        "w": sum(x["decision"] == "W" for x in games),
+        "l": sum(x["decision"] == "L" for x in games),
+        "otl": sum(x["decision"] == "O" for x in games),
+        "sv_pct": round(sum(x["sv"] or 0 for x in games) / sa, 3) if sa else None,
+        "gaa": round(sum(x["ga"] or 0 for x in games) * 3600 / toi, 2) if toi else None,
+        "so": sum(bool(x["shutout"]) for x in games),
+    }
+
+
 def player(conn: sqlite3.Connection, nhl_player_id: int, season_id: int | None) -> dict[str, Any]:
     p = conn.execute(
         "SELECT p.*, t.abbrev AS team_abbrev FROM players p LEFT JOIN teams t ON t.id = p.current_team_id "
@@ -267,97 +397,35 @@ def player(conn: sqlite3.Connection, nhl_player_id: int, season_id: int | None) 
         "height_cm": p["height_cm"],
         "weight_kg": p["weight_kg"],
     }
-    if p["position"] == "G":
-        log = conn.execute(
-            """SELECT g.nhl_game_id, g.game_date, o.abbrev, s.is_home, s.started, s.toi_s, s.shots_against,
-                      s.saves, s.goals_against, s.decision, s.shutout
-               FROM goalie_game_stats s JOIN games g ON g.id = s.game_id JOIN teams o ON o.id = s.opponent_team_id
-               WHERE s.player_id = ? AND g.season_id = ? ORDER BY g.game_date DESC""",
-            (p["id"], season_id),
-        ).fetchall()
-        games = [
-            {
-                "game_id": r[0],
-                "date": r[1],
-                "opponent": r[2],
-                "home": bool(r[3]),
-                "started": bool(r[4]),
-                "toi_s": r[5],
-                "sa": r[6],
-                "sv": r[7],
-                "ga": r[8],
-                "decision": r[9],
-                "shutout": bool(r[10]) if r[10] is not None else None,
-            }
-            for r in log
-        ]
-        sa = sum(x["sa"] or 0 for x in games)
-        toi = sum(x["toi_s"] or 0 for x in games)
-        totals = (
-            {
-                "gp": len(games),
-                "starts": sum(x["started"] for x in games),
-                "w": sum(x["decision"] == "W" for x in games),
-                "l": sum(x["decision"] == "L" for x in games),
-                "otl": sum(x["decision"] == "O" for x in games),
-                "sv_pct": round(sum(x["sv"] or 0 for x in games) / sa, 3) if sa else None,
-                "gaa": round(sum(x["ga"] or 0 for x in games) * 3600 / toi, 2) if toi else None,
-                "so": sum(bool(x["shutout"]) for x in games),
-            }
-            if games
-            else None
+    last_season = season_id - 10001 if season_id else None
+    goalie = p["position"] == "G"
+    rows = conn.execute(GOALIE_LOG_SQL if goalie else SKATER_LOG_SQL, (p["id"], season_id, last_season)).fetchall()
+    played = [(_goalie_game if goalie else _skater_game)(r) for r in rows]
+    this_season = [g for g in played if g["season"] == season_id]
+    prior = [g for g in played if g["season"] == last_season]
+
+    if goalie:
+        totals = _goalie_totals(this_season)
+        # Saves/GA props are about starts; relief appearances would distort the rates.
+        rates = hitrates.hit_rates(
+            [g for g in played if g["started"]], hitrates.GOALIE_STATS, season=season_id, last_season=last_season
         )
+        basis = "starts"
     else:
-        log = conn.execute(
-            """SELECT g.nhl_game_id, g.game_date, o.abbrev, s.is_home, s.toi_s, s.goals, s.assists, s.points,
-                      s.shots, s.hits, s.blocked_shots, s.pim, s.plus_minus, s.pp_goals
-               FROM player_game_stats s JOIN games g ON g.id = s.game_id JOIN teams o ON o.id = s.opponent_team_id
-               WHERE s.player_id = ? AND g.season_id = ? ORDER BY g.game_date DESC""",
-            (p["id"], season_id),
-        ).fetchall()
-        games = [
-            {
-                "game_id": r[0],
-                "date": r[1],
-                "opponent": r[2],
-                "home": bool(r[3]),
-                "toi_s": r[4],
-                "g": r[5],
-                "a": r[6],
-                "p": r[7],
-                "sog": r[8],
-                "hits": r[9],
-                "blk": r[10],
-                "pim": r[11],
-                "pm": r[12],
-                "ppg": r[13],
-            }
-            for r in log
-        ]
+        totals = _skater_totals(this_season)
+        rates = hitrates.hit_rates(played, hitrates.SKATER_STATS, season=season_id, last_season=last_season)
+        basis = "games_played"
 
-        def total(k: str) -> int:
-            return sum(x[k] or 0 for x in games)
-
-        totals = (
-            {
-                "gp": len(games),
-                "g": total("g"),
-                "a": total("a"),
-                "p": total("p"),
-                "sog": total("sog"),
-                "hits": total("hits"),
-                "blk": total("blk"),
-                "pim": total("pim"),
-                "ppg": total("ppg"),
-                "toi_avg_s": round(total("toi_s") / len(games)) if games else None,
-            }
-            if games
-            else None
-        )
+    dnp = _dnp_games(conn, p["id"], p["current_team_id"], season_id) if season_id else []
+    log = sorted(this_season + dnp, key=lambda g: g["date"], reverse=True)
     return {
         "player": bio,
         "season": season_id,
+        "last_season": last_season,
         "totals": totals,
         "totals_reason": None if totals else "no_games_this_season",
-        "games": games,
+        "games": log,
+        "last_season_games": prior,
+        "hit_rates": rates,
+        "hit_rates_basis": basis,
     }

@@ -53,3 +53,19 @@ export function signed(n: number | null): string {
 export function num(n: number | null | undefined): string {
   return n === null || n === undefined ? "—" : String(n);
 }
+
+/** 95% Wilson score interval, matching pipeline/rinkx/analytics/hitrates.py. */
+export function wilson(hits: number, n: number, z = 1.96): [number, number] | null {
+  if (n === 0) return null;
+  const p = hits / n;
+  const denom = 1 + (z * z) / n;
+  const centre = (p + (z * z) / (2 * n)) / denom;
+  const half = (z * Math.sqrt((p * (1 - p)) / n + (z * z) / (4 * n * n))) / denom;
+  return [Math.max(0, centre - half), Math.min(1, centre + half)];
+}
+
+export function seasonLabel(season: number | null): string {
+  if (!season) return "";
+  const s = String(season);
+  return `${s.slice(0, 4)}-${s.slice(6)}`;
+}

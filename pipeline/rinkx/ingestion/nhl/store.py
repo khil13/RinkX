@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sqlite3
 
-from rinkx.ingestion.nhl.parse import Boxscore, GameRec, PlayerRec, SeasonRec, StandingRec, TeamRef
+from rinkx.ingestion.nhl.parse import Boxscore, GameRec, PlayByPlay, PlayerRec, SeasonRec, StandingRec, TeamRef
 
 PROVENANCE = "official"
 QUALITY = 0.95  # official box score; some fields (TOI splits, assist types) are absent, not wrong
@@ -222,6 +222,8 @@ def write_boxscore(conn: sqlite3.Connection, game_id: int, box: Boxscore, source
     conn.execute("DELETE FROM player_game_stats WHERE game_id = ?", (game_id,))
     conn.execute("DELETE FROM goalie_game_stats WHERE game_id = ?", (game_id,))
     conn.execute("DELETE FROM team_game_stats WHERE game_id = ?", (game_id,))
+    # Fresh box-score rows have no enrichment yet; make sure the jobs redo it.
+    conn.execute("DELETE FROM game_enrichment WHERE game_id = ?", (game_id,))
     n = 0
     for t in box.teams:
         tid = teams[t.nhl_team_id]
@@ -321,4 +323,124 @@ def mark_covered(conn: sqlite3.Connection, days: list[str], source_id: int, fetc
         "INSERT INTO schedule_coverage (game_date, fetched_at, source_id) VALUES (?,?,?) "
         "ON CONFLICT(game_date) DO UPDATE SET fetched_at = excluded.fetched_at",
         [(d, fetched_at, source_id) for d in days],
+    )
+
+
+def write_play_by_play(conn: sqlite3.Connection, game_id: int, pbp: PlayByPlay, source_id: int, fetched_at: str) -> int:
+    """Replace this game's shot events and set primary/secondary assists. Returns events written."""
+    teams = {pbp.home_team_id: team_id(conn, pbp.home_team_id), pbp.away_team_id: team_id(conn, pbp.away_team_id)}
+    ids: dict[int, int] = {}
+
+    def pid(nhl_id: int | None) -> int | None:
+        if nhl_id is None:
+            return None
+        if nhl_id not in ids:
+            found = player_id(conn, nhl_id)
+            if found is None:
+                raise KeyError(f"player {nhl_id} in play-by-play is not loaded")
+            ids[nhl_id] = found
+        return ids[nhl_id]
+
+    conn.execute("DELETE FROM pbp_shot_events WHERE game_id = ?", (game_id,))
+    for e in pbp.shots:
+        conn.execute(
+            """INSERT INTO pbp_shot_events (game_id, event_idx, period, period_seconds, event_type, shooter_id,
+                 goalie_id, blocker_id, team_id, strength_state, x_coord, y_coord, shot_type, is_teammate_block,
+                 is_empty_net, source_id, fetched_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                game_id,
+                e.event_idx,
+                e.period,
+                e.period_seconds,
+                e.event_type,
+                pid(e.shooter_id),
+                pid(e.goalie_id),
+                pid(e.blocker_id),
+                teams[e.shooter_team_id],
+                e.strength_state,
+                e.x,
+                e.y,
+                e.shot_type,
+                int(e.teammate_block),
+                int(e.empty_net),
+                source_id,
+                fetched_at,
+            ),
+        )
+    # Primary/secondary assists. Every skater in the box score gets a value (0 if none).
+    conn.execute(
+        "UPDATE player_game_stats SET primary_assists = 0, secondary_assists = 0 WHERE game_id = ?", (game_id,)
+    )
+    for g in pbp.goals:
+        for column, nhl_id in (("primary_assists", g.assist1_id), ("secondary_assists", g.assist2_id)):
+            if nhl_id is not None:
+                conn.execute(
+                    f"UPDATE player_game_stats SET {column} = {column} + 1 WHERE game_id = ? AND player_id = ?",
+                    (game_id, pid(nhl_id)),
+                )
+    conn.execute(
+        "INSERT INTO game_enrichment (game_id, pbp_at) VALUES (?, ?) "
+        "ON CONFLICT(game_id) DO UPDATE SET pbp_at = excluded.pbp_at",
+        (game_id, fetched_at),
+    )
+    return len(pbp.shots)
+
+
+# Stats-API report fields -> player_game_stats columns. Only official, directly reported values.
+REPORT_COLUMNS: dict[str, dict[str, str]] = {
+    "timeonice": {"ev_toi_s": "evTimeOnIce", "pp_toi_s": "ppTimeOnIce", "sh_toi_s": "shTimeOnIce"},
+    "summary": {"sh_goals": "shGoals", "gw_goals": "gameWinningGoals"},
+    "realtime": {
+        "shot_attempts": "totalShotAttempts",
+        "missed_shots": "missedShots",
+        "shots_blocked_by_opp": "shotAttemptsBlocked",
+    },
+    "faceoffwins": {"faceoff_wins": "totalFaceoffWins", "faceoff_losses": "totalFaceoffLosses"},
+}
+REPORT_EXTRA: dict[str, dict[str, str]] = {
+    "realtime": {"first_goals": "firstGoals", "empty_net_goals": "emptyNetGoals", "ot_goals": "otGoals"},
+}
+
+
+def apply_game_report(conn: sqlite3.Connection, report: str, rows: list[dict[str, object]]) -> set[int]:
+    """Update existing player-game rows from one stats-API report. Returns the game ids touched.
+    Rows for games whose box score isn't loaded yet are skipped (applied on a later run)."""
+    touched: set[int] = set()
+    columns = REPORT_COLUMNS[report]
+    extras = REPORT_EXTRA.get(report, {})
+    for r in rows:
+        key = conn.execute(
+            "SELECT s.game_id, s.player_id FROM player_game_stats s JOIN games g ON g.id = s.game_id "
+            "JOIN players p ON p.id = s.player_id WHERE g.nhl_game_id = ? AND p.nhl_player_id = ?",
+            (r["gameId"], r["playerId"]),
+        ).fetchone()
+        if key is None:
+            continue
+        sets = [f"{col} = ?" for col in columns]
+        values: list[object] = [r.get(field) for field in columns.values()]
+        if report == "summary":
+            # The API reports power-play *points* and goals; assists are the difference.
+            pp_points, pp_goals = r.get("ppPoints"), r.get("ppGoals")
+            sets.append("pp_assists = ?")
+            values.append(pp_points - pp_goals if isinstance(pp_points, int) and isinstance(pp_goals, int) else None)
+        if extras:
+            # One json_set with every path: separate `extra = json_set(extra, ...)` assignments in a
+            # single UPDATE all read the original value, so only the last would survive.
+            pairs = ", ".join(f"'$.{name}', ?" for name in extras)
+            sets.append(f"extra = json_set(extra, {pairs})")
+            values.extend(r.get(field) for field in extras.values())
+        conn.execute(
+            f"UPDATE player_game_stats SET {', '.join(sets)} WHERE game_id = ? AND player_id = ?",
+            (*values, key[0], key[1]),
+        )
+        touched.add(int(key[0]))
+    return touched
+
+
+def mark_stats_enriched(conn: sqlite3.Connection, game_ids: set[int], at: str) -> None:
+    conn.executemany(
+        "INSERT INTO game_enrichment (game_id, stats_at) VALUES (?, ?) "
+        "ON CONFLICT(game_id) DO UPDATE SET stats_at = excluded.stats_at",
+        [(g, at) for g in game_ids],
     )

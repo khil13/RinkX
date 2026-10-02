@@ -6,7 +6,9 @@ RinkX answers **"why does the model project this player at this number?"** It do
 
 ## Status
 
-**Phase 1 complete:** NHL schedule, standings, rosters and box scores ingested hourly from the free NHL API; Games (daily slate), Game, Players and Player pages. Goalies, lineups, injuries and odds are clearly marked *not connected yet*. Next: Phase 2 (play-by-play, ice-time splits, hit rates).
+**Phase 2 complete:** NHL schedule, standings, rosters, box scores, play-by-play and official ice-time splits ingested hourly from the free NHL API, including last season. Pages: Games (daily slate), Game, Players, and Player (hit rates over L5–L20/season/last season, full game log with missed games). Goalies, lineups, injuries and odds are clearly marked *not connected yet*. Next: Phase 3 (projection models).
+
+**Speed up the backfill:** Actions → pipeline → Run workflow → set *Games to load this run* to 400.
 
 **First time?** Follow [docs/setup.md](docs/setup.md).
 

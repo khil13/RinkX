@@ -66,27 +66,27 @@
             "odds": [
               {
                 "providerId": 9,
-                "value": "+142"
-              },
-              {
-                "providerId": 3,
-                "value": "2.42"
-              },
-              {
-                "providerId": 8,
-                "value": "+144"
-              },
-              {
-                "providerId": 7,
                 "value": "+150"
               },
               {
+                "providerId": 3,
+                "value": "2.46"
+              },
+              {
+                "providerId": 8,
+                "value": "+147"
+              },
+              {
+                "providerId": 7,
+                "value": "+152"
+              },
+              {
                 "providerId": 6,
-                "value": "2.37"
+                "value": "2.42"
               },
               {
                 "providerId": 10,
-                "value": "3.30"
+                "value": "3.35"
               }
             ]
           },
@@ -110,23 +110,23 @@
             "odds": [
               {
                 "providerId": 9,
-                "value": "-170"
+                "value": "-180"
               },
               {
                 "providerId": 3,
-                "value": "1.58"
+                "value": "1.56"
               },
               {
                 "providerId": 8,
-                "value": "-177"
+                "value": "-180"
               },
               {
                 "providerId": 7,
-                "value": "-182"
+                "value": "-184"
               },
               {
                 "providerId": 6,
-                "value": "1.58"
+                "value": "1.57"
               },
               {
                 "providerId": 10,
@@ -204,19 +204,19 @@
               },
               {
                 "providerId": 3,
-                "value": "1.67"
+                "value": "1.66"
               },
               {
                 "providerId": 8,
-                "value": "-150"
+                "value": "-149"
               },
               {
                 "providerId": 7,
-                "value": "-150"
+                "value": "-146"
               },
               {
                 "providerId": 6,
-                "value": "2.34"
+                "value": "2.20"
               },
               {
                 "providerId": 10,
@@ -248,19 +248,19 @@
               },
               {
                 "providerId": 3,
-                "value": "2.24"
+                "value": "2.26"
               },
               {
                 "providerId": 8,
-                "value": "+123"
+                "value": "+122"
               },
               {
                 "providerId": 7,
-                "value": "+125"
+                "value": "+122"
               },
               {
                 "providerId": 6,
-                "value": "1.60"
+                "value": "1.67"
               },
               {
                 "providerId": 10,
@@ -338,7 +338,7 @@
               },
               {
                 "providerId": 3,
-                "value": "1.89"
+                "value": "1.88"
               },
               {
                 "providerId": 8,
@@ -350,7 +350,7 @@
               },
               {
                 "providerId": 6,
-                "value": "1.97"
+                "value": "1.92"
               },
               {
                 "providerId": 10,
@@ -382,7 +382,7 @@
               },
               {
                 "providerId": 3,
-                "value": "1.95"
+                "value": "1.96"
               },
               {
                 "providerId": 8,
@@ -394,7 +394,7 @@
               },
               {
                 "providerId": 6,
-                "value": "1.84"
+                "value": "1.87"
               },
               {
                 "providerId": 10,
@@ -472,23 +472,23 @@
               },
               {
                 "providerId": 3,
-                "value": "1.68"
+                "value": "1.67"
               },
               {
                 "providerId": 8,
-                "value": "-150"
+                "value": "-151"
               },
               {
                 "providerId": 7,
-                "value": "-146"
+                "value": "-152"
               },
               {
                 "providerId": 6,
-                "value": "2.12"
+                "value": "2.22"
               },
               {
                 "providerId": 10,
-                "value": "2.10"
+                "value": "2.13"
               }
             ]
           },
@@ -516,7 +516,7 @@
               },
               {
                 "providerId": 3,
-                "value": "2.23"
+                "value": "2.24"
               },
               {
                 "providerId": 8,
@@ -524,11 +524,11 @@
               },
               {
                 "providerId": 7,
-                "value": "+122"
+                "value": "+126"
               },
               {
                 "providerId": 6,
-                "value": "1.72"
+                "value": "1.67"
               },
               {
                 "providerId": 10,
@@ -618,7 +618,7 @@
               },
               {
                 "providerId": 6,
-                "value": "2.01"
+                "value": "1.89"
               },
               {
                 "providerId": 10,
@@ -662,7 +662,7 @@
               },
               {
                 "providerId": 6,
-                "value": "1.80"
+                "value": "1.90"
               },
               {
                 "providerId": 10,
@@ -752,7 +752,7 @@
               },
               {
                 "providerId": 6,
-                "value": "2.80"
+                "value": "2.75"
               }
             ]
           },
@@ -792,7 +792,7 @@
               },
               {
                 "providerId": 6,
-                "value": "1.44"
+                "value": "1.45"
               }
             ]
           },
@@ -863,11 +863,11 @@
               },
               {
                 "providerId": 8,
-                "value": "-216"
+                "value": "-218"
               },
               {
                 "providerId": 7,
-                "value": "-205"
+                "value": "-210"
               },
               {
                 "providerId": 6,
@@ -907,11 +907,11 @@
               },
               {
                 "providerId": 8,
-                "value": "+175"
+                "value": "+176"
               },
               {
                 "providerId": 7,
-                "value": "+168"
+                "value": "+172"
               },
               {
                 "providerId": 6,
@@ -1008,7 +1008,7 @@
               },
               {
                 "providerId": 6,
-                "value": "2.48"
+                "value": "2.22"
               },
               {
                 "providerId": 10,
@@ -1052,11 +1052,11 @@
               },
               {
                 "providerId": 6,
-                "value": "1.54"
+                "value": "1.67"
               },
               {
                 "providerId": 10,
-                "value": "3.00"
+                "value": "2.95"
               }
             ]
           },

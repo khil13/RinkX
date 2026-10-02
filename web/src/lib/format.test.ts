@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ago, githubRepo, longDate, minutesSince, mmss, signed } from "./format";
+import { ago, githubRepo, longDate, minutesSince, mmss, seasonLabel, signed, wilson } from "./format";
 
 const now = Date.parse("2026-10-10T18:00:00Z");
 
@@ -34,5 +34,18 @@ describe("stat formatting", () => {
 
   it("keeps calendar dates on their own day", () => {
     expect(longDate("2026-03-10")).toMatch(/10/);
+  });
+});
+
+describe("hit-rate helpers", () => {
+  it("matches the Python Wilson interval", () => {
+    const [lo, hi] = wilson(4, 5)!;
+    expect(lo).toBeCloseTo(0.376, 3);
+    expect(hi).toBeCloseTo(0.964, 3);
+    expect(wilson(0, 0)).toBeNull();
+  });
+  it("labels seasons", () => {
+    expect(seasonLabel(20262027)).toBe("2026-27");
+    expect(seasonLabel(null)).toBe("");
   });
 });

@@ -142,8 +142,8 @@ test("game page: box score, context, and missing data labeled", async ({ page })
 
   await page.getByRole("link", { name: "Jeremy Swayman" }).first().click();
   await expect(page.getByRole("heading", { name: "Jeremy Swayman" })).toBeVisible();
-  await expect(page.getByText("Game log (1)")).toBeVisible();
-  await expect(page.getByText("Every game is listed. Nothing is filtered.")).toBeVisible();
+  await expect(page.getByText("Game log 2025-26 (1 played)")).toBeVisible();
+  await expect(page.getByText("Every game is listed, including games missed. Nothing is filtered.")).toBeVisible();
 });
 
 test("player search finds a player from the recorded rosters", async ({ page }) => {
@@ -159,4 +159,19 @@ test("game outside the published window says so", async ({ page }) => {
   await unlock(page);
   await page.goto(`${CONFIGURED}#/games/1`);
   await expect(page.getByText(/Live data unavailable for this game/)).toBeVisible();
+});
+
+test("player hit rates count every threshold and say what they include", async ({ page }) => {
+  await unlock(page);
+  await page.goto(`${CONFIGURED}#/players/8477960`); // Adrian Kempe: 2 SOG, 6 attempts, 1 assist
+  const table = page.getByRole("table", { name: "Shots on goal hit rates" });
+  await expect(table).toBeVisible();
+  const row = (k: string) => table.locator("tr", { has: page.locator("td", { hasText: new RegExp(`^${k}\\+$`) }) });
+  await expect(row("2").locator("td").nth(1)).toContainText("1/1"); // 2+ SOG in L5
+  await expect(row("3").locator("td").nth(1)).toContainText("0/1"); // not 3+
+  await page.getByRole("tab", { name: "Shot attempts" }).click();
+  await expect(page.getByRole("table", { name: "Shot attempts hit rates" })).toBeVisible();
+  await expect(page.getByText(/Counts games played, most recent first/)).toBeVisible();
+  // Enriched log columns: PP time and shot attempts from the official stats API.
+  await expect(page.locator("td", { hasText: /^2:02$/ })).toBeVisible(); // 122 s on the power play
 });

@@ -217,25 +217,41 @@ export interface PlayerBio {
 export interface SkaterGame {
   game_id: number;
   date: string;
+  season: number;
+  playoffs?: boolean;
   opponent: string;
   home: boolean;
+  dnp?: false;
   toi_s: number | null;
+  ev_toi_s: number | null;
+  pp_toi_s: number | null;
+  sh_toi_s: number | null;
   g: number | null;
   a: number | null;
   p: number | null;
+  a1: number | null;
+  a2: number | null;
   sog: number | null;
+  icf: number | null;
   hits: number | null;
   blk: number | null;
   pim: number | null;
   pm: number | null;
   ppg: number | null;
+  ppa: number | null;
+  ppp: number | null;
+  fow: number | null;
+  fol: number | null;
 }
 
 export interface GoalieGame {
   game_id: number;
   date: string;
+  season: number;
+  playoffs?: boolean;
   opponent: string;
   home: boolean;
+  dnp?: false;
   started: boolean;
   toi_s: number | null;
   sa: number | null;
@@ -245,10 +261,44 @@ export interface GoalieGame {
   shutout: boolean | null;
 }
 
+/** A completed team game the player did not play: listed, never counted in hit rates. */
+export interface DnpGame {
+  game_id: number;
+  date: string;
+  season: number;
+  opponent: string;
+  home: boolean;
+  dnp: true;
+}
+
+export interface HitWindow {
+  games: number;
+  known: number;
+  missing: number;
+  counts: number[];
+  mean: number | null;
+  median: number | null;
+  sd: number | null;
+  from: string | null;
+  to: string | null;
+}
+
+export type WindowName = "L5" | "L10" | "L15" | "L20" | "season" | "last_season";
+
+export interface HitRateStat {
+  label: string;
+  thresholds: number[];
+  windows: Record<WindowName, HitWindow>;
+}
+
 export interface PlayerPage {
   player: PlayerBio;
   season: number | null;
+  last_season: number | null;
   totals: Record<string, number | null> | null;
   totals_reason: Reason | null;
-  games: (SkaterGame | GoalieGame)[];
+  games: (SkaterGame | GoalieGame | DnpGame)[];
+  last_season_games: (SkaterGame | GoalieGame)[];
+  hit_rates: Record<string, HitRateStat>;
+  hit_rates_basis: "games_played" | "starts";
 }
