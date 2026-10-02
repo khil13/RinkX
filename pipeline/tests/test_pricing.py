@@ -250,3 +250,21 @@ def test_pricing_real_projections_against_lines(tmp_path):
     )
     assert run_pricing(conn, now + timedelta(hours=2), CFG) == 1
     assert mean > 0
+
+    # Phase 6: Best Props rows carry source + timestamps, and only open lines with current projections appear.
+    from rinkx.publish.best import best_props
+
+    later = now + timedelta(hours=2)
+    data = best_props(conn, later)
+    assert data["reason"] is None and len(data["rows"]) == 3
+    for row in data["rows"]:
+        assert row["book_name"] and row["source"] == "The Odds API"
+        assert row["line_seen_at"] and row["priced_at"]
+        assert row["lean"] in (None, "over", "under")
+        assert row["edge"] == pytest.approx(row["p_model"] - row["p_market"], abs=1e-6)
+    fd_row = next(r for r in data["rows"] if r["book"] == "fanduel" and r["market"] == "skater_shots_on_goal")
+    assert fd_row["over_price"] == -130  # the latest prediction for the line, after the price move
+    conn.execute("UPDATE prop_lines SET status = 'removed' WHERE id = ?", (line_ids["betmgm"],))
+    conn.execute("UPDATE player_projections SET is_current = 0 WHERE game_id = ? AND market_id = ?", (gid, sog))
+    after = best_props(conn, later)["rows"]
+    assert [r["market"] for r in after] == ["game_total"]  # pulled line and stale projection drop out

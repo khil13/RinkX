@@ -29,7 +29,7 @@ function Price({ value, best }: { value: number | null; best: boolean }) {
   );
 }
 
-const SIDE_LABEL: Record<string, string> = {
+export const SIDE_LABEL: Record<string, string> = {
   over: "Over",
   under: "Under",
   yes: "Yes",
@@ -38,7 +38,7 @@ const SIDE_LABEL: Record<string, string> = {
   away: "Away",
 };
 
-function pts(x: number | null | undefined): string {
+export function pts(x: number | null | undefined): string {
   if (x === null || x === undefined) return "—";
   const v = x * 100;
   return `${v >= 0 ? "+" : "−"}${Math.abs(v).toFixed(1)}`;
@@ -297,7 +297,7 @@ const PART_LABEL: Record<string, string> = {
   availability: "Availability",
 };
 
-function ConfidenceBreakdown({ p }: { p: NonNullable<Pricing["confidence_parts"]> }) {
+export function ConfidenceBreakdown({ p }: { p: NonNullable<Pricing["confidence_parts"]> }) {
   return (
     <ul className="flex flex-col gap-1.5">
       {Object.entries(p.parts).map(([k, v]) => (

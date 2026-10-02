@@ -59,8 +59,8 @@ test("not-remembered key is gone after reload", async ({ page }) => {
 
 test("unbuilt pages show no sample data", async ({ page }) => {
   await unlock(page);
-  await page.goto(`${CONFIGURED}#/props/best`);
-  await expect(page.getByText(/Not built yet\. This page arrives in Phase 6/)).toBeVisible();
+  await page.goto(`${CONFIGURED}#/parlay`);
+  await expect(page.getByText(/Not built yet\. This page arrives in Phase 8/)).toBeVisible();
 });
 
 test("setup page generates keys the Python pipeline accepts", async ({ page }) => {
@@ -111,7 +111,7 @@ test("pages fit the screen with no horizontal page scroll", async ({ page }) => 
     expect(overflow, route || "dashboard").toBeLessThanOrEqual(0);
   }
   await unlock(page, true, MODELS);
-  for (const route of ["#/games/2025029999", "#/players/8000001", "#/models"]) {
+  for (const route of ["#/games/2025029999", "#/players/8000001", "#/models", "#/props", "#/props/best"]) {
     await page.goto(MODELS + route);
     await page.waitForLoadState("networkidle");
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
@@ -270,4 +270,75 @@ test("real-data site without an odds key says lines aren't connected", async ({ 
   await expect(page.getByText(/Sportsbook lines aren't connected/)).toBeVisible();
   await page.goto(`${CONFIGURED}#/admin`);
   await expect(page.getByText(/Not connected\. Add the ODDS_API_KEY repository secret/)).toBeVisible();
+});
+
+test("best props: leans only, source and time on every row, filters, sort and the prop card (synthetic)", async ({ page }) => {
+  await unlock(page, true, MODELS);
+  await page.goto(`${MODELS}#/props/best`);
+  await expect(page.getByRole("heading", { name: "Best Props" })).toBeVisible();
+  const list = page.getByRole("list", { name: "Props" });
+  const cards = list.getByRole("listitem");
+  await expect(cards).toHaveCount(3); // 3 of the 6 priced lines clear the bar
+  await expect(page.getByText(/3 leans of 6 priced lines/)).toBeVisible();
+  for (const c of await cards.all()) await expect(c).toContainText(/via The Odds API · line seen /);
+  await expect(cards.first()).toContainText("Syn P8000002"); // highest expected value first
+  await expect(list).not.toContainText("No lean");
+
+  const filters = page.getByRole("group", { name: "Filters" });
+  await filters.getByLabel("Side").selectOption("under");
+  await expect(cards).toHaveCount(1);
+  await expect(cards.first()).toContainText("Syn P8000003");
+  await filters.getByLabel("Side").selectOption("yes");
+  await expect(page.getByText("Your filters hide every prop.")).toBeVisible();
+  await page.getByRole("button", { name: "Reset filters" }).click();
+  await filters.getByLabel("Book").selectOption("betmgm");
+  await page.reload(); // filters persist on this device
+  await expect(page.getByRole("group", { name: "Filters" }).getByLabel("Book")).toHaveValue("betmgm");
+  await expect(cards).toHaveCount(1);
+  await page.getByRole("button", { name: "Reset filters" }).click();
+  await expect(cards).toHaveCount(3);
+
+  await cards.first().getByRole("button").click();
+  const dialog = page.getByRole("dialog", { name: "Prop card" });
+  await expect(dialog).toBeVisible();
+  await expect(dialog).toContainText(/Confidence \d+\/100/);
+  await expect(dialog.getByText("Market agreement")).toBeVisible();
+  await expect(dialog.getByText(/^Implied\(/).first()).toBeVisible();
+  await expect(dialog).toContainText(/Prediction #\d+ is frozen/);
+  await dialog.getByRole("button", { name: "Close" }).click();
+  await expect(dialog).toBeHidden();
+});
+
+test("props: every priced line, sortable, with changes since the last visit marked (synthetic)", async ({ page }) => {
+  await unlock(page, true, MODELS);
+  await page.goto(`${MODELS}#/props`);
+  const cards = page.getByRole("list", { name: "Props" }).getByRole("listitem");
+  await expect(cards).toHaveCount(6);
+  await expect(cards.filter({ hasText: "No lean" })).toHaveCount(3);
+  await expect(page.getByText("NEW", { exact: true })).toHaveCount(0); // first visit: nothing to compare
+  await page.getByLabel("Sort by").selectOption("confidence");
+  await expect(cards.first()).toContainText("Syn P8000002");
+  await expect(cards.last()).toContainText("Syn P8000001");
+  await page.getByLabel("Min confidence").selectOption("70");
+  await expect(cards).toHaveCount(2);
+  await page.getByRole("button", { name: "Reset filters" }).click();
+
+  // Pretend the last visit saw only one line, at an older price.
+  const key = await page.evaluate(() => {
+    const seen = JSON.parse(localStorage.getItem("rinkx.props.seen") ?? "{}") as Record<string, number>;
+    const k = Object.keys(seen)[0] ?? "";
+    localStorage.setItem("rinkx.props.seen", JSON.stringify({ [k]: (seen[k] ?? 0) - 1000 }));
+    return k;
+  });
+  expect(key).toBeTruthy();
+  await page.reload();
+  await expect(page.getByText("PRICE MOVED", { exact: true })).toHaveCount(1);
+  await expect(page.getByText("NEW", { exact: true })).toHaveCount(5);
+});
+
+test("best props on a site without odds says so instead of showing anything", async ({ page }) => {
+  await unlock(page);
+  await page.goto(`${CONFIGURED}#/props/best`);
+  await expect(page.getByText(/Sportsbook lines aren't connected/)).toBeVisible();
+  await expect(page.getByRole("list", { name: "Props" })).toHaveCount(0);
 });
