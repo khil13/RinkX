@@ -20,6 +20,7 @@ from typing import Any
 import yaml
 
 from rinkx.config import REPO_ROOT
+from rinkx.grading.performance import track_records
 from rinkx.ingestion.runs import ingestion_run, register_source
 from rinkx.models.project import MODELS_SOURCE
 from rinkx.pricing import confidence as conf
@@ -250,6 +251,7 @@ def _score(
     game_date: str,
     is_goalie: bool,
     is_game: bool,
+    track_record: float | None = None,
 ) -> conf.Confidence:
     s_over = SIDES[kind][0]
     if pr.side != "none":
@@ -281,6 +283,7 @@ def _score(
             toi_cv=cv,
             role_change=change,
             implausible_edge=cfg.implausible_edge,
+            track_record=track_record,
         )
     )
 
@@ -315,6 +318,7 @@ def run_pricing(conn: sqlite3.Connection, now: datetime, cfg: PricingConfig | No
     cfg = cfg or PricingConfig.load()
     src = register_source(conn, MODELS_SOURCE)
     written = 0
+    tracks = track_records(conn)
     with ingestion_run(conn, src, "pricing") as run:
         prows = conn.execute(PLAYER_SQL, (iso(now),)).fetchall()
         groups: dict[tuple[int, int, int], list[sqlite3.Row]] = {}
@@ -357,6 +361,7 @@ def run_pricing(conn: sqlite3.Connection, now: datetime, cfg: PricingConfig | No
                     game_date=r["game_date"],
                     is_goalie=r["position"] == "G",
                     is_game=False,
+                    track_record=tracks.get(r["market_id"]),
                 )
                 _insert(
                     conn,
@@ -415,6 +420,7 @@ def run_pricing(conn: sqlite3.Connection, now: datetime, cfg: PricingConfig | No
                     game_date=r["game_date"],
                     is_goalie=False,
                     is_game=True,
+                    track_record=tracks.get(r["market_id"]),
                 )
                 _insert(
                     conn,

@@ -111,7 +111,7 @@ test("pages fit the screen with no horizontal page scroll", async ({ page }) => 
     expect(overflow, route || "dashboard").toBeLessThanOrEqual(0);
   }
   await unlock(page, true, MODELS);
-  for (const route of ["#/games/2025029999", "#/players/8000001", "#/models", "#/props", "#/props/best"]) {
+  for (const route of ["#/games/2025029999", "#/players/8000001", "#/models", "#/props", "#/props/best", "#/performance"]) {
     await page.goto(MODELS + route);
     await page.waitForLoadState("networkidle");
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
@@ -319,8 +319,8 @@ test("props: every priced line, sortable, with changes since the last visit mark
   await page.getByLabel("Sort by").selectOption("confidence");
   await expect(cards.first()).toContainText("Syn P8000002");
   await expect(cards.last()).toContainText("Syn P8000001");
-  await page.getByLabel("Min confidence").selectOption("70");
-  await expect(cards).toHaveCount(2);
+  await page.getByLabel("Min confidence").selectOption("60");
+  await expect(cards).toHaveCount(4);
   await page.getByRole("button", { name: "Reset filters" }).click();
 
   // Pretend the last visit saw only one line, at an older price.
@@ -341,4 +341,34 @@ test("best props on a site without odds says so instead of showing anything", as
   await page.goto(`${CONFIGURED}#/props/best`);
   await expect(page.getByText(/Sportsbook lines aren't connected/)).toBeVisible();
   await expect(page.getByRole("list", { name: "Props" })).toHaveCount(0);
+});
+
+test("model performance: graded results, calibration vs market, splits and recent bets (synthetic)", async ({ page }) => {
+  await unlock(page, true, MODELS);
+  await page.goto(`${MODELS}#/performance`);
+  await expect(page.getByRole("heading", { name: "Model performance" })).toBeVisible();
+  await expect(page.getByText(/SYNTHETIC·? ?test data/)).toBeVisible(); // test data is always labelled
+  const summary = page.getByLabel("Summary");
+  await expect(summary).toContainText("Bets (W-L-P)");
+  await expect(summary).toContainText(/ROI \(95% range\)/);
+  await expect(summary).toContainText(/beat the close \d+% of the time/);
+  await expect(page.getByRole("img", { name: "Cumulative profit" })).toBeVisible();
+  await expect(page.getByText(/Worst drawdown from a high point: −\d/)).toBeVisible();
+  await expect(page.getByRole("img", { name: "Reliability diagram" })).toBeVisible();
+  await expect(page.getByText("No-vig market")).toBeVisible();
+  await expect(page.getByRole("table", { name: "By market" })).toContainText("Shots on Goal");
+  await expect(page.getByRole("table", { name: "By confidence" })).toBeVisible();
+  await expect(page.getByRole("table", { name: "By model version" })).toContainText("synthetic");
+  const recent = page.getByRole("list", { name: "Recent graded bets" }).getByRole("listitem");
+  await expect(recent).toHaveCount(50);
+  await expect(recent.first()).toContainText(/actual \d+/);
+  await expect(recent.first()).toContainText(/WIN|LOSS|win|loss/);
+  await expect(page.getByText(/far too few to tell skill from luck/)).toHaveCount(0); // 600+ bets here
+});
+
+test("model performance before anything is graded says so", async ({ page }) => {
+  await unlock(page);
+  await page.goto(`${CONFIGURED}#/performance`);
+  await expect(page.getByText(/Nothing graded yet/)).toBeVisible();
+  await expect(page.getByLabel("Summary")).toHaveCount(0);
 });

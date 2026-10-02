@@ -706,7 +706,7 @@ def project_game(
                 )
             )
         if "team_goals" in game_passed:
-            for side, ex, mat in (("home", ex_h, env.home_total), ("away", ex_a, env.away_total)):
+            for side, ex, mat in (("home", ex_h, env.home_total_book), ("away", ex_a, env.away_total_book)):
                 pm = mat[0]
                 game_projs.append(
                     GameProjection(

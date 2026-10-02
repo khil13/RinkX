@@ -618,3 +618,74 @@ export interface BestProps {
   rows: PropRow[];
   reason: "not_connected" | "no_lines" | "not_priced" | null;
 }
+
+// ---- Model Performance (Phase 7) ----------------------------------------------------------------
+
+export interface BetRecord {
+  n: number;
+  wins: number;
+  losses: number;
+  pushes: number;
+  profit: number;
+  roi: number | null;
+  roi_ci?: [number, number];
+  clv_n: number;
+  avg_clv: number | null;
+  beat_close: number | null;
+  expected_roi: number | null;
+}
+
+export interface ProbScores {
+  brier: number;
+  log_loss: number;
+}
+
+export interface GradedBet {
+  prediction_id: number;
+  date: string;
+  game: string;
+  subject: string;
+  player_id: number | null;
+  market_label: string;
+  line: number | null;
+  side: string;
+  price: number | null;
+  book_name: string | null;
+  confidence: number | null;
+  p_model: number;
+  actual: number | null;
+  outcome: "win" | "loss" | "push" | "void";
+  profit: number | null;
+  clv: number | null;
+  void_reason: string | null;
+}
+
+export interface Performance {
+  generated_at: string;
+  lineup_mode: "live_tracked";
+  period: { from: string; to: string } | null;
+  graded: number;
+  synthetic: boolean;
+  min_bets: number;
+  calibration: {
+    n: number;
+    model?: ProbScores;
+    market?: ProbScores;
+    model_same_rows?: ProbScores;
+    n_vs_market?: number;
+    reliability?: { lo: number; hi: number; n: number; mean_p: number; hit_rate: number }[];
+    ece?: number | null;
+    mean_p?: number;
+    hit_rate?: number;
+  };
+  bets: BetRecord;
+  series: { date: string; profit: number; cumulative: number; bets: number }[];
+  max_drawdown: number;
+  by_market: (BetRecord & { key: string })[];
+  by_confidence: (BetRecord & { key: string })[];
+  confidence_monotonic: boolean | null;
+  by_month: (BetRecord & { key: string })[];
+  by_version: (BetRecord & { key: string })[];
+  voids: Record<string, number>;
+  recent: GradedBet[];
+}

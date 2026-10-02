@@ -14,6 +14,7 @@ from typing import Any
 
 from rinkx import __version__, crypto
 from rinkx.config import ConfigError, Settings
+from rinkx.grading import performance
 from rinkx.ingestion.nhl.jobs import current_season
 from rinkx.publish import best, guards, lines, projections, views
 from rinkx.publish.schemas import BuildInfo, Envelope, FeedStatus, FileEntry, Manifest, Meta
@@ -147,6 +148,7 @@ def _league_files(conn: sqlite3.Connection, today: date, now: datetime) -> dict[
             out[f"games/{gid}.json"] = (views.game_detail(conn, gid), oldest)
     out["models.json"] = (projections.models_report(conn), None)
     out["props/best.json"] = (best.best_props(conn, now), None)
+    out["performance.json"] = (performance.performance(conn, now), None)
     if conn.execute("SELECT 1 FROM teams LIMIT 1").fetchone():
         out["teams.json"] = (views.teams(conn, season, today.isoformat()), None)
     if conn.execute("SELECT 1 FROM players LIMIT 1").fetchone():

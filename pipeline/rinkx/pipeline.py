@@ -11,6 +11,7 @@ from datetime import datetime
 from pathlib import Path
 
 from rinkx.config import Settings
+from rinkx.grading.grade import run_grading
 from rinkx.ingestion.http import Fetcher, HttpFetcher, ReplayFetcher
 from rinkx.ingestion.nhl.jobs import NhlOptions, run_nhl
 from rinkx.ingestion.odds.client import OddsClient, UrllibTransport
@@ -122,7 +123,9 @@ def _run_stages(
         owner = settings.github_repository.split("/")[0]
         qe = run_quick_entry(conn, tracker, owner, now)
 
-    run_models(conn, now, settings.today or slate_date(now), qe.reasons if qe else None)
+    today = settings.today or slate_date(now)
+    run_models(conn, now, today, qe.reasons if qe else None)
     run_pricing(conn, now)  # model vs market for every open line with a current projection
+    run_grading(conn, now, today)  # settle predictions for finished games
     conn.commit()
     return finish(conn, tracker, qe, started) if tracker is not None and qe is not None else []

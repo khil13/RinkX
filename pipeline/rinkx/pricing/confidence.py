@@ -31,7 +31,7 @@ class Inputs:
     role_change: float | None = None  # relative change: last-5 TOI vs the 15 before
     injury_feed: bool = False
     implausible_edge: float = 0.15
-    track_record: float | None = None  # Phase 7: realized/predicted edge ratio for this market
+    track_record: float | None = None  # realized / expected ROI of graded leans in this market (grading)
 
 
 @dataclass
@@ -61,9 +61,10 @@ def score(c: Inputs) -> Confidence:
     edge_pts = 30 * max(0.0, min(z / 2.5, 1.0)) * mult
     notes["edge_strength"].append(f"Edge {c.edge * 100:+.1f} pts is {z:.1f}x its uncertainty (±{sigma * 100:.1f} pts).")
     notes["edge_strength"].append(
-        "No graded track record yet (Phase 7), so no adjustment."
+        "Not enough graded bets in this market yet, so no track-record adjustment."
         if c.track_record is None
-        else f"Track-record multiplier {mult:.2f}."
+        else f"Track record: graded leans in this market returned {c.track_record:.2f}x their expected value, "
+        f"so this part is multiplied by {mult:.2f}."
     )
 
     # 2. Role certainty.

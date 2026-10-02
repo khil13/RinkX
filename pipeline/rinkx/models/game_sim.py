@@ -8,8 +8,10 @@ first goal, team and game totals. All closed-form, so no simulation noise.
                          lambda_h : lambda_a; otherwise a shootout (home share from past games).
                          Playoffs: play until a goal, split by lambda_h : lambda_a.
 
-Shootout "goals" are never goals (team totals, shutouts and first goal ignore them). Everything
-is tested walk-forward against simple baselines, exactly like the player models (fit.py).
+Shootout "goals" are never goals (team goals, shutouts and first goal ignore them), except in the
+game and team *totals* offered for pricing, which follow book settlement: the shootout winner is
+credited one goal. Everything is tested walk-forward against simple baselines, exactly like the
+player models (fit.py).
 """
 
 from __future__ import annotations
@@ -93,9 +95,11 @@ class Outcomes:
     p_away_first: F
     so_home: F  # home goalie shutout (away scores no goal)
     so_away: F
-    home_total: F  # (n, MAXG + 2): includes the OT goal
+    home_total: F  # (n, MAXG + 2): real goals, including the OT goal (what the team-goals test scores)
     away_total: F
-    game_total: F  # (n, 2 * MAXG + 2)
+    game_total: F  # (n, 2 * MAXG + 2): as books settle totals, the shootout winner credited one goal
+    home_total_book: F  # (n, MAXG + 2): team totals as books settle them (shootout winner +1)
+    away_total_book: F
 
 
 def outcomes(c: Cols, ch: GameChoice) -> Outcomes:
@@ -128,15 +132,34 @@ def outcomes(c: Cols, ch: GameChoice) -> Outcomes:
     home_total[:, 1:] += tie_k * (q * s_h)[:, None]
     away_total[:, : MAXG + 1] += pa - tie_k * (q * (1 - s_h))[:, None]
     away_total[:, 1:] += tie_k * (q * (1 - s_h))[:, None]
+    # Books count the shootout winner as one goal, so a regulation tie always adds exactly one
+    # to the game total (an OT goal or the shootout), and one to whichever team wins it.
+    so_mass = tie_k * (1 - q)[:, None]
+    home_book, away_book = home_total.copy(), away_total.copy()
+    for book, share in ((home_book, so_win), (away_book, np.where(playoff, 0.0, 1 - c["so_home"]))):
+        book[:, : MAXG + 1] -= so_mass * share[:, None]
+        book[:, 1:] += so_mass * share[:, None]
     game_total = np.zeros((n, 2 * MAXG + 2))
     for i in range(n):
         conv = np.convolve(ph[i], pa[i])
         tie_i = np.zeros_like(conv)
         tie_i[::2][: MAXG + 1] = tie_k[i]
-        game_total[i, : len(conv)] += conv - tie_i * q[i]
-        game_total[i, 1 : len(conv) + 1] += tie_i * q[i]
+        game_total[i, : len(conv)] += conv - tie_i
+        game_total[i, 1 : len(conv) + 1] += tie_i
     return Outcomes(
-        lam_h, lam_a, p_home_win, tie, first_h, first_a, so_home, so_away, home_total, away_total, game_total
+        lam_h,
+        lam_a,
+        p_home_win,
+        tie,
+        first_h,
+        first_a,
+        so_home,
+        so_away,
+        home_total,
+        away_total,
+        game_total,
+        home_book,
+        away_book,
     )
 
 

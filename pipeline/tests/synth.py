@@ -247,3 +247,127 @@ def add_upcoming(conn: sqlite3.Connection, day: date) -> int:
     )
     conn.commit()
     return int(conn.execute("SELECT id FROM games WHERE nhl_game_id = ?", (UPCOMING_NHL_ID,)).fetchone()[0])
+
+
+def _american(p: float) -> int:
+    p = min(max(p, 0.03), 0.97)
+    return -round(100 * p / (1 - p)) if p >= 0.5 else max(101, round(100 * (1 - p) / p))
+
+
+def add_priced_history(
+    conn: sqlite3.Connection, truth: Truth, *, days: int = 40, per_team: int = 3, seed: int = 3
+) -> int:
+    """Frozen shots-on-goal predictions for finished games in the last `days` days, as if lines
+    had been priced before each game: the model is the player's season-to-date average (Poisson);
+    the market is priced from the TRUE rate, with noise and margin, at two books, moving between
+    an opening and a closing price. All synthetic. Returns predictions written."""
+    import json
+
+    from scipy.stats import poisson
+
+    from rinkx.pricing import confidence as conf
+    from rinkx.pricing.model_probs import at_line
+    from rinkx.pricing.price import PricingConfig, _insert, price_line
+    from rinkx.timeutil import iso, parse_iso
+
+    rng = np.random.default_rng(seed)
+    cfg = PricingConfig.load()
+    src = conn.execute("SELECT id FROM data_sources WHERE code = 'synthetic'").fetchone()[0]
+    market = conn.execute("SELECT id FROM markets WHERE code = 'skater_shots_on_goal'").fetchone()[0]
+    for code, name in (("fanduel", "FanDuel"), ("betmgm", "BetMGM")):
+        conn.execute("INSERT OR IGNORE INTO sportsbooks (code, name, is_enabled) VALUES (?, ?, 1)", (code, name))
+    books = [r[0] for r in conn.execute("SELECT id FROM sportsbooks WHERE code IN ('fanduel','betmgm') ORDER BY code")]
+    conn.execute(
+        "INSERT OR IGNORE INTO model_versions (model_family, version, algorithm, feature_list) "
+        "VALUES ('skater_shots', 'synthetic', 'season average (synthetic)', '[]')"
+    )
+    mv = conn.execute("SELECT id FROM model_versions WHERE model_family = 'skater_shots' AND version = 'synthetic'")
+    mv_id = mv.fetchone()[0]
+    last = conn.execute("SELECT max(game_date) FROM games WHERE status = 'final'").fetchone()[0]
+    since = (date.fromisoformat(last) - timedelta(days=days - 1)).isoformat()
+    games = conn.execute(
+        "SELECT id, start_time_utc, game_date, home_team_id, away_team_id FROM games "
+        "WHERE status = 'final' AND game_date >= ? ORDER BY start_time_utc",
+        (since,),
+    ).fetchall()
+    written = 0
+    for g in games:
+        start = parse_iso(g["start_time_utc"])
+        opened, closed = iso(start - timedelta(hours=20)), iso(start - timedelta(hours=1))
+        for team in (g["home_team_id"], g["away_team_id"]):
+            for (pid,) in conn.execute(
+                "SELECT id FROM players WHERE current_team_id = ? AND position <> 'G' ORDER BY id LIMIT ?",
+                (team, per_team),
+            ).fetchall():
+                n, shots, toi = conn.execute(
+                    "SELECT count(*), avg(s.shots), avg(s.toi_s) FROM player_game_stats s JOIN games x "
+                    "ON x.id = s.game_id WHERE s.player_id = ? AND x.start_time_utc < ?",
+                    (pid, g["start_time_utc"]),
+                ).fetchone()
+                if n < 10:
+                    continue
+                pmf = [float(v) for v in poisson.pmf(np.arange(25), shots)]
+                fair = float(1 - poisson.cdf(2, truth.shot_rate[pid] * toi / 3600))
+                proj = conn.execute(
+                    "INSERT INTO player_projections (game_id, player_id, market_id, model_version_id, computed_at, "
+                    "as_of, mean, pmf, inputs, data_quality, trigger_reason, is_current, provenance) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, '{}', 0.9, 'scheduled', 0, 'synthetic')",
+                    (g["id"], pid, market, mv_id, opened, opened, shots, json.dumps({"p": pmf})),
+                ).lastrowid
+                for book in books:
+                    p_open = float(np.clip(fair + rng.normal(0, 0.025), 0.08, 0.92))
+                    p_close = float(np.clip(fair + rng.normal(0, 0.01), 0.08, 0.92))
+                    o_over, o_under = _american(p_open + 0.023), _american(1 - p_open + 0.023)
+                    c_over, c_under = _american(p_close + 0.023), _american(1 - p_close + 0.023)
+                    line_id = conn.execute(
+                        "INSERT INTO prop_lines (game_id, market_id, sportsbook_id, player_id, line, over_price, "
+                        "under_price, status, first_seen_at, last_seen_at, last_changed_at, provenance, source_id) "
+                        "VALUES (?, ?, ?, ?, 2.5, ?, ?, 'closed', ?, ?, ?, 'synthetic', ?)",
+                        (g["id"], market, book, pid, c_over, c_under, opened, closed, closed, src),
+                    ).lastrowid
+                    for at, ov, un in ((opened, o_over, o_under), (closed, c_over, c_under)):
+                        conn.execute(
+                            "INSERT INTO line_movements (prop_line_id, observed_at, line, over_price, under_price, "
+                            "status, source_id) VALUES (?, ?, 2.5, ?, ?, 'open', ?)",
+                            (line_id, at, ov, un, src),
+                        )
+                    pr = price_line("over_under", at_line(pmf, 2.5), 2.5, o_over, o_under, 0.9, cfg, "shots on goal")
+                    over_side = pr.side == "over" or (pr.side == "none" and (pr.edge_over or 0) >= (pr.edge_under or 0))
+                    c = conf.score(
+                        conf.Inputs(
+                            edge=(pr.edge_over if over_side else pr.edge_under) or 0.0,
+                            p_model=pr.p_over if over_side else pr.p_under,
+                            games_in_history=int(n),
+                            data_quality=0.9,
+                            book_novigs=[],
+                            one_sided=False,
+                            moved_against_pts=None,
+                            is_goalie_prop=False,
+                            is_game_market=False,
+                            start_probability=None,
+                            start_confirmed=False,
+                            opp_goalie_confirmed=True,
+                        )
+                    )
+                    row = {
+                        "line_id": line_id,
+                        "sportsbook_id": book,
+                        "line": 2.5,
+                        "over_price": o_over,
+                        "under_price": o_under,
+                    }
+                    _insert(
+                        conn,
+                        proj_col="projection_id",
+                        proj_id=proj,
+                        r=row,
+                        game_id=g["id"],  # type: ignore[arg-type]
+                        market_id=market,
+                        player_id=pid,
+                        pr=pr,
+                        c=c,
+                        now=parse_iso(opened),
+                    )
+                    written += 1
+    conn.commit()
+    return written

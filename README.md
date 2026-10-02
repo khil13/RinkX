@@ -14,7 +14,14 @@ RinkX answers **"why does the model project this player at this number?"** It do
 - a lean only when the edge is at least 3 points, EV is positive and the data is good enough;
 - a 0–100 confidence score with a five-part breakdown and the full calculation.
 
-Each priced line is frozen for later grading. **Phase 6: Best Props.** **Best Props** lists the lines with a lean; **Props** lists every priced line. Both can be filtered by date, game, market, book, side, minimum edge and confidence, and sorted by EV, edge, confidence or start time. Each card shows its source and when the line was seen, marks what is new or has moved since your last visit, and opens the full calculation. Injuries are still marked *not connected yet*. Next: Phase 7 (backtesting and grading).
+Each priced line is frozen for later grading. **Phase 6: Best Props.** **Best Props** lists the lines with a lean; **Props** lists every priced line. Both can be filtered by date, game, market, book, side, minimum edge and confidence, and sorted by EV, edge, confidence or start time. Each card shows its source and when the line was seen, marks what is new or has moved since your last visit, and opens the full calculation. **Phase 7: grading.** After each game, every frozen prediction is graded by book rules: overtime counts, the shootout doesn't, and a player who doesn't play voids the bet. Each one is compared with the closing line. **Model Performance** shows:
+
+- record, profit, ROI with its 95% range and closing-line value;
+- a profit chart with drawdowns;
+- calibration next to the no-vig market;
+- results by market, confidence, month and model version.
+
+Losing stretches stay visible. Model 1.3 also prices game and team totals the way books settle them (the shootout winner counts as a goal). Injuries are still marked *not connected yet*. Next: Phase 8 (alerts, news, parlay builder).
 
 **Speed up the backfill:** Actions → pipeline → Run workflow → set *Games to load this run* to 400. The models need loaded history before they can pass their test, so nothing is projected until then.
 

@@ -82,7 +82,7 @@ flowchart LR
 | ↳ game-day window | every 10 min, 15:00–03:59 UTC (11 am–midnight ET) | Exits in under 30 s if no game starts within 8 h. Otherwise: goalies, injuries, odds (budget-aware), game status → recompute affected projections → reprice → alerts → publish if the bundle changed. |
 | ↳ hourly | minute 17 | Schedule, rosters, news, odds on non-game days at a low cadence. *(Phase 0 runs only this, and only publishes.)* |
 | ↳ nightly | 09:37 UTC (5:37 am ET) | Final boxscores + PBP, shift-chart lineups, grading and CLV, rolling features, correlations. |
-| ↳ weekly | Monday 10:13 UTC | Model retraining, walk-forward backtest, calibration report. Champion promotion stays manual (via an issue form). |
+| ↳ weekly | Monday 10:13 UTC | *Not built (Phase 7 decision):* the hourly run already re-tests the models every 20 h and grades every run. Model versions change by merging code. |
 | `quick-entry.yml` | `issues: opened` with label `quick-entry` | Validates that the author is the repo owner, writes the row (`provenance='manual'`, `source_ref` = your URL), recomputes affected projections, publishes, then closes the issue with a summary comment. |
 | `keepalive.yml` | weekly | Re-enables the scheduled workflows through the API. GitHub silently disables schedules in public repos after 60 days without repository activity, and pipeline runs don't count as activity. |
 | `ci.yml` | push / PR | Lint, typecheck, unit tests, schema tests, copy lint, contract tests. |
