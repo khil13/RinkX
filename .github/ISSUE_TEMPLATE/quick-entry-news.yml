@@ -1,0 +1,65 @@
+name: "Quick Entry: news"
+description: Add a news item (injury, lineup, transaction ...) with its source link. Owner only; applied on the next pipeline run.
+title: "Quick Entry: news"
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Shows on the News page and the player's page, and can trigger a `news` alert. It does not
+        change projections: to rule a player out or confirm a goalie, use those forms.
+  - type: input
+    id: headline
+    attributes:
+      label: Headline
+      description: One line, in your own words or quoted from the source.
+    validations:
+      required: true
+  - type: dropdown
+    id: category
+    attributes:
+      label: Category
+      options:
+        - Injury
+        - Lineup
+        - Goalie
+        - Scratch
+        - Suspension
+        - Coach
+        - Rest
+        - Transaction
+        - General
+    validations:
+      required: true
+  - type: input
+    id: player
+    attributes:
+      label: Player
+      description: NHL player id or full name (optional if you give a team).
+  - type: input
+    id: team
+    attributes:
+      label: Team
+      description: 3-letter abbreviation (optional if you give a player).
+  - type: dropdown
+    id: reliability
+    attributes:
+      label: Reliability
+      options:
+        - Official
+        - Beat reporter
+        - Aggregator
+        - Unverified
+    validations:
+      required: true
+  - type: textarea
+    id: details
+    attributes:
+      label: Details
+      description: Optional. A sentence or two of context.
+  - type: input
+    id: source
+    attributes:
+      label: Source URL
+      placeholder: https://
+    validations:
+      required: true

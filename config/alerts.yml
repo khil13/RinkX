@@ -1,0 +1,41 @@
+# Alerts: push notifications to your phone through ntfy (https://ntfy.sh).
+#
+# Setup (once): install the ntfy app, subscribe to a long random topic name, and add that name as
+# the NTFY_TOPIC repository secret. Anyone who knows the topic can read it, so make it long and
+# random. Without the secret, alerts are still recorded and shown in the app (News → Alerts).
+#
+# Each alert fires at most once per game. When several props in the same game match, they are
+# listed in that one notification. Edit this file in the GitHub app; the next run picks it up.
+#
+# Types and their options (all filters optional unless marked required):
+#   edge       a priced line with a lean
+#              min_edge (points), min_confidence (0-100), min_ev (units per unit), market, player, team
+#   line_move  a line's implied probability moved at least `points` since it was first seen
+#              points (required), market, player, team
+#   goalie     a starting goalie was confirmed
+#              team
+#   news       a news item was entered (Quick Entry: news)
+#              categories (list: injury, lineup, goalie, scratch, suspension, coach, rest, transaction,
+#              general), player, team
+#   line       a specific player's line: market and player required, plus max_line and/or min_price
+#
+# market: a market code (skater_shots_on_goal, skater_goals, skater_assists, skater_points,
+#         skater_pp_points, skater_blocked_shots, skater_anytime_goal, skater_first_goal,
+#         goalie_saves, goalie_win, game_moneyline, game_total)
+# player: NHL player id (the number in the player's page address). team: 3-letter abbreviation.
+# enabled: false turns an alert off without deleting it.
+
+alerts:
+  - key: strong-leans
+    type: edge
+    min_edge: 5
+    min_confidence: 65
+
+  - key: goalie-confirmed
+    type: goalie
+    enabled: false
+
+  - key: injury-news
+    type: news
+    categories: [injury, scratch, suspension]
+    enabled: false

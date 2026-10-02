@@ -281,7 +281,13 @@ The breakdown is always displayed. Confidence buckets (50–59, 60–69, …) ar
 
 ## 10. Correlation engine
 
-* **Empirical.** For pairs of prop outcomes (same player across markets, linemates, same team, opponent skater vs. goalie), estimate correlations from historical games:
+* **As built (Phase 8, `correlation/estimate.py`):**
+  - Each appearance's stat becomes a standardized residual: (actual − the player's average in earlier games) ÷ √average, using players with 5+ earlier games.
+  - Pearson correlations of those residuals are pooled for the same player, teammates, opponents, and a skater vs the opposing starting goalie. Teammate and opponent pairs use closed-form sums per team-game, and a test checks them against brute force.
+  - `n_obs` counts independent units: player-games, or team-games. The 95% CI is Fisher's z with that n.
+  - Correlations are re-estimated at most every 20 h.
+  - Not built: tetrachoric correlations at specific lines, linemate (line-combination) pairs, and simulation-based same-game joints.
+* **Empirical (design).** For pairs of prop outcomes (same player across markets, linemates, same team, opponent skater vs. goalie), estimate correlations from historical games:
   * Binary outcomes at specific lines: phi / tetrachoric correlation.
   * Continuous: Pearson correlation of residuals (actual − projected), which removes the shared-mean confound.
   * Each estimate stores `n_obs`, a bootstrap CI, the method and the window.

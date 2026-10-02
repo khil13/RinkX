@@ -41,6 +41,9 @@ def test_configured_run_publishes_encrypted_bundle(tmp_path: Path, keys):
         "models.json.enc",
         "props/best.json.enc",
         "performance.json.enc",
+        "news.json.enc",
+        "alerts.json.enc",
+        "correlations.json.enc",
     }
     assert result.store_pulled is None and result.store_pushed is not None
 

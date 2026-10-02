@@ -326,6 +326,7 @@ export interface PlayerPage {
   hit_rates_basis: "games_played" | "starts";
   projection: PlayerProjection;
   lines: { game: { id: number; date: string }; markets: LineMarket[] } | null;
+  news?: NewsItem[];
 }
 
 // ---- Phase 3: projections (pipeline/rinkx/publish/projections.py) ----
@@ -688,4 +689,41 @@ export interface Performance {
   by_version: (BetRecord & { key: string })[];
   voids: Record<string, number>;
   recent: GradedBet[];
+}
+
+// ---- News & alerts (Phase 8) ----------------------------------------------------------------------
+
+export interface NewsItem {
+  id: number;
+  headline: string;
+  summary: string | null;
+  url: string;
+  category: "injury" | "lineup" | "goalie" | "scratch" | "suspension" | "coach" | "rest" | "transaction" | "general";
+  reliability: "official" | "beat_reporter" | "aggregator" | "unverified";
+  published_at: string;
+  player: { id: number; name: string } | null;
+  team: string | null;
+}
+
+export interface NewsFeed {
+  generated_at: string;
+  days: number;
+  items: NewsItem[];
+}
+
+export interface AlertsHistory {
+  generated_at: string;
+  delivery: "ntfy" | null;
+  alerts: { key: string; type: string; active: boolean; condition: Record<string, unknown>; last_triggered_at: string | null }[];
+  events: {
+    key: string;
+    type: string;
+    game: number;
+    matchup: string;
+    message: string;
+    matches: number;
+    triggered_at: string;
+    delivery: "pending" | "sent" | "failed";
+    delivered_at: string | null;
+  }[];
 }

@@ -7,10 +7,11 @@ Rules: values come straight from the store; anything RinkX can't know yet is nul
 from __future__ import annotations
 
 import sqlite3
+from datetime import datetime
 from typing import Any
 
 from rinkx.analytics import hitrates
-from rinkx.publish import lines, projections
+from rinkx.publish import lines, news, projections
 
 NOT_CONNECTED = "not_connected"  # the feed that would provide this isn't built yet
 INSUFFICIENT = "insufficient_sample"
@@ -388,7 +389,9 @@ def _goalie_totals(games: list[dict[str, Any]]) -> dict[str, Any] | None:
     }
 
 
-def player(conn: sqlite3.Connection, nhl_player_id: int, season_id: int | None) -> dict[str, Any]:
+def player(
+    conn: sqlite3.Connection, nhl_player_id: int, season_id: int | None, now: datetime | None = None
+) -> dict[str, Any]:
     p = conn.execute(
         "SELECT p.*, t.abbrev AS team_abbrev FROM players p LEFT JOIN teams t ON t.id = p.current_team_id "
         "WHERE p.nhl_player_id = ?",
@@ -438,4 +441,5 @@ def player(conn: sqlite3.Connection, nhl_player_id: int, season_id: int | None) 
         "hit_rates_basis": basis,
         "projection": projections.player_projection(conn, p["id"]),
         "lines": lines.player_lines(conn, p["id"]),
+        "news": news.for_player(conn, p["id"], now) if now is not None else [],
     }

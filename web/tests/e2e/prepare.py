@@ -27,6 +27,8 @@ sys.path.insert(0, str(REPO / "pipeline/tests"))
 
 from rinkx import crypto  # noqa: E402
 from rinkx.config import Settings  # noqa: E402
+from rinkx.alerts.evaluate import run_alerts  # noqa: E402
+from rinkx.correlation.estimate import run_correlations  # noqa: E402
 from rinkx.grading.grade import run_grading  # noqa: E402
 from rinkx.models.project import run_models  # noqa: E402
 from rinkx.pricing.price import run_pricing  # noqa: E402
@@ -185,9 +187,17 @@ def models_site(env: dict[str, str], tmp: Path) -> None:
         "### Status\n\nConfirmed\n\n### Source URL\n\nhttps://example.org/synthetic-source\n"
     )
     later = now + timedelta(hours=1)
-    qe = run_quick_entry(conn, _Tracker([Issue(1, "Quick Entry: goalie", body, "owner", iso(now))]), "owner", later)
+    news = (
+        "### Headline\n\nSynthetic note: day-to-day with a minor injury\n\n### Category\n\nInjury\n\n"
+        "### Player\n\n8000001\n\n### Team\n\n_No response_\n\n### Reliability\n\nBeat reporter\n\n"
+        "### Details\n\nTest data.\n\n### Source URL\n\nhttps://example.org/synthetic-news\n"
+    )
+    issues = [Issue(1, "Quick Entry: goalie", body, "owner", iso(now)), Issue(2, "Quick Entry: news", news, "owner", iso(now))]
+    qe = run_quick_entry(conn, _Tracker(issues), "owner", later)
     run_models(conn, later, today, qe.reasons)
     _synthetic_lines(conn, game, now, later)
+    run_correlations(conn, later)  # parlay correlations from the synthetic history
+    run_alerts(conn, later, send=None, site_url=None)  # config/alerts.yml; no topic, so "not sent"
     settings = Settings.from_env(env | {"RINKX_ENV": "dev"})
     build_bundle(conn, site("models") / "data", settings, now=later, store_asset=None, today=today)
     conn.close()

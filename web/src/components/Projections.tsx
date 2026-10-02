@@ -41,14 +41,13 @@ function effect(e: number): string {
 }
 
 /** Link that opens a prefilled GitHub issue form; null when not on the published site. */
-export function quickEntryUrl(template: "goalie" | "player-out", fields: Record<string, string>): string | null {
+const QE_TITLE = { goalie: "Quick Entry: goalie", "player-out": "Quick Entry: player out", news: "Quick Entry: news" };
+type QuickEntryTemplate = keyof typeof QE_TITLE;
+
+export function quickEntryUrl(template: QuickEntryTemplate, fields: Record<string, string>): string | null {
   const gh = githubRepo();
   if (!gh) return null;
-  const q = new URLSearchParams({
-    template: `quick-entry-${template}.yml`,
-    title: template === "goalie" ? "Quick Entry: goalie" : "Quick Entry: player out",
-    ...fields,
-  });
+  const q = new URLSearchParams({ template: `quick-entry-${template}.yml`, title: QE_TITLE[template], ...fields });
   return `https://github.com/${gh.owner}/${gh.repo}/issues/new?${q.toString()}`;
 }
 
@@ -57,7 +56,7 @@ export function QuickEntryLink({
   fields,
   children,
 }: {
-  template: "goalie" | "player-out";
+  template: QuickEntryTemplate;
   fields: Record<string, string>;
   children: React.ReactNode;
 }) {
