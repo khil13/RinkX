@@ -47,7 +47,23 @@ export interface Envelope<T> {
   meta: Meta;
 }
 
+export interface OddsAdmin {
+  credits: { remaining: number | null; used: number | null; as_of: string } | null;
+  monthly_credits: number | null;
+  reserve: number | null;
+  last_plan: { allowance: number; remaining: number; game_lines: boolean; prop_games: number;
+               unmapped_markets: string[]; at: string } | null;
+  unresolved_players: {
+    name: string;
+    reason: string;
+    game_id: number;
+    suggestion: { nhl_id: number; name: string } | null;
+    detected_at: string;
+  }[];
+}
+
 export interface HealthData {
+  odds?: OddsAdmin;
   build: BuildInfo;
   store: { asset: string | null; schema_version: number };
   table_rows: Record<string, number>;
@@ -155,6 +171,8 @@ export interface GameSummary {
   environment_reason: Reason;
   /** Model-only game outlook (no odds); null when not projected or not tested yet. */
   model: { p_home_win: number | null; goals_home: number | null; goals_away: number | null } | null;
+  /** open sportsbook lines for this game (Phase 4) */
+  line_count: number;
   fetched_at: string;
 }
 
@@ -191,6 +209,7 @@ export interface GameDetail extends GameSummary {
   boxscore: { skaters: SkaterLine[]; goalies: GoalieLine[] } | null;
   boxscore_reason: Reason | null;
   projections: GameProjections;
+  lines: GameLines;
 }
 
 export interface Slate {
@@ -306,6 +325,7 @@ export interface PlayerPage {
   hit_rates: Record<string, HitRateStat>;
   hit_rates_basis: "games_played" | "starts";
   projection: PlayerProjection;
+  lines: { game: { id: number; date: string }; markets: LineMarket[] } | null;
 }
 
 // ---- Phase 3: projections (pipeline/rinkx/publish/projections.py) ----
@@ -461,4 +481,54 @@ export interface ModelsReport {
   stats: Record<string, StatTest>;
   markets: Record<string, { stat: string; label: string }>;
   not_modeled: { market: string; label: string; reason: string }[];
+}
+
+// ---- Phase 4: sportsbook lines (pipeline/rinkx/publish/lines.py) ----
+
+export interface LineMove {
+  at: string;
+  line: number | null;
+  over: number | null;
+  under: number | null;
+  status: string;
+}
+
+export interface BookLine {
+  book: string;
+  book_name: string;
+  line: number | null;
+  /** over / yes / home price (American) */
+  over: number | null;
+  /** under / no / away price */
+  under: number | null;
+  last_seen_at: string;
+  last_changed_at: string;
+  movement?: LineMove[];
+}
+
+export interface LineRow {
+  player: { id: number; name: string } | null;
+  team: string | null;
+  books: BookLine[];
+  line: number | null;
+  best_over: { book: string; price: number } | null;
+  best_under: { book: string; price: number } | null;
+  /** median no-vig probability of over/yes/home across books at the common line */
+  consensus: { p_over: number; books: number } | null;
+  consensus_reason: "vig_not_removable" | null;
+  lines_differ: boolean;
+}
+
+export interface LineMarket {
+  market: string;
+  label: string;
+  kind: "over_under" | "yes_no" | "moneyline";
+  rows: LineRow[];
+}
+
+export interface GameLines {
+  books: string[];
+  markets: LineMarket[];
+  fetched_at: string | null;
+  reason: "not_connected" | "no_lines_yet" | null;
 }

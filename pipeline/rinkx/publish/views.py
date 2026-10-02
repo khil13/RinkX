@@ -10,7 +10,7 @@ import sqlite3
 from typing import Any
 
 from rinkx.analytics import hitrates
-from rinkx.publish import projections
+from rinkx.publish import lines, projections
 
 NOT_CONNECTED = "not_connected"  # the feed that would provide this isn't built yet
 INSUFFICIENT = "insufficient_sample"
@@ -123,6 +123,9 @@ def game_summary(conn: sqlite3.Connection, g: sqlite3.Row) -> dict[str, Any]:
         "environment": None,
         "environment_reason": NOT_CONNECTED,
         "model": projections.model_summary(conn, g["id"]),  # model win % and goals; not odds
+        "line_count": conn.execute(
+            "SELECT count(*) FROM prop_lines WHERE game_id = ? AND status = 'open'", (g["id"],)
+        ).fetchone()[0],
         "fetched_at": g["fetched_at"],
     }
 
@@ -229,6 +232,7 @@ def game_detail(conn: sqlite3.Connection, nhl_game_id: int) -> dict[str, Any]:
         out[side]["lines"] = None
         out[side]["lines_reason"] = NOT_CONNECTED
     out["projections"] = projections.game_projections(conn, g)
+    out["lines"] = lines.game_lines(conn, g["id"])
     box = _boxscore(conn, g["id"])
     out["boxscore"] = box
     out["boxscore_reason"] = None if box else ("not_final" if g["status"] != "final" else "data_unavailable")
@@ -433,4 +437,5 @@ def player(conn: sqlite3.Connection, nhl_player_id: int, season_id: int | None) 
         "hit_rates": rates,
         "hit_rates_basis": basis,
         "projection": projections.player_projection(conn, p["id"]),
+        "lines": lines.player_lines(conn, p["id"]),
     }

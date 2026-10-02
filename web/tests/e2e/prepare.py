@@ -109,6 +109,55 @@ class _Tracker:
     def close(self, number: int, completed: bool) -> None: ...
 
 
+class _OddsTransport:
+    """Serves SYNTHETIC odds payloads (DEV site only) in The Odds API v4 shape."""
+
+    def __init__(self, routes: dict[str, object]) -> None:
+        self.routes, self.calls, self.remaining = routes, 0, 500
+
+    def get(self, url: str) -> tuple[object, dict[str, str]]:
+        import urllib.parse
+
+        self.calls += 1
+        path = urllib.parse.urlparse(url).path.removeprefix("/v4")
+        cost = 0 if path.endswith("/events") else 3
+        self.remaining -= cost
+        return self.routes[path], {"x-requests-last": str(cost), "x-requests-remaining": str(self.remaining)}
+
+
+def _synthetic_lines(conn, game: int, first: datetime, second: datetime) -> None:
+    from rinkx.ingestion.odds.client import OddsClient
+    from rinkx.ingestion.odds.jobs import OddsConfig, run_odds
+
+    g = conn.execute(
+        "SELECT g.start_time_utc, h.location || ' ' || h.name, a.location || ' ' || a.name, g.home_team_id "
+        "FROM games g JOIN teams h ON h.id = g.home_team_id JOIN teams a ON a.id = g.away_team_id WHERE g.id = ?",
+        (game,),
+    ).fetchone()
+    ev = {"id": "syn-ev", "commence_time": g[0], "home_team": g[1], "away_team": g[2]}
+    skaters = [r[0] for r in conn.execute(
+        "SELECT full_name FROM players WHERE current_team_id = ? AND position <> 'G' ORDER BY id LIMIT 3", (g[3],)
+    )]
+
+    def payload(move: int) -> dict:
+        def book(key: str, shift: int) -> dict:
+            outs = []
+            for i, name in enumerate(skaters):
+                outs += [{"name": "Over", "description": name, "price": -120 - 10 * i + shift - move, "point": 2.5},
+                         {"name": "Under", "description": name, "price": -110 + 5 * i - shift, "point": 2.5}]
+            return {"key": key, "title": key, "markets": [{"key": "player_shots_on_goal", "outcomes": outs}]}
+
+        return ev | {"bookmakers": [book("fanduel", 0), book("betmgm", 5)]}
+
+    game_odds = [ev | {"bookmakers": [{"key": "fanduel", "markets": [{"key": "h2h", "outcomes": [
+        {"name": g[1], "price": -135}, {"name": g[2], "price": 115}]}]}]}]
+    cfg = OddsConfig.load()
+    for at, move in ((first, 0), (second + timedelta(hours=6), 15)):
+        routes = {"/sports/icehockey_nhl/events": [ev], "/sports/icehockey_nhl/odds": game_odds,
+                  "/sports/icehockey_nhl/events/syn-ev/odds": payload(move)}
+        run_odds(conn, OddsClient("synthetic-dev-key", _OddsTransport(routes)), at, cfg)
+
+
 def models_site(env: dict[str, str], tmp: Path) -> None:
     """Synthetic league (labelled: DEV build, SYNTHETIC data): models tested, projections published,
     then the away team's backup goalie confirmed through Quick Entry so before/after shows."""
@@ -132,6 +181,7 @@ def models_site(env: dict[str, str], tmp: Path) -> None:
     later = now + timedelta(hours=1)
     qe = run_quick_entry(conn, _Tracker([Issue(1, "Quick Entry: goalie", body, "owner", iso(now))]), "owner", later)
     run_models(conn, later, today, qe.reasons)
+    _synthetic_lines(conn, game, now, later)
     settings = Settings.from_env(env | {"RINKX_ENV": "dev"})
     build_bundle(conn, site("models") / "data", settings, now=later, store_asset=None, today=today)
     conn.close()

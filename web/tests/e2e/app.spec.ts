@@ -210,7 +210,9 @@ test("synthetic league: projections, Explain, and before/after from a Quick Entr
   await expect(outlook).toContainText("Model only: no odds are connected");
   await expect(home.getByText("1st G", { exact: true })).toBeVisible();
 
-  await home.getByRole("link").first().click();
+  // Navigate by the link's target (on a phone the fixed tab bar can cover a link near the bottom edge).
+  const href = await home.getByRole("link").first().getAttribute("href");
+  await page.goto(MODELS + href);
   await expect(page.getByText(/^Projection · vs T01/)).toBeVisible();
   const sog = page.getByRole("article", { name: "Shots on goal projection" });
   await expect(sog).toBeVisible();
@@ -233,4 +235,31 @@ test("model tests page shows what passed and what was held back", async ({ page 
   await expect(win).toContainText("vs standings records (log5)");
   await expect(page.getByRole("article", { name: "First goal scorer test" })).toContainText("PASSED · PUBLISHED");
   await expect(page.getByText(/Saves \+ Win: needs a joint saves-and-win model/)).toBeVisible();
+});
+
+test("sportsbook lines: comparison table, best price, no-vig, movement (synthetic)", async ({ page }) => {
+  await unlock(page, true, MODELS);
+  await page.goto(`${MODELS}#/games/2025029999`);
+  const sog = page.getByRole("table", { name: "Shots on Goal lines" });
+  await expect(sog).toBeVisible();
+  await expect(sog.locator("thead").getByText("FanDuel")).toBeVisible();
+  await expect(sog.locator("thead").getByText("BetMGM")).toBeVisible();
+  await expect(sog.getByTitle("Best price").first()).toBeVisible();
+  await expect(sog.getByText(/^\d+%$/).first()).toBeVisible(); // no-vig consensus
+  await expect(page.getByRole("table", { name: "Moneyline lines" })).toBeVisible();
+  await expect(page.getByText(/Prices change; check the book before acting/)).toBeVisible();
+
+  await page.goto(`${MODELS}#/players/8000001`);
+  const card = page.getByRole("article", { name: "Shots on Goal line" });
+  await expect(card).toBeVisible();
+  await expect(card.getByRole("img", { name: "Line movement" })).toBeVisible();
+  await expect(card).toContainText("FanDuel");
+});
+
+test("real-data site without an odds key says lines aren't connected", async ({ page }) => {
+  await unlock(page);
+  await page.goto(`${CONFIGURED}#/games/2025021012`);
+  await expect(page.getByText(/Sportsbook lines aren't connected/)).toBeVisible();
+  await page.goto(`${CONFIGURED}#/admin`);
+  await expect(page.getByText(/Not connected\. Add the ODDS_API_KEY repository secret/)).toBeVisible();
 });

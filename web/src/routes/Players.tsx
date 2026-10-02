@@ -3,6 +3,7 @@ import { Link, useParams } from "react-router";
 import { Missing, Notice, Panel, Spinner } from "../components/ui";
 import { useEncrypted } from "../lib/data/fetch";
 import { HitRates } from "../components/HitRates";
+import { PlayerLinesPanel } from "../components/Lines";
 import { MODEL_REASON_TEXT, ProjectionCard, TestedNote } from "../components/Projections";
 import type { DnpGame, GoalieGame, PlayerIndexEntry, PlayerPage, SkaterGame } from "../lib/data/types";
 import { longDate, mmss, num, seasonLabel, signed } from "../lib/format";
@@ -205,6 +206,7 @@ export function Player() {
     hit_rates,
     hit_rates_basis,
     projection,
+    lines,
   } = res.value.data;
   const goalie = p.position === "G";
   const cells = goalie ? GOALIE_TOTALS : SKATER_TOTALS;
@@ -270,6 +272,12 @@ export function Player() {
           <p className="text-sm text-muted">{MODEL_REASON_TEXT[projection.reason ?? "no_upcoming_projection"]}</p>
         )}
       </Panel>
+
+      {lines && lines.markets.length > 0 && (
+        <Panel title={`Sportsbook lines · ${longDate(lines.game.date)}`}>
+          <PlayerLinesPanel markets={lines.markets} />
+        </Panel>
+      )}
 
       <Panel title="Hit rates">
         {Object.keys(hit_rates).length ? (

@@ -63,6 +63,8 @@ jobs:
           RINKX_DATA_KEY: ${{ secrets.DATA_KEY }}
           RINKX_STORE_KEY: ${{ secrets.STORE_KEY }}
           RINKX_BOXSCORE_LIMIT: ${{ inputs.boxscore_limit || '40' }}
+          # Optional. Without it the site says "Sportsbook lines: not connected".
+          RINKX_ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
           GH_TOKEN: ${{ github.token }}
         run: python -m rinkx run --out web/dist/data
 

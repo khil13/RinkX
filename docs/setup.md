@@ -50,7 +50,16 @@ When the run finishes, reload the site and enter your passphrase. Tick **Remembe
 | Data store (`rinkx-*.db.enc`) | the `store` release | yes, but encrypted (AES-256-GCM, STORE_KEY) |
 | DATA_KEY, STORE_KEY | Actions secrets + your password manager | **no** |
 | Passphrase | your head / password manager | **no** |
+| ODDS_API_KEY | Actions secret | **no** (redacted from every log and error) |
 | Quick Entry issues | this repo's Issues | **yes**: they hold only what you typed and its public source link. The pipeline's reply never includes projections. |
+
+### Sportsbook lines (Phase 4)
+
+1. Get a free key at **the-odds-api.com** (the free plan has 500 credits a month).
+2. In GitHub, go to **Settings → Secrets and variables → Actions → New repository secret**. Name it `ODDS_API_KEY`, paste the key, and save.
+3. Optional but recommended: run **Actions → probe-odds → Run workflow** once. It checks that the API's real responses match RinkX's parser and market list. It prints only market and bookmaker names, never prices, and costs about 9 credits.
+
+The next pipeline run starts fetching lines for your books (`config/books.yml`: FanDuel and BetMGM). `config/budget.yml` decides how credits are spent. On the free plan that's game lines once a day plus props for about one or two games a day, soonest first. To cover every game, raise `monthly_credits` after upgrading your plan. **Admin** shows credits left and any sportsbook player names that didn't match an NHL player. Those lines stay hidden until you add the name to `config/player_aliases.yml`.
 
 ### Quick Entry (confirm a goalie, rule a player out)
 

@@ -1,0 +1,28 @@
+# Odds-API credit budget. The pipeline never plans to spend past this; when credits run low
+# it fetches fewer games/markets and the app says which games have lines.
+# The Odds API: 1 credit per market per region per call (up to 10 bookmakers = 1 region).
+monthly_credits: 500      # your plan's monthly credits (free plan: 500)
+reserve: 20               # never plan to spend below this many remaining credits
+
+game_lines:               # moneyline + total for every game in one call
+  markets: [h2h, totals]
+  times_per_day: 1
+
+props:
+  window_hours: 30        # only games starting within this many hours
+  # Refresh a game's props when it is due: hours since its last fetch, by time to puck drop.
+  refresh_hours:
+    far: 24               # more than 12 h before puck drop
+    near: 6               # 3-12 h before
+    close: 2              # under 3 h before
+  # Markets in priority order: when credits are short, the first ones are fetched first.
+  markets:
+    - player_shots_on_goal
+    - player_points
+    - player_total_saves
+    - player_goal_scorer_anytime
+    - player_assists
+    - player_blocked_shots
+    - player_goals
+    - player_power_play_points
+    - player_goal_scorer_first

@@ -15,7 +15,7 @@ from typing import Any
 from rinkx import __version__, crypto
 from rinkx.config import ConfigError, Settings
 from rinkx.ingestion.nhl.jobs import current_season
-from rinkx.publish import guards, projections, views
+from rinkx.publish import guards, lines, projections, views
 from rinkx.publish.schemas import BuildInfo, Envelope, FeedStatus, FileEntry, Manifest, Meta
 from rinkx.store.db import schema_version
 from rinkx.timeutil import iso, parse_iso, slate_date
@@ -121,6 +121,7 @@ def _health(conn: sqlite3.Connection, store_asset: str | None, build: BuildInfo)
         "store": {"asset": store_asset, "schema_version": schema_version(conn)},
         "table_rows": {t: conn.execute(f"SELECT count(*) FROM {t}").fetchone()[0] for t in tables},
         "synthetic_rows": guards.synthetic_row_counts(conn),
+        "odds": lines.odds_admin(conn),
         "data_sources": sources,
         "recent_runs": runs,
     }
