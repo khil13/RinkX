@@ -13,6 +13,8 @@ from pathlib import Path
 from rinkx.config import Settings
 from rinkx.ingestion.http import Fetcher, HttpFetcher, ReplayFetcher
 from rinkx.ingestion.nhl.jobs import NhlOptions, run_nhl
+from rinkx.ingestion.odds.client import OddsClient, UrllibTransport
+from rinkx.ingestion.odds.jobs import run_odds
 from rinkx.models.project import run_models
 from rinkx.publish.build import build_bundle, missing_setup
 from rinkx.publish.schemas import Manifest
@@ -41,6 +43,7 @@ def run(
     push: bool = True,
     now: datetime | None = None,
     tracker: IssueTracker | None = None,
+    odds_client: OddsClient | None = None,
 ) -> RunResult:
     now = now or utcnow()
     settings.workdir.mkdir(parents=True, exist_ok=True)
@@ -67,7 +70,7 @@ def run(
     try:
         version = migrate(conn, settings.db_dir)
         log.info("schema version %d", version)
-        after_save = _run_stages(conn, settings, now, tracker)
+        after_save = _run_stages(conn, settings, now, tracker, odds_client)
         manifest = build_bundle(conn, out_dir, settings, now=now, store_asset=pulled, today=settings.today)
         pushed = None
         if push:
@@ -94,12 +97,22 @@ def _issue_tracker(settings: Settings) -> IssueTracker | None:
 
 
 def _run_stages(
-    conn: sqlite3.Connection, settings: Settings, now: datetime, tracker: IssueTracker | None
+    conn: sqlite3.Connection,
+    settings: Settings,
+    now: datetime,
+    tracker: IssueTracker | None,
+    odds_client: OddsClient | None = None,
 ) -> list[Callable[[], None]]:
     """Run every stage; return follow-up actions to perform once the store is saved."""
     if "nhl" in settings.sources:
         fetcher: Fetcher = ReplayFetcher(settings.fixtures_dir) if settings.fixtures_dir is not None else HttpFetcher()
         run_nhl(conn, fetcher, now, NhlOptions(today=settings.today, boxscore_limit=settings.boxscore_limit))
+
+    # Sportsbook lines: only with an ODDS_API_KEY (or an injected client in tests).
+    if odds_client is None and settings.odds_api_key and "nhl" in settings.sources:
+        odds_client = OddsClient(settings.odds_api_key, UrllibTransport())
+    if odds_client is not None:
+        run_odds(conn, odds_client, now)
 
     tracker = tracker or _issue_tracker(settings)
     started = iso(now)

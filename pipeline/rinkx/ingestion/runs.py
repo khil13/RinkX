@@ -61,6 +61,7 @@ class RunStats:
     rows_read: int = 0
     rows_upserted: int = 0
     http_calls: int = 0
+    quota_remaining: int | None = None  # metered APIs (odds)
     errors: list[str] = field(default_factory=list)  # per-item failures; the run is then 'partial'
     meta: dict[str, object] = field(default_factory=dict)
 
@@ -90,13 +91,14 @@ def ingestion_run(conn: sqlite3.Connection, source_id: int, job_name: str) -> It
         log.error("%s failed: %s\n%s", job_name, error, traceback.format_exc())
     conn.execute(
         "UPDATE ingestion_runs SET status = ?, finished_at = ?, rows_read = ?, rows_upserted = ?, "
-        "http_calls = ?, error = ?, meta = ? WHERE id = ?",
+        "http_calls = ?, quota_remaining = ?, error = ?, meta = ? WHERE id = ?",
         (
             status,
             iso(utcnow()),
             stats.rows_read,
             stats.rows_upserted,
             stats.http_calls,
+            stats.quota_remaining,
             error,
             json.dumps(stats.meta),
             run_id,

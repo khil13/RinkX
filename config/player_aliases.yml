@@ -1,0 +1,5 @@
+# Sportsbook spellings that don't match the NHL's, mapped to NHL player ids. The Admin page
+# lists unmatched names with a suggested id; add them here. Unmatched lines are never shown.
+# Example:
+#   "Mitch Marner": 8478483
+aliases: {}

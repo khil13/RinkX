@@ -126,7 +126,8 @@ function GameCard({ g }: { g: GameSummary }) {
           </span>
         )}
         <span>
-          Odds: <Missing reason={g.environment_reason} />
+          Lines:{" "}
+          {g.line_count > 0 ? <span className="num">{g.line_count} open</span> : <Missing reason={g.environment_reason} />}
         </span>
       </div>
     </Link>

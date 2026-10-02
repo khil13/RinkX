@@ -72,6 +72,7 @@ class Settings:
     fixtures_dir: Path | None  # serve recorded API responses instead of the network (tests/dev)
     today: date | None  # override the slate date (tests/dev)
     boxscore_limit: int  # max box scores fetched per run (raise for a one-off backfill)
+    odds_api_key: str | None = None  # The Odds API (Actions secret ODDS_API_KEY); never logged
 
     @classmethod
     def from_env(cls, environ: dict[str, str] | None = None) -> Settings:
@@ -98,6 +99,7 @@ class Settings:
             fixtures_dir=Path(e["RINKX_FIXTURES"]) if e.get("RINKX_FIXTURES") else None,
             today=date.fromisoformat(e["RINKX_TODAY"]) if e.get("RINKX_TODAY") else None,
             boxscore_limit=int(e.get("RINKX_BOXSCORE_LIMIT", "40")),
+            odds_api_key=e.get("RINKX_ODDS_API_KEY") or None,
         )
 
     def require_data_key(self) -> bytes:

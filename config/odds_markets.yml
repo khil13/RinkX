@@ -1,0 +1,17 @@
+# The Odds API market keys -> RinkX markets (db markets.code). A key the API returns that is
+# not listed here is recorded and shown on the Admin page, never guessed at.
+# Verify keys with: Actions -> probe-odds -> Run workflow (prints market keys only, no prices).
+sport: icehockey_nhl
+regions: us
+markets:
+  h2h: game_moneyline
+  totals: game_total
+  player_shots_on_goal: skater_shots_on_goal
+  player_goals: skater_goals
+  player_assists: skater_assists
+  player_points: skater_points
+  player_power_play_points: skater_pp_points
+  player_blocked_shots: skater_blocked_shots
+  player_total_saves: goalie_saves
+  player_goal_scorer_anytime: skater_anytime_goal
+  player_goal_scorer_first: skater_first_goal

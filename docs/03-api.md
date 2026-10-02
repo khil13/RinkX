@@ -132,12 +132,24 @@ The TypeScript implementation is tested against **shared fixture vectors** gener
 
 `games/{id}` carries `projections: {models, reason, home, away}`. Each side has `goalie` (projected or confirmed starter, with probability and source), `players[]` (expected TOI and PP TOI, and per market `{mean, median, sd, p_ge[], data_quality, missing_inputs, previous}`) and `out[]` (players ruled out via Quick Entry, with source). `games/{id}.projections.environment` *(model 1.1)* carries the model-only game outlook: `win {home, away, tied_after_regulation, expected_goals, factors, previous}`, and `totals {home, away, game}`, each with `mean`, `p_ge[]` and `factors`. Every slate game summary carries a compact `model {p_home_win, goals_home, goals_away}`. Neither involves odds. `players/{id}` carries `projection: {game, markets[], reason}`. Its markets add the full `pmf`, `factors_for` / `factors_against` (`{name, effect, detail}`, where `effect` is multiplicative: the reference mean × Π(1 + effect) = projected mean) and `inputs`. `previous` is set when a Quick Entry changed the projection (`{mean, computed_at, reason}`), which drives the before → after display. When nothing is projected, `reason` says why (`models_not_ready`, `no_model_passed`, `game_started`, `ruled_out`, …). Projections never appear for a stat whose model failed its test.
 
+## Sportsbook lines (Phase 4)
+
+`games/{id}.lines` = `{books, markets[], fetched_at, reason}`. Each market has `rows[]`, one per player (or the home team, for the moneyline). A row holds:
+
+- `books[]`: `{book, line, over, under, last_seen_at, last_changed_at}`, with American prices. Moneyline over/under = home/away; yes/no markets use over = Yes.
+- `line`: the most common line across books.
+- `best_over` / `best_under`: the best price, among books at that line only.
+- `consensus`: `{p_over, books}`, the median multiplicative no-vig probability. It is `null` with `consensus_reason: "vig_not_removable"` when only one side is offered.
+- `lines_differ`
+
+`players/{id}.lines` gives the same data for the player's next game with lines, plus each book's `movement[]` (line_movements). Only lines whose player resolved to an NHL id are stored, so only those are published. Slate game summaries carry `line_count`. `admin/health.odds` holds credits, the last budget plan, unmapped market keys, and unmatched player names with suggestions.
+
 ## Write path: Quick Entry and config
 
 | Action | How |
 |---|---|
 | Confirm goalie / rule a player out *(built in Phase 3)*; line or PP change / injury / news *(later)* | GitHub **Issue form** (`.github/ISSUE_TEMPLATE/quick-entry-*.yml`), opened prefilled from buttons on the Game page. Required: game, player, status, **source URL**. Opening the issue starts `pipeline.yml`, but only for the owner's issues titled `Quick Entry:`. The run applies every open owner entry once (logged in `quick_entries`), writing `goalie_starts` / `game_availability` with `provenance='manual'`. It then recomputes the game's projections, tagging the changed ones `goalie_confirmed` / `player_out`, and publishes. **After** the store is saved, it comments and closes the issue. The repo is public, so the comment says how many projections changed but never shows their values; before → after is shown only in the app. |
 | Create or edit alerts | Edit `config/alerts.yml` in the GitHub app. It syncs into the `alerts` table on the next run. |
-| Choose books / odds budget | `config/books.yml`, `config/budget.yml` |
+| Choose books / odds budget | `config/books.yml`, `config/budget.yml`; market mapping in `config/odds_markets.yml`; name fixes in `config/player_aliases.yml` |
 | Promote a model | Issue form "Promote model" (owner only) → the workflow flips champion status and attaches the backtest report |
 | Force refresh | **Actions → pipeline → Run workflow** in the GitHub app |

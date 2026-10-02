@@ -4,6 +4,7 @@ import { useEncrypted } from "../lib/data/fetch";
 import type { GameDetail, Side } from "../lib/data/types";
 import { clock, localTime, longDate, mmss, num, signed } from "../lib/format";
 import { RestChip, statusLabel } from "./Games";
+import { GameLinesPanel } from "../components/Lines";
 import {
   GameOutlook,
   GoalieLine,
@@ -273,7 +274,6 @@ export function Game() {
                 : "Not projected: the game model hasn't passed its test on past games yet (see Model Tests)."}
             </p>
           )}
-          <p className="mt-1 text-xs text-muted">Sportsbook lines: not connected (Phase 4).</p>
         </Panel>
         <Panel title="Injuries">
           <Missing reason={g.home.injuries_reason} />
@@ -307,6 +307,10 @@ export function Game() {
           )}
         </Panel>
       )}
+
+      <Panel title="Sportsbook lines">
+        <GameLinesPanel lines={g.lines} />
+      </Panel>
 
       <Panel title="Team context">
         <ContextTable away={g.away} home={g.home} />

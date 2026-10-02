@@ -1,0 +1,25 @@
+name: probe-odds
+
+# Manual check that The Odds API's real responses match RinkX's parser and market mapping.
+# Prints names and formats only (no prices or player names). Costs ~1 credit per prop market.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install ./pipeline
+      - name: Probe
+        env:
+          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+        run: |
+          if [ -z "$ODDS_API_KEY" ]; then echo "Add the ODDS_API_KEY secret first."; exit 1; fi
+          python scripts/probe_odds.py

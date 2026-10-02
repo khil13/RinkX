@@ -83,4 +83,6 @@ class SourceAdapter(Protocol):
 Every record must carry `source_id`, `source_ref`, `fetched_at`, `provenance` and `quality`, or validation rejects it. Parse failures go to `data_quality_issues`. They never become silent zeros.
 
 ### Entity resolution
+**Implemented in Phase 4** (`pipeline/rinkx/ingestion/odds/resolve.py`). The order is: a stored alias, then the owner's `config/player_aliases.yml`, then an exact name match, then curated nickname rules (Mitch → Mitchell). Fuzzy matches are never applied automatically; they appear as suggestions on the Admin page. The original plan follows.
+
 Player names differ across vendors ("Mitch Marner" vs "Mitchell Marner"). Odds vendors key on names, and the NHL uses numeric IDs. A `player_aliases` mapping table (added in Phase 4) resolves vendor names to `players.id` using exact match, then a curated alias table, then fuzzy match restricted to the game's two rosters. A fuzzy match below the confidence threshold goes to an admin review queue. Unresolved lines are **not shown**, so a line is never attached to the wrong player.

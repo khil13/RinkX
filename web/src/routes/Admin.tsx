@@ -53,6 +53,62 @@ export function Admin() {
         </dl>
       </Panel>
 
+      <Panel title="Sportsbook lines (The Odds API)">
+        {!data.odds || (!data.odds.credits && !data.odds.last_plan) ? (
+          <p className="text-sm text-muted">
+            Not connected. Add the ODDS_API_KEY repository secret; the next pipeline run starts fetching lines.
+          </p>
+        ) : (
+          <div className="flex flex-col gap-3 text-sm">
+            <dl className="num grid grid-cols-[auto_1fr] gap-x-6 gap-y-1">
+              <dt className="font-sans text-muted">Credits remaining</dt>
+              <dd>
+                {data.odds.credits?.remaining ?? "—"} of {data.odds.monthly_credits ?? "—"} / month (reserve{" "}
+                {data.odds.reserve ?? "—"})
+              </dd>
+              {data.odds.last_plan && (
+                <>
+                  <dt className="font-sans text-muted">Last run</dt>
+                  <dd>
+                    allowance {data.odds.last_plan.allowance} · game lines {data.odds.last_plan.game_lines ? "yes" : "no"}{" "}
+                    · props for {data.odds.last_plan.prop_games} game(s)
+                  </dd>
+                </>
+              )}
+            </dl>
+            {data.odds.last_plan && data.odds.last_plan.unmapped_markets.length > 0 && (
+              <Notice tone="warn">
+                Market keys not in config/odds_markets.yml: {data.odds.last_plan.unmapped_markets.join(", ")}
+              </Notice>
+            )}
+            <div>
+              <h3 className="mb-1 text-xs font-semibold text-muted">
+                Unmatched player names ({data.odds.unresolved_players.length}): their lines are hidden
+              </h3>
+              {data.odds.unresolved_players.length === 0 ? (
+                <p className="text-muted">None.</p>
+              ) : (
+                <ul className="divide-y divide-line">
+                  {data.odds.unresolved_players.map((u) => (
+                    <li key={u.name} className="py-1.5">
+                      <span className="font-semibold">{u.name}</span>{" "}
+                      <span className="text-muted">
+                        {u.reason === "ambiguous" ? "matches more than one player" : "no match on either roster"}
+                        {u.suggestion && ` · maybe ${u.suggestion.name} (NHL id ${u.suggestion.nhl_id})`}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <p className="mt-1 text-xs text-muted">
+                To fix one, add <code className="num">"Book Name": nhl_id</code> under <code>aliases</code> in
+                config/player_aliases.yml.
+              </p>
+            </div>
+          </div>
+        )}
+      </Panel>
+
       <Panel title="Data sources">
         {data.data_sources.length === 0 ? (
           <p className="text-sm text-muted">None registered yet. Phase 1 adds the NHL API.</p>
