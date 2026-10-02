@@ -6,7 +6,15 @@ RinkX answers **"why does the model project this player at this number?"** It do
 
 ## Status
 
-**Phase 3 complete, plus model 1.1:** projection models for shots, goals, assists, points, PP points, blocks, hits and goalie saves/goals against. Model 1.1 adds a game model: win probability, overtime chance, team and game goal totals, goalie win and shutout, and first goal scorer. Each comes with a full probability distribution and an *Explain* breakdown. A stat is published only after it beats a season-average and a last-10 baseline on past games it never saw (see **Model Tests** in the app). Starting goalies are projected from recent starts. **Quick Entry** issue forms confirm a goalie or rule a player out, and the projections update with a before → after. Built on Phase 1–2: hourly NHL schedule, box scores, play-by-play, ice-time splits, hit rates and game logs. **Phase 4: sportsbook lines.** FanDuel and BetMGM (New Jersey) lines from The Odds API, with best price, a no-vig consensus and line movement. Spending stays inside a monthly credit budget, and lines whose player can't be matched to an NHL id are never shown. It turns on when you add the `ODDS_API_KEY` secret (see [setup](docs/setup.md#sportsbook-lines-phase-4)). Injuries are still marked *not connected yet*. Next: Phase 5 (model vs market: edge, EV and confidence).
+**Phase 3 complete, plus model 1.1:** projection models for shots, goals, assists, points, PP points, blocks, hits and goalie saves/goals against. Model 1.1 adds a game model: win probability, overtime chance, team and game goal totals, goalie win and shutout, and first goal scorer. Each comes with a full probability distribution and an *Explain* breakdown. A stat is published only after it beats a season-average and a last-10 baseline on past games it never saw (see **Model Tests** in the app). Starting goalies are projected from recent starts. **Quick Entry** issue forms confirm a goalie or rule a player out, and the projections update with a before → after. Built on Phase 1–2: hourly NHL schedule, box scores, play-by-play, ice-time splits, hit rates and game logs. **Phase 4: sportsbook lines.** FanDuel and BetMGM (New Jersey) lines from The Odds API, with best price, a no-vig consensus and line movement. Spending stays inside a monthly credit budget, and lines whose player can't be matched to an NHL id are never shown. It turns on when you add the `ODDS_API_KEY` secret (see [setup](docs/setup.md#sportsbook-lines-phase-4)). **Phase 5: model vs market.** Every line with a current projection is priced:
+
+- the model's probability at that exact line (pushes handled);
+- the no-vig market probability;
+- edge and expected value at the offered price;
+- a lean only when the edge is at least 3 points, EV is positive and the data is good enough;
+- a 0–100 confidence score with a five-part breakdown and the full calculation.
+
+Each priced line is frozen for later grading. Injuries are still marked *not connected yet*. Next: Phase 6 (Best Props page) and Phase 7 (backtesting and grading).
 
 **Speed up the backfill:** Actions → pipeline → Run workflow → set *Games to load this run* to 400. The models need loaded history before they can pass their test, so nothing is projected until then.
 

@@ -867,17 +867,21 @@ def project_upcoming(
 
 
 def prune(conn: sqlite3.Connection, today: date) -> int:
+    """Delete projections for games older than KEEP_DAYS, except ones a prediction points to
+    (those are graded later). A kept row's link to a deleted predecessor is cleared first."""
     cutoff = (today - timedelta(days=KEEP_DAYS)).isoformat()
-    cur = conn.execute(
-        "DELETE FROM player_projections WHERE game_id IN (SELECT id FROM games WHERE game_date < ?) "
-        "AND id NOT IN (SELECT projection_id FROM predictions)",
-        (cutoff,),
-    )
-    n = cur.rowcount
-    cur = conn.execute(
-        "DELETE FROM game_projections WHERE game_id IN (SELECT id FROM games WHERE game_date < ?)", (cutoff,)
-    )
-    return n + cur.rowcount
+    n = 0
+    for table, col in (("player_projections", "projection_id"), ("game_projections", "game_projection_id")):
+        doomed = (
+            f"SELECT id FROM {table} WHERE game_id IN (SELECT id FROM games WHERE game_date < ?) "
+            f"AND id NOT IN (SELECT {col} FROM predictions WHERE {col} IS NOT NULL)"
+        )
+        conn.execute(
+            f"UPDATE {table} SET supersedes = NULL WHERE supersedes IN ({doomed}) AND id NOT IN ({doomed})",
+            (cutoff, cutoff),
+        )
+        n += conn.execute(f"DELETE FROM {table} WHERE id IN ({doomed})", (cutoff,)).rowcount
+    return n
 
 
 EVAL_GROWTH = 1.10  # re-test early once completed games grow by 10% (e.g. during a backfill)

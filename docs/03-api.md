@@ -142,6 +142,11 @@ The TypeScript implementation is tested against **shared fixture vectors** gener
 - `consensus`: `{p_over, books}`, the median multiplicative no-vig probability. It is `null` with `consensus_reason: "vig_not_removable"` when only one side is offered.
 - `lines_differ`
 
+**Phase 5 pricing:**
+- Each book entry carries `pricing`, the latest frozen prediction for that line: model probabilities (pushes excluded), `p_push`, no-vig or implied probability, edge and EV for each side, `side` (`none` unless the lean rules pass), `confidence`, `devig_method` and `priced_at`.
+- On player pages it also carries `confidence_parts` (`score`, `parts`, `max`, `notes`) and the `calculation` trail.
+- Each row carries `lean`: the best priced side across books (book, side, line, price, edge, EV, confidence), or `null`.
+
 `players/{id}.lines` gives the same data for the player's next game with lines, plus each book's `movement[]` (line_movements). Only lines whose player resolved to an NHL id are stored, so only those are published. Slate game summaries carry `line_count`. `admin/health.odds` holds credits, the last budget plan, unmapped market keys, and unmatched player names with suggestions.
 
 ## Write path: Quick Entry and config

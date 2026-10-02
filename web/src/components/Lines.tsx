@@ -1,4 +1,4 @@
-import type { BookLine, GameLines, LineMarket, LineRow } from "../lib/data/types";
+import type { BookLine, GameLines, Lean, LineMarket, LineRow, Pricing } from "../lib/data/types";
 import { localTime } from "../lib/format";
 import { pct } from "./Projections";
 
@@ -25,6 +25,36 @@ function Price({ value, best }: { value: number | null; best: boolean }) {
     <span className={best ? "font-semibold text-accent" : ""} title={best ? "Best price" : undefined}>
       {american(value)}
       {best && <span className="sr-only"> (best)</span>}
+    </span>
+  );
+}
+
+const SIDE_LABEL: Record<string, string> = {
+  over: "Over",
+  under: "Under",
+  yes: "Yes",
+  no: "No",
+  home: "Home",
+  away: "Away",
+};
+
+function pts(x: number | null | undefined): string {
+  if (x === null || x === undefined) return "—";
+  const v = x * 100;
+  return `${v >= 0 ? "+" : "−"}${Math.abs(v).toFixed(1)}`;
+}
+
+function LeanText({ lean }: { lean: Lean | null }) {
+  if (!lean) return <span className="text-xs text-muted">No lean</span>;
+  return (
+    <span className="whitespace-nowrap text-xs">
+      <span className="font-semibold">{SIDE_LABEL[lean.side]}</span> {american(lean.price)}{" "}
+      <span className="text-muted">({lean.book_name})</span>
+      <br />
+      <span className="text-muted">
+        edge {pts(lean.edge)} pts · EV {lean.ev >= 0 ? "+" : "−"}
+        {Math.abs(lean.ev).toFixed(2)}u · conf {lean.confidence ?? "—"}
+      </span>
     </span>
   );
 }
@@ -56,6 +86,11 @@ function MarketTable({ m, books }: { m: LineMarket; books: string[] }) {
               No-vig {a.toLowerCase()}
               <div className="text-[10px]">consensus</div>
             </th>
+            <th className="py-1 text-right font-normal">
+              Model {a.toLowerCase()}
+              <div className="text-[10px]">at the line</div>
+            </th>
+            <th className="py-1 pl-3 text-left font-normal">Lean</th>
           </tr>
         </thead>
         <tbody>
@@ -94,6 +129,10 @@ function MarketTable({ m, books }: { m: LineMarket; books: string[] }) {
                   </span>
                 )}
               </td>
+              <td className="text-right">{modelPct(r)}</td>
+              <td className="py-1.5 pl-3 text-left font-sans">
+                <LeanText lean={r.lean} />
+              </td>
             </tr>
           ))}
         </tbody>
@@ -101,6 +140,11 @@ function MarketTable({ m, books }: { m: LineMarket; books: string[] }) {
       {books.length > 0 && <span className="sr-only">Books: {books.join(", ")}</span>}
     </div>
   );
+}
+
+function modelPct(r: LineRow): string {
+  const priced = r.books.find((b) => b.line === r.line && b.pricing)?.pricing;
+  return priced ? pct(priced.p_model_over) : "—";
 }
 
 export function GameLinesPanel({ lines }: { lines: GameLines }) {
@@ -124,7 +168,9 @@ export function GameLinesPanel({ lines }: { lines: GameLines }) {
       <p className="text-xs text-muted">
         {lines.books.join(" and ")} · fetched {lines.fetched_at ? localTime(lines.fetched_at) : "—"}. Best price at the
         common line is highlighted. No-vig = the books' implied probability with their margin removed (median across
-        books). Prices change; check the book before acting.
+        books). Model = RinkX's probability at the same line (pushes excluded). A lean is shown only when the edge is
+        at least 3 points, the expected value at the offered price is positive and the data is good enough. Statistical
+        estimates, not guarantees; prices change, so check the book before acting.
       </p>
     </div>
   );
@@ -233,10 +279,102 @@ export function PlayerLinesPanel({ markets }: { markets: LineMarket[] }) {
               <p className="num text-xs text-muted">
                 No-vig {a.toLowerCase()}: {r.consensus ? pct(r.consensus.p_over) : "one-sided (margin can't be removed)"}
               </p>
+              <ModelVsMarket row={r} a={a} b={b} />
               <Movement row={r} />
             </article>
           );
         }),
+      )}
+    </div>
+  );
+}
+
+const PART_LABEL: Record<string, string> = {
+  edge_strength: "Edge vs its uncertainty",
+  role_certainty: "Role certainty",
+  data_quality: "Data quality",
+  market_agreement: "Market agreement",
+  availability: "Availability",
+};
+
+function ConfidenceBreakdown({ p }: { p: NonNullable<Pricing["confidence_parts"]> }) {
+  return (
+    <ul className="flex flex-col gap-1.5">
+      {Object.entries(p.parts).map(([k, v]) => (
+        <li key={k}>
+          <div className="flex items-center justify-between text-xs">
+            <span>{PART_LABEL[k] ?? k}</span>
+            <span className="num">
+              {v}/{p.max[k]}
+            </span>
+          </div>
+          <div className="mt-0.5 h-1 rounded bg-line" aria-hidden>
+            <div className="h-1 rounded bg-accent" style={{ width: `${(v / (p.max[k] ?? 1)) * 100}%` }} />
+          </div>
+          {(p.notes[k] ?? []).map((n) => (
+            <p key={n} className="text-[11px] text-muted">
+              {n}
+            </p>
+          ))}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/** Model vs market for the book with the lean (or the first priced book at the common line). */
+function ModelVsMarket({ row, a, b }: { row: LineRow; a: string; b: string }) {
+  const book =
+    row.books.find((x) => x.book === row.lean?.book) ?? row.books.find((x) => x.line === row.line && x.pricing);
+  const p = book?.pricing;
+  if (!book || !p) return <p className="text-xs text-muted">Not priced: no current projection for this line.</p>;
+  const market = p.p_novig_over ?? p.p_implied_over;
+  return (
+    <div className="flex flex-col gap-2 rounded border border-line p-2">
+      <p className="num text-xs">
+        <span className="text-muted">Model {a.toLowerCase()}</span> {pct(p.p_model_over)}{" "}
+        <span className="text-muted">vs market</span> {market !== null ? pct(market) : "—"}
+        {p.p_novig_over === null && <span className="text-muted"> (raw implied, margin included)</span>}
+        <span className="text-muted"> at {book.book_name}</span>
+      </p>
+      <p className="num text-xs">
+        <span className="text-muted">{a}:</span> edge {pts(p.edge_over)} pts, EV{" "}
+        {p.ev_over !== null ? `${p.ev_over >= 0 ? "+" : "−"}${Math.abs(p.ev_over).toFixed(2)}u` : "—"}
+        {p.edge_under !== null && (
+          <>
+            {" · "}
+            <span className="text-muted">{b}:</span> edge {pts(p.edge_under)} pts, EV{" "}
+            {p.ev_under !== null ? `${p.ev_under >= 0 ? "+" : "−"}${Math.abs(p.ev_under).toFixed(2)}u` : "—"}
+          </>
+        )}
+      </p>
+      <p className="text-sm">
+        {p.side === "none" ? (
+          <span className="text-muted">No lean at this price.</span>
+        ) : (
+          <>
+            Lean <span className="font-semibold">{SIDE_LABEL[p.side]}</span> · confidence{" "}
+            <span className="num font-semibold">{p.confidence}</span>/100
+          </>
+        )}
+      </p>
+      {p.confidence_parts && (
+        <details className="text-xs">
+          <summary className="cursor-pointer text-accent">Confidence breakdown ({p.confidence}/100)</summary>
+          <div className="mt-2">
+            <ConfidenceBreakdown p={p.confidence_parts} />
+          </div>
+        </details>
+      )}
+      {p.calculation && (
+        <details className="text-xs">
+          <summary className="cursor-pointer text-accent">Show the calculation</summary>
+          <ol className="num mt-2 list-decimal pl-5 text-[11px] text-muted">
+            {p.calculation.map((c) => (
+              <li key={c}>{c}</li>
+            ))}
+          </ol>
+        </details>
       )}
     </div>
   );

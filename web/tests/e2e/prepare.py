@@ -27,6 +27,7 @@ sys.path.insert(0, str(REPO / "pipeline/tests"))
 from rinkx import crypto  # noqa: E402
 from rinkx.config import Settings  # noqa: E402
 from rinkx.models.project import run_models  # noqa: E402
+from rinkx.pricing.price import run_pricing  # noqa: E402
 from rinkx.pipeline import run  # noqa: E402
 from rinkx.publish.build import build_bundle  # noqa: E402
 from rinkx.quick_entry import Issue, run_quick_entry  # noqa: E402
@@ -156,6 +157,7 @@ def _synthetic_lines(conn, game: int, first: datetime, second: datetime) -> None
         routes = {"/sports/icehockey_nhl/events": [ev], "/sports/icehockey_nhl/odds": game_odds,
                   "/sports/icehockey_nhl/events/syn-ev/odds": payload(move)}
         run_odds(conn, OddsClient("synthetic-dev-key", _OddsTransport(routes)), at, cfg)
+        run_pricing(conn, at)  # Phase 5: model vs market for each line
 
 
 def models_site(env: dict[str, str], tmp: Path) -> None:

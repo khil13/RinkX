@@ -504,6 +504,46 @@ export interface BookLine {
   last_seen_at: string;
   last_changed_at: string;
   movement?: LineMove[];
+  pricing: Pricing | null;
+}
+
+/** A frozen model-vs-market prediction for one line at one book (Phase 5). */
+export interface Pricing {
+  prediction_id: number;
+  /** model probability of over/yes/home, without pushes */
+  p_model_over: number;
+  p_model_under: number;
+  p_push: number;
+  p_novig_over: number | null;
+  p_implied_over: number | null;
+  edge_over: number | null;
+  edge_under: number | null;
+  ev_over: number | null;
+  ev_under: number | null;
+  side: "over" | "under" | "yes" | "no" | "home" | "away" | "none";
+  confidence: number | null;
+  devig_method: string | null;
+  priced_at: string;
+  // player page only
+  confidence_parts?: {
+    score: number;
+    parts: Record<string, number>;
+    max: Record<string, number>;
+    notes: Record<string, string[]>;
+  };
+  calculation?: string[];
+}
+
+export interface Lean {
+  book: string;
+  book_name: string;
+  side: Pricing["side"];
+  line: number | null;
+  price: number;
+  edge: number;
+  ev: number;
+  confidence: number | null;
+  p_model: number;
 }
 
 export interface LineRow {
@@ -517,6 +557,7 @@ export interface LineRow {
   consensus: { p_over: number; books: number } | null;
   consensus_reason: "vig_not_removable" | null;
   lines_differ: boolean;
+  lean: Lean | null;
 }
 
 export interface LineMarket {

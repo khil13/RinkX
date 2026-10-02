@@ -239,6 +239,13 @@ EV/1u = p_model · (decimal − 1) − (1 − p_model)    at the offered price
 * A side is labeled *Over/Under* only when edge ≥ the market's minimum (initially 3 pts, tuned by backtest), EV > 0 at the offered price, and data quality ≥ the floor. Otherwise `side = none`.
 * The full calculation trail is returned with every prop (see the API doc).
 
+**Built in Phase 5** (`pipeline/rinkx/pricing/`, thresholds in `config/pricing.yml`):
+
+- **Removing the margin:** multiplicative by default; power when either side's implied probability is above 0.65. Shin is reported in the calculation trail. The consensus is the median across books at the most common line.
+- **Model probability at the line:** read off the projection's PMF. On whole-number lines, P(push) is reported and over/under are conditioned on no push. Expected value uses the unconditional probabilities, because a push returns the stake.
+- **One-sided markets:** compared with the raw implied probability. That includes the margin, so the edge is understated rather than overstated.
+- **Frozen predictions:** every priced line is written to `predictions` as published (immutable by trigger), but only when the projection or the price changed. Since migration 0008, game markets (moneyline, total) are priced too, via `game_projection_id`.
+
 ## 8. Confidence score (0–100)
 
 Confidence is **not** "how much the model likes it". Edge is one of five components and is measured relative to uncertainty.
@@ -250,6 +257,13 @@ Confidence is **not** "how much the model likes it". Edge is one of five compone
 | **Data quality** | 20 | `data_quality × 20` minus sample penalties (< 10 games with the current team, new to the league, missing PBP for recent games). |
 | **Market agreement** | 15 | Line stability (penalty if the line moved against our side recently), cross-book agreement, and an **implausible-edge penalty**: edges above ~15 pts are more often missing information (injury, lineup) than real value, so confidence *drops*. |
 | **Availability** | 15 | Player status (available vs GTD), own goalie confirmation (goalie props), opposing goalie confirmation (skater props), and no postponement risk. |
+
+**As built (Phase 5):**
+- **Model uncertainty** is approximated as `sqrt(p(1−p)/n)`, with n = games of history (5–82). Cross-book dispersion is half the spread of no-vig probabilities, plus a 1.5-point floor.
+- **Track-record multiplier** is 1.0 until Phase 7 grades predictions.
+- **Not available yet, so scored conservatively and stated in the notes:** confirmed lineups and an injury feed.
+
+Every part carries notes explaining its score.
 
 The breakdown is always displayed. Confidence buckets (50–59, 60–69, …) are evaluated in the backtest. If higher buckets don't perform better, the weights get revised. That check is a release gate.
 
