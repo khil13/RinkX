@@ -7,7 +7,10 @@ import json
 import sqlite3
 import statistics
 from collections import defaultdict
+from datetime import datetime
 from typing import Any
+
+from rinkx.timeutil import iso
 
 
 def implied(a: int) -> float:
@@ -212,3 +215,59 @@ def odds_admin(conn: sqlite3.Connection) -> dict[str, Any]:
         "last_plan": (json.loads(plan[0]) | {"at": plan[1]}) if plan else None,
         "unresolved_players": issues,
     }
+
+
+MOVEMENT_SQL = """
+SELECT l.id, l.line, l.over_price, l.under_price, l.first_seen_at, l.last_changed_at, l.last_seen_at,
+       m.code AS market, m.name AS market_name, m.kind, b.code AS book, b.name AS book_name,
+       g.nhl_game_id, g.start_time_utc, h.abbrev AS home, a.abbrev AS away,
+       p.nhl_player_id, p.full_name, t.abbrev AS team,
+       (SELECT count(*) FROM line_movements x WHERE x.prop_line_id = l.id) AS moves,
+       (SELECT x.over_price FROM line_movements x WHERE x.prop_line_id = l.id AND x.over_price IS NOT NULL
+        ORDER BY x.observed_at LIMIT 1) AS first_over,
+       (SELECT x.under_price FROM line_movements x WHERE x.prop_line_id = l.id AND x.under_price IS NOT NULL
+        ORDER BY x.observed_at LIMIT 1) AS first_under
+FROM prop_lines l
+JOIN markets m ON m.id = l.market_id
+JOIN sportsbooks b ON b.id = l.sportsbook_id AND b.is_enabled = 1
+JOIN games g ON g.id = l.game_id
+JOIN teams h ON h.id = g.home_team_id JOIN teams a ON a.id = g.away_team_id
+LEFT JOIN players p ON p.id = l.player_id
+LEFT JOIN teams t ON t.id = p.current_team_id
+WHERE l.status = 'open' AND l.is_main_line = 1 AND g.status IN ('scheduled','pregame') AND g.start_time_utc > ?
+"""
+
+
+def movement_board(conn: sqlite3.Connection, now: datetime) -> dict[str, Any]:
+    """Line Movement page (Phase 10): every open main line for upcoming games with its first and
+    current price and the change in implied probability of the over / yes / home side."""
+    rows = []
+    for r in conn.execute(MOVEMENT_SQL, (iso(now),)):
+        change = None
+        if r["first_over"] is not None and r["over_price"] is not None:
+            change = round((implied(r["over_price"]) - implied(r["first_over"])) * 100, 2)
+        rows.append(
+            {
+                "subject": r["full_name"] or f"{r['away']} @ {r['home']}",
+                "player_id": r["nhl_player_id"],
+                "team": r["team"],
+                "game": {
+                    "id": r["nhl_game_id"],
+                    "home": r["home"],
+                    "away": r["away"],
+                    "start_time_utc": r["start_time_utc"],
+                },
+                "market": r["market"],
+                "market_label": r["market_name"],
+                "kind": r["kind"],
+                "book_name": r["book_name"],
+                "line": r["line"],
+                "first": {"over": r["first_over"], "under": r["first_under"], "at": r["first_seen_at"]},
+                "now": {"over": r["over_price"], "under": r["under_price"], "at": r["last_seen_at"]},
+                "changed_at": r["last_changed_at"],
+                "moves": r["moves"],
+                "change_pts": change,
+            }
+        )
+    rows.sort(key=lambda x: -abs(x["change_pts"] or 0))
+    return {"generated_at": iso(now), "source": "The Odds API", "rows": rows}

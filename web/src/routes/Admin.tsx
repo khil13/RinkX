@@ -3,6 +3,54 @@ import { useEncrypted } from "../lib/data/fetch";
 import type { HealthData } from "../lib/data/types";
 import { localTime } from "../lib/format";
 
+function StoreBackups({ store }: { store: HealthData["store"] }) {
+  const versions = store.versions ?? [];
+  const drill = store.drill;
+  const weekly = versions.filter((v) => v.kind === "weekly");
+  return (
+    <Panel title="Store & backups">
+      <dl className="grid grid-cols-[auto_1fr] gap-x-6 gap-y-1.5 text-sm">
+        <dt className="text-muted">Versions kept</dt>
+        <dd className="num">
+          {versions.length} ({versions.length - weekly.length} recent, {weekly.length} weekly)
+          {store.keep && (
+            <span className="text-muted">
+              {" "}
+              · policy: newest {store.keep.recent} plus one per week for {store.keep.weekly} weeks
+            </span>
+          )}
+        </dd>
+        <dt className="text-muted">Oldest</dt>
+        <dd className="num">{versions.length ? localTime(versions[versions.length - 1]!.at) : "—"}</dd>
+        <dt className="text-muted">Restore drill</dt>
+        <dd>
+          {!drill ? (
+            <span className="text-muted">not run yet (runs about once a day)</span>
+          ) : drill.status === "succeeded" ? (
+            <span className="text-over">
+              passed {drill.at ? localTime(drill.at) : ""}
+              <span className="num text-muted">
+                {drill.detail.version
+                  ? ` · oldest version (${drill.detail.age_days?.toFixed(1)} days old) decrypted, integrity ${drill.detail.integrity}, migrated to schema v${drill.detail.schema}`
+                  : ` · ${drill.detail.note ?? ""}`}
+              </span>
+            </span>
+          ) : (
+            <span className="text-bad">
+              FAILED {drill.at ? localTime(drill.at) : ""} · {drill.detail.error ?? drill.error ?? "see the run log"}
+            </span>
+          )}
+        </dd>
+      </dl>
+      <p className="mt-2 text-[11px] text-muted">
+        To roll back: Actions → store → Run workflow → restore, with a version name from “list”. It uploads that
+        version as the newest and deletes nothing. Keep offline copies of STORE_KEY and DATA_KEY in your password
+        manager: without STORE_KEY no backup can be read.
+      </p>
+    </Panel>
+  );
+}
+
 export function Admin() {
   const health = useEncrypted<HealthData>("admin/health.json");
 
@@ -52,6 +100,8 @@ export function Admin() {
           </dd>
         </dl>
       </Panel>
+
+      <StoreBackups store={data.store} />
 
       <Panel title="Sportsbook lines (The Odds API)">
         {!data.odds || (!data.odds.credits && !data.odds.last_plan) ? (

@@ -1,0 +1,56 @@
+name: store
+
+# Manual tools for the encrypted data store. "drill" is read-only (the pipeline also runs it about
+# once a day and shows the result on Admin). "restore" makes an older version current again; it
+# uploads a new version and deletes nothing, so it can itself be undone the same way.
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "list, drill, or restore"
+        required: true
+        default: list
+        type: choice
+        options: [list, drill, restore]
+      version:
+        description: "restore only: the version to restore (from 'list', e.g. rinkx-20261001T091700123456Z.db.enc)"
+        required: false
+      confirm:
+        description: "restore only: type RESTORE"
+        required: false
+
+permissions:
+  contents: write # read and write release assets of the `store` release
+
+concurrency:
+  group: rinkx-store # never at the same time as a pipeline run
+  cancel-in-progress: false
+
+jobs:
+  store:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pipeline/pyproject.toml
+      - run: pip install ./pipeline
+      - name: Run
+        env:
+          RINKX_ENV: prod
+          RINKX_STORE_KEY: ${{ secrets.STORE_KEY }}
+          GH_TOKEN: ${{ github.token }}
+          ACTION: ${{ inputs.action }}
+          VERSION: ${{ inputs.version }}
+          CONFIRM: ${{ inputs.confirm }}
+        run: |
+          case "$ACTION" in
+            list) python -m rinkx store-list ;;
+            drill) python -m rinkx store-drill ;;
+            restore)
+              if [ "$CONFIRM" != "RESTORE" ]; then echo "Type RESTORE in the confirm box to restore."; exit 1; fi
+              python -m rinkx store-restore --version "$VERSION" --yes ;;
+          esac

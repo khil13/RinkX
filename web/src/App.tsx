@@ -25,6 +25,8 @@ const Parlay = named(() => import("./routes/Parlay"), "Parlay");
 const Performance = named(() => import("./routes/Performance"), "Performance");
 const Models = named(() => import("./routes/Models"), "Models");
 const Admin = named(() => import("./routes/Admin"), "Admin");
+const Goalies = named(() => import("./routes/Goalies"), "Goalies");
+const LineMovement = named(() => import("./routes/LineMovement"), "LineMovement");
 const SettingsPage = named(() => import("./routes/Settings"), "Settings");
 
 const page = (el: React.ReactElement) => <Suspense fallback={<Spinner label="Loading…" />}>{el}</Suspense>;
@@ -42,6 +44,8 @@ const BUILT: Record<string, () => React.ReactElement> = {
   "/news": () => page(<News />),
   "/parlay": () => priced(<Parlay />),
   "/settings": () => page(<SettingsPage />),
+  "/goalies": () => page(<Goalies />),
+  "/lines": () => priced(<LineMovement />),
   "/admin": () => page(<Admin />),
 };
 

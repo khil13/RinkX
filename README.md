@@ -34,7 +34,16 @@ Losing stretches stay visible. Model 1.3 also prices game and team totals the wa
 - **Settings** sets odds format (American or decimal), time zone, and a **cool-off** that hides every price and prop on that device for a day to a month. It can't be ended early.
 - Pages load on demand, and CI enforces a download budget.
 
-Injuries are still marked *not connected yet* (there's no free injury feed; use Quick Entry). Next: Phase 10 (hardening: backups, restore drill, staleness alerts).
+Injuries are still marked *not connected yet* (there's no free injury feed; use Quick Entry). **Phase 10: hardening.**
+
+- **Backups:** the newest 10 store versions are kept, plus one a week for 8 weeks.
+- **Restore drill:** runs about once a day and shows on Admin.
+- **Rollback:** a one-click `store` workflow restores any kept version.
+- **Watchdog:** an hourly workflow opens an issue (and pushes to your phone) if the pipeline stops succeeding.
+- **Keepalive:** it now verifies that every scheduled workflow stays on.
+- **New pages:** Goalies and Line Movement. Every page in the menu is now built.
+
+**Keep offline copies of STORE_KEY and DATA_KEY**: see [setup](docs/setup.md#keys-backups-and-the-watchdog-phase-10).
 
 **Speed up the backfill:** Actions → pipeline → Run workflow → set *Games to load this run* to 400. The models need loaded history before they can pass their test, so nothing is projected until then.
 

@@ -251,6 +251,15 @@ def test_pricing_real_projections_against_lines(tmp_path):
     assert run_pricing(conn, now + timedelta(hours=2), CFG) == 1
     assert mean > 0
 
+    # Phase 10: the Line Movement board shows first vs current price for every open line.
+    from rinkx.publish.lines import movement_board
+
+    board = movement_board(conn, now + timedelta(hours=2))["rows"]
+    assert len(board) == 3 and board[0]["book_name"] == "fanduel"  # the line that moved sorts first
+    assert board[0]["first"]["over"] == -115 and board[0]["now"]["over"] == -130 and board[0]["moves"] == 2
+    assert board[0]["change_pts"] == pytest.approx((130 / 230 - 115 / 215) * 100, abs=0.01)
+    assert all(r["change_pts"] == 0 for r in board[1:])
+
     # Phase 6: Best Props rows carry source + timestamps, and only open lines with current projections appear.
     from rinkx.publish.best import best_props
 

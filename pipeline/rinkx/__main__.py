@@ -4,6 +4,9 @@ rinkx run --out DIR [--no-push]      pull store, run stages, publish bundle to D
 rinkx dev-setup [--passphrase P]     create local dev keys + keyfile under .rinkx/
 rinkx keyfile --out PATH             wrap a DATA_KEY with your passphrase (interactive)
 rinkx store-list                     list stored versions
+rinkx store-drill                    restore drill: the oldest kept version must decrypt, check and migrate
+rinkx store-restore --version NAME --yes   make an older version current again (uploaded as a new version)
+rinkx watchdog                       alert if the pipeline hasn't succeeded recently (watchdog.yml)
 """
 
 from __future__ import annotations
@@ -20,6 +23,7 @@ from rinkx import crypto
 from rinkx.config import REPO_ROOT, ConfigError, Settings
 from rinkx.pipeline import run
 from rinkx.store import remote
+from rinkx.timeutil import utcnow
 
 DEV_ENV = REPO_ROOT / ".rinkx/dev.env"
 MIN_PASSPHRASE_CHARS = 20
@@ -108,6 +112,34 @@ def cmd_store_list(_: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_store_drill(_: argparse.Namespace) -> int:
+    settings = Settings.from_env()
+    settings.workdir.mkdir(parents=True, exist_ok=True)
+    r = remote.drill(
+        remote.backend_for(settings), settings.require_store_key(), settings.workdir, settings.db_dir, utcnow()
+    )
+    # Names, ages and row counts only: nothing from inside the store is printed.
+    print(json.dumps({"ok": r.ok, "version": r.version, "age_days": r.age_days, **r.detail}, indent=2))
+    return 0 if r.ok else 1
+
+
+def cmd_store_restore(args: argparse.Namespace) -> int:
+    if not args.yes:
+        print("Restoring makes an older version current. Re-run with --yes to confirm.")
+        return 1
+    settings = Settings.from_env()
+    settings.workdir.mkdir(parents=True, exist_ok=True)
+    name = remote.restore(remote.backend_for(settings), settings.require_store_key(), args.version, settings.workdir)
+    print(f"Restored {args.version}; it is now the current store as {name}.")
+    return 0
+
+
+def cmd_watchdog(_: argparse.Namespace) -> int:
+    from rinkx import watchdog
+
+    return watchdog.main(Settings.from_env())
+
+
 def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     load_dev_env()
@@ -130,6 +162,17 @@ def main(argv: list[str] | None = None) -> int:
 
     p = sub.add_parser("store-list", help="list stored store versions")
     p.set_defaults(func=cmd_store_list)
+
+    p = sub.add_parser("store-drill", help="check that the oldest kept version still restores (read-only)")
+    p.set_defaults(func=cmd_store_drill)
+
+    p = sub.add_parser("store-restore", help="make an older stored version the current one")
+    p.add_argument("--version", required=True, help="asset name from store-list, e.g. rinkx-20261001T...Z.db.enc")
+    p.add_argument("--yes", action="store_true", help="confirm")
+    p.set_defaults(func=cmd_store_restore)
+
+    p = sub.add_parser("watchdog", help="alert when the pipeline hasn't succeeded recently")
+    p.set_defaults(func=cmd_watchdog)
 
     args = parser.parse_args(argv)
     try:

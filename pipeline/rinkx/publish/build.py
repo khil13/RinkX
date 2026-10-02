@@ -20,6 +20,7 @@ from rinkx.grading import performance
 from rinkx.ingestion.nhl.jobs import current_season
 from rinkx.publish import best, guards, lines, news, projections, views
 from rinkx.publish.schemas import BuildInfo, Envelope, FeedStatus, FileEntry, Manifest, Meta
+from rinkx.store import remote
 from rinkx.store.db import schema_version
 from rinkx.timeutil import iso, parse_iso, slate_date
 
@@ -101,7 +102,22 @@ def feed_statuses(conn: sqlite3.Connection, now: datetime) -> list[FeedStatus]:
     return out
 
 
-def _health(conn: sqlite3.Connection, store_asset: str | None, build: BuildInfo) -> dict[str, Any]:
+DRILL_SQL = """
+SELECT r.status, r.finished_at, r.meta, r.error FROM ingestion_runs r JOIN data_sources s ON s.id = r.source_id
+WHERE s.code = 'store' AND r.job_name = 'restore_drill' ORDER BY r.id DESC LIMIT 1
+"""
+
+
+def _drill(conn: sqlite3.Connection) -> dict[str, Any] | None:
+    r = conn.execute(DRILL_SQL).fetchone()
+    if r is None:
+        return None
+    return {"status": r["status"], "at": r["finished_at"], "detail": json.loads(r["meta"] or "{}"), "error": r["error"]}
+
+
+def _health(
+    conn: sqlite3.Connection, store_asset: str | None, build: BuildInfo, versions: list[dict[str, Any]]
+) -> dict[str, Any]:
     tables = [
         r[0]
         for r in conn.execute(
@@ -121,7 +137,13 @@ def _health(conn: sqlite3.Connection, store_asset: str | None, build: BuildInfo)
     ]
     return {
         "build": build.model_dump(),
-        "store": {"asset": store_asset, "schema_version": schema_version(conn)},
+        "store": {
+            "asset": store_asset,
+            "schema_version": schema_version(conn),
+            "versions": versions,  # as found at the start of this run (this run's upload comes after)
+            "keep": {"recent": remote.KEEP_VERSIONS, "weekly": remote.WEEKLY_SNAPSHOTS},
+            "drill": _drill(conn),
+        },
         "table_rows": {t: conn.execute(f"SELECT count(*) FROM {t}").fetchone()[0] for t in tables},
         "synthetic_rows": guards.synthetic_row_counts(conn),
         "odds": lines.odds_admin(conn),
@@ -156,6 +178,7 @@ def _league_files(
     out["news.json"] = (news.feed(conn, now), None)
     out["alerts.json"] = (alerts.history(conn, now, delivery), None)
     out["correlations.json"] = (correlations.published(conn, now), None)
+    out["lines/movement.json"] = (lines.movement_board(conn, now), None)
     if conn.execute("SELECT 1 FROM teams LIMIT 1").fetchone():
         out["teams.json"] = (views.teams(conn, season, today.isoformat()), None)
     if conn.execute("SELECT 1 FROM players LIMIT 1").fetchone():
@@ -188,6 +211,7 @@ def build_bundle(
     now: datetime,
     store_asset: str | None,
     today: date | None = None,
+    store_versions: list[dict[str, Any]] | None = None,
 ) -> Manifest:
     today = today or slate_date(now)
     if settings.env == "prod":
@@ -219,7 +243,7 @@ def build_bundle(
         sources = [
             r[0]
             for r in conn.execute(
-                "SELECT code FROM data_sources WHERE is_enabled = 1 AND category NOT IN ('models', 'alerts') "
+                "SELECT code FROM data_sources WHERE is_enabled = 1 AND category NOT IN ('models', 'alerts', 'store') "
                 "ORDER BY code"
             )
         ]
@@ -228,7 +252,7 @@ def build_bundle(
             for r in conn.execute("SELECT model_family, version FROM model_versions WHERE status = 'champion'")
         }
         encrypted: dict[str, tuple[Any, str | None]] = {
-            "admin/health.json": (_health(conn, store_asset, build), None),
+            "admin/health.json": (_health(conn, store_asset, build, store_versions or []), None),
         }
         encrypted.update(_league_files(conn, today, now, delivery=settings.ntfy_topic is not None))
         for rel, (data, oldest) in encrypted.items():
