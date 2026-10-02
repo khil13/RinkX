@@ -35,7 +35,7 @@ def test_configured_run_publishes_encrypted_bundle(tmp_path: Path, keys):
     result = run(make_settings(tmp_path, keys), out, now=NOW)
     m = read_manifest(out)
     assert m["configured"] is True and m["missing_setup"] == []
-    assert set(m["files"]) == {"keyfile.json", "admin/health.json.enc"}
+    assert set(m["files"]) == {"keyfile.json", "admin/health.json.enc", "models.json.enc"}
     assert result.store_pulled is None and result.store_pushed is not None
 
     # Every expected feed is reported, and with no data sources connected all are unavailable.
@@ -49,6 +49,9 @@ def test_configured_run_publishes_encrypted_bundle(tmp_path: Path, keys):
     assert env["meta"]["data_status"] == "live"
     assert env["data"]["store"]["schema_version"] >= 2
     assert "Auston" not in (out / "admin/health.json.enc").read_text()
+    models = crypto.decrypt_json(json.loads((out / "models.json.enc").read_text()), "models.json", data_key)
+    assert models["data"]["status"] == "insufficient_history"  # no games: nothing tested, nothing projected
+    assert not any(e["passed"] for e in models["data"]["stats"].values())
 
     # Second run pulls what the first pushed.
     again = run(make_settings(tmp_path, keys), tmp_path / "data", now=NOW)
@@ -156,7 +159,7 @@ def test_publishes_league_files_from_replayed_nhl_data(tmp_path: Path, keys):
     bos = next(g for g in games if g["id"] == 2025021012)
     assert (bos["home"]["team"]["abbrev"], bos["home"]["score"], bos["away"]["score"]) == ("BOS", 2, 1)
     assert bos["home"]["record"]["as_of"] == "2026-03-10"
-    assert bos["home"]["goalie"] is None and bos["home"]["goalie_reason"] == "not_connected"
+    assert bos["home"]["goalie"]["name"] == "Jeremy Swayman" and bos["home"]["goalie"]["status"] == "actual"
     assert bos["environment"] is None and bos["environment_reason"] == "not_connected"
 
     game = read("games/2025021012.json")["data"]

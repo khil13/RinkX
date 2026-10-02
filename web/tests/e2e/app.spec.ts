@@ -5,6 +5,7 @@ import { expect, test, type Page } from "@playwright/test";
 const CONFIGURED = "http://127.0.0.1:4173/"; // league data replayed from recorded NHL responses
 const SETUP = "http://127.0.0.1:4174/";
 const EMPTY = "http://127.0.0.1:4175/";
+const MODELS = "http://127.0.0.1:4176/"; // DEV build of the SYNTHETIC test league (tests/synth.py)
 const { passphrase } = JSON.parse(readFileSync("tests/e2e/.sites/secrets.json", "utf8")) as { passphrase: string };
 
 async function unlock(page: Page, remember = true, site = CONFIGURED) {
@@ -103,11 +104,18 @@ test("setup page generates keys the Python pipeline accepts", async ({ page }) =
 
 test("pages fit the screen with no horizontal page scroll", async ({ page }) => {
   await unlock(page);
-  for (const route of ["", "#/games", "#/games/2025021012", "#/players/8477960"]) {
+  for (const route of ["", "#/games", "#/games/2025021012", "#/players/8477960", "#/models"]) {
     await page.goto(CONFIGURED + route);
     await page.waitForLoadState("networkidle");
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
     expect(overflow, route || "dashboard").toBeLessThanOrEqual(0);
+  }
+  await unlock(page, true, MODELS);
+  for (const route of ["#/games/2025029999", "#/players/8000001", "#/models"]) {
+    await page.goto(MODELS + route);
+    await page.waitForLoadState("networkidle");
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+    expect(overflow, `models site ${route}`).toBeLessThanOrEqual(0);
   }
 });
 
@@ -174,4 +182,48 @@ test("player hit rates count every threshold and say what they include", async (
   await expect(page.getByText(/Counts games played, most recent first/)).toBeVisible();
   // Enriched log columns: PP time and shot attempts from the official stats API.
   await expect(page.locator("td", { hasText: /^2:02$/ })).toBeVisible(); // 122 s on the power play
+});
+
+test("real data with too little history: no projections, and the reason is stated", async ({ page }) => {
+  await unlock(page);
+  await page.goto(`${CONFIGURED}#/models`);
+  await expect(page.getByRole("heading", { name: "Model tests" })).toBeVisible();
+  await expect(page.getByText(/Not enough completed games loaded to test the models yet/)).toBeVisible();
+  await expect(page.getByText("PASSED · PUBLISHED")).toHaveCount(0);
+  await page.goto(`${CONFIGURED}#/players/8477960`);
+  await expect(page.getByText(/No projections yet: the models haven't been tested/)).toBeVisible();
+});
+
+test("synthetic league: projections, Explain, and before/after from a Quick Entry goalie", async ({ page }) => {
+  await unlock(page, true, MODELS);
+  await expect(page.getByText(/DEV BUILD · may contain SYNTHETIC data/)).toBeVisible(); // always labelled
+  await page.goto(`${MODELS}#/games/2025029999`);
+  const home = page.getByRole("table", { name: "T00 projections" });
+  await expect(home).toBeVisible();
+  await expect(page.getByRole("table", { name: "T01 projections" })).toBeVisible();
+  await expect(page.getByText("CONFIRMED", { exact: true })).toBeVisible(); // away starter, entered via Quick Entry with a source
+  await expect(page.getByText(/PROJECTED · \d+%/)).toBeVisible(); // home starter, from recent starts
+  await expect(page.getByText(/Lineups aren't confirmed/)).toBeVisible();
+
+  await home.getByRole("link").first().click();
+  await expect(page.getByText(/^Projection · vs T01/)).toBeVisible();
+  const sog = page.getByRole("article", { name: "Shots on goal projection" });
+  await expect(sog).toBeVisible();
+  await expect(sog.getByRole("img", { name: "Shots on goal distribution" })).toBeVisible();
+  await sog.getByText("Explain projection").click();
+  await expect(sog.getByText("Ice time", { exact: true })).toBeVisible();
+  await expect(sog.getByText(/The factors multiply to the projected average/)).toBeVisible();
+  // The opposing goalie was changed by Quick Entry: scoring projections show before -> after.
+  await expect(page.getByText(/Updated after goalie confirmed: \d+\.\d\d → \d+\.\d\d/).first()).toBeVisible();
+});
+
+test("model tests page shows what passed and what was held back", async ({ page }) => {
+  await unlock(page, true, MODELS);
+  await page.goto(`${MODELS}#/models`);
+  await expect(page.getByRole("heading", { name: "Model tests" })).toBeVisible();
+  await expect(page.getByRole("article", { name: "Shots on goal test" })).toContainText("PASSED · PUBLISHED");
+  const ga = page.getByRole("article", { name: "Goals against test" });
+  await expect(ga).toContainText("NOT PUBLISHED");
+  await expect(ga).toContainText("Did not clearly beat the simple baselines");
+  await expect(page.getByText(/First Goal: needs the game simulation/)).toBeVisible();
 });

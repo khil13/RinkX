@@ -3,6 +3,8 @@
   .sites/league      dist/ + the real pipeline replaying recorded NHL responses (2026-03-10)
   .sites/empty       dist/ + a configured bundle with no data sources connected
   .sites/setup       dist/ + a manifest-only bundle (no keys yet)
+  .sites/models      dist/ + a DEV bundle from the SYNTHETIC test league (tests/synth.py): tested
+                     models, projections for an upcoming game, and a Quick-Entry goalie change
 
 Run from web/ after `vite build`:  python tests/e2e/prepare.py
 """
@@ -13,16 +15,22 @@ import json
 import shutil
 import sys
 import tempfile
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 WEB = HERE.parents[1]
 REPO = WEB.parent
 sys.path.insert(0, str(REPO / "pipeline"))
+sys.path.insert(0, str(REPO / "pipeline/tests"))
 
 from rinkx import crypto  # noqa: E402
 from rinkx.config import Settings  # noqa: E402
+from rinkx.models.project import run_models  # noqa: E402
 from rinkx.pipeline import run  # noqa: E402
+from rinkx.publish.build import build_bundle  # noqa: E402
+from rinkx.quick_entry import Issue, run_quick_entry  # noqa: E402
+from rinkx.timeutil import iso  # noqa: E402
 
 PASSPHRASE = "e2e passphrase with several words"
 SITES = HERE / ".sites"
@@ -82,9 +90,51 @@ def main() -> None:
     setup = site("setup")
     run(Settings.from_env(base | {"RINKX_KEYFILE": str(tmp / "absent.json")}), setup / "data")
 
+    models_site(base | keys, tmp)
+
     (SITES / "secrets.json").write_text(json.dumps({"passphrase": PASSPHRASE}))
     shutil.rmtree(tmp)
     print(f"e2e sites ready in {SITES}")
+
+
+class _Tracker:
+    def __init__(self, issues: list[Issue]) -> None:
+        self.issues = issues
+
+    def open_issues(self) -> list[Issue]:
+        return self.issues
+
+    def comment(self, number: int, body: str) -> None: ...
+
+    def close(self, number: int, completed: bool) -> None: ...
+
+
+def models_site(env: dict[str, str], tmp: Path) -> None:
+    """Synthetic league (labelled: DEV build, SYNTHETIC data): models tested, projections published,
+    then the away team's backup goalie confirmed through Quick Entry so before/after shows."""
+    import synth  # pipeline/tests/synth.py
+
+    days = 140
+    today = date(2025, 10, 7) + timedelta(days=days)
+    now = datetime(today.year, today.month, today.day, 15, tzinfo=UTC)
+    conn, truth = synth.build(str(tmp / "synthetic.db"), days=days, seed=3)
+    game = synth.add_upcoming(conn, today)
+    run_models(conn, now, today)
+    away = conn.execute("SELECT away_team_id FROM games WHERE id = ?", (game,)).fetchone()[0]
+    nhl_id, abbrev = conn.execute(
+        "SELECT p.nhl_player_id, t.abbrev FROM players p JOIN teams t ON t.id = p.current_team_id WHERE p.id = ?",
+        (truth.goalies[away][1],),
+    ).fetchone()
+    body = (
+        f"### Game\n\n{synth.UPCOMING_NHL_ID}\n\n### Team\n\n{abbrev}\n\n### Goalie\n\n{nhl_id}\n\n"
+        "### Status\n\nConfirmed\n\n### Source URL\n\nhttps://example.org/synthetic-source\n"
+    )
+    later = now + timedelta(hours=1)
+    qe = run_quick_entry(conn, _Tracker([Issue(1, "Quick Entry: goalie", body, "owner", iso(now))]), "owner", later)
+    run_models(conn, later, today, qe.reasons)
+    settings = Settings.from_env(env | {"RINKX_ENV": "dev"})
+    build_bundle(conn, site("models") / "data", settings, now=later, store_asset=None, today=today)
+    conn.close()
 
 
 if __name__ == "__main__":

@@ -1,0 +1,56 @@
+name: "Quick Entry: player out"
+description: Rule a skater out of (or back into) an upcoming game. Owner only; applied on the next pipeline run.
+title: "Quick Entry: player out"
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Removes the player's projections for that game (or restores them with "Back in"). The issue is
+        commented on and closed when applied; the comment never includes projections.
+  - type: input
+    id: game
+    attributes:
+      label: Game
+      description: NHL game id (filled in from the app), or the date as YYYY-MM-DD together with a team.
+    validations:
+      required: true
+  - type: input
+    id: team
+    attributes:
+      label: Team
+      description: 3-letter abbreviation. Only needed with a date.
+  - type: input
+    id: player
+    attributes:
+      label: Player
+      description: NHL player id or full name.
+    validations:
+      required: true
+  - type: dropdown
+    id: status
+    attributes:
+      label: Status
+      options:
+        - Out
+        - Back in
+    validations:
+      required: true
+  - type: dropdown
+    id: reason
+    attributes:
+      label: Reason
+      options:
+        - Injury
+        - Illness
+        - Healthy scratch
+        - Rest
+        - Suspension
+        - Personal
+        - Other
+  - type: input
+    id: source
+    attributes:
+      label: Source URL
+      placeholder: https://
+    validations:
+      required: true

@@ -65,8 +65,9 @@ The requested core table list maps onto this schema, except `users`, which is un
 4. **Point-in-time correctness.** `as_of` on projections, `observed_at`/`reported_at` on lineups, goalies and injuries, and `captured_at` on odds let the feature builder reconstruct "what we knew at time T". Walk-forward backtests depend on this.
 5. **Data quality is first-class.** Stat rows carry `provenance` and `quality`. Projections carry `data_quality` and `missing_inputs[]`. A `data_quality_issues` queue feeds the admin dashboard.
 6. **Enrichment.** `game_enrichment` records when each game's play-by-play and stats-API reports were applied, so each runs once. Teammate-blocked shots follow the official convention, verified against the box score and stats API: they count as the shooter's blocked attempt but not as anyone's blocked shot (`is_teammate_block = 1`, `blocker_id` NULL).
-7. **Size management.** `line_movements` stores only changes, and only for books enabled in `config/books.yml`. At season end, its rows are exported to a Parquet Release asset and pruned from SQLite. Stats and PBP tables stay small, at under 200k rows per season per table.
-8. **One champion per model family.** A partial unique index on `model_versions(model_family) WHERE status='champion'` makes promotion an atomic swap.
+7. **Quick Entry** *(migration 0005)*. `game_availability` records a player ruled out of, or back into, one game, with a mandatory source URL. `quick_entries` logs each processed issue, so it is applied exactly once. Projections for games more than 14 days old are pruned, unless a prediction references them.
+8. **Size management.** `line_movements` stores only changes, and only for books enabled in `config/books.yml`. At season end, its rows are exported to a Parquet Release asset and pruned from SQLite. Stats and PBP tables stay small, at under 200k rows per season per table.
+9. **One champion per model family.** A partial unique index on `model_versions(model_family) WHERE status='champion'` makes promotion an atomic swap.
 
 ## Prop catalogue (seeded)
 

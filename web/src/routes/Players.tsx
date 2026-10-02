@@ -3,6 +3,7 @@ import { Link, useParams } from "react-router";
 import { Missing, Notice, Panel, Spinner } from "../components/ui";
 import { useEncrypted } from "../lib/data/fetch";
 import { HitRates } from "../components/HitRates";
+import { MODEL_REASON_TEXT, ProjectionCard, TestedNote } from "../components/Projections";
 import type { DnpGame, GoalieGame, PlayerIndexEntry, PlayerPage, SkaterGame } from "../lib/data/types";
 import { longDate, mmss, num, seasonLabel, signed } from "../lib/format";
 
@@ -193,8 +194,18 @@ export function Player() {
   if (res.state === "error") return <Notice tone="bad">{res.error.message}</Notice>;
   if (res.state === "unavailable") return <Notice tone="warn">Live data unavailable for this player.</Notice>;
 
-  const { player: p, totals, totals_reason, games, season, last_season, last_season_games, hit_rates, hit_rates_basis } =
-    res.value.data;
+  const {
+    player: p,
+    totals,
+    totals_reason,
+    games,
+    season,
+    last_season,
+    last_season_games,
+    hit_rates,
+    hit_rates_basis,
+    projection,
+  } = res.value.data;
   const goalie = p.position === "G";
   const cells = goalie ? GOALIE_TOTALS : SKATER_TOTALS;
   const played = games.filter((g) => !g.dnp).length;
@@ -236,6 +247,27 @@ export function Player() {
             Avg TOI {mmss((totals.toi_avg_s as number | null) ?? null)} · PP TOI{" "}
             {mmss((totals.pp_toi_avg_s as number | null) ?? null)} per game
           </p>
+        )}
+      </Panel>
+
+      <Panel
+        title={
+          projection.game
+            ? `Projection · ${projection.game.home ? "vs" : "@"} ${projection.game.opponent} · ${longDate(projection.game.date)}`
+            : "Projection"
+        }
+      >
+        {projection.game ? (
+          <div className="flex flex-col gap-3">
+            <div className="grid gap-3 sm:grid-cols-2">
+              {projection.markets.map((m) => (
+                <ProjectionCard key={m.market} m={m} />
+              ))}
+            </div>
+            <TestedNote testedAt={projection.models.tested_at} />
+          </div>
+        ) : (
+          <p className="text-sm text-muted">{MODEL_REASON_TEXT[projection.reason ?? "no_upcoming_projection"]}</p>
         )}
       </Panel>
 

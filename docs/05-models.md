@@ -8,6 +8,38 @@
 4. **Simple first, complex only when it wins out-of-sample.** A GLM baseline ships first. Gradient boosting and Bayesian hierarchical models are challengers, promoted only on walk-forward log loss **and** calibration.
 5. **Recent overs are not a reason.** Hit rates are shown for context. They enter the model only through the shrunk rates, never as a "streak" feature.
 
+## What is built (Phase 3, model version 1.0)
+
+The sections below are the full design. Version 1.0 implements the baseline subset in
+`pipeline/rinkx/models/`, and **ships a stat only if it passes the walk-forward test** (§11). The test runs
+daily on all loaded history, and the Model Tests page (`/#/models`) shows the result for every stat.
+
+| Stat (markets) | Formula in 1.0 | Factors the tuner may keep |
+|---|---|---|
+| Shots on goal | shrunk shots per hour × expected ice time | opponent shots allowed, home/road |
+| Goals (Goals, Anytime Goal) | either shrunk goals per hour × ice time, or projected shots × shrunk shooting % (the better on the tuning window) | opponent shots allowed, opposing goalie, home/road |
+| Assists, Points | shrunk rate per hour × ice time | opponent shots allowed, opposing goalie, home/road |
+| PP points / PP goal / PP assist | shrunk rate per **PP** hour × expected PP time | opponent's PP-against rate, home/road |
+| Blocked shots, Hits | shrunk rate per hour × ice time | opponent, home/road, arena scorekeeping (home-game vs road-game totals) |
+| Goalie saves, goals against | shots against ~ NB(league × own defence × opponent offence); saves/GA ~ binomial on a shrunk save % | own defence, opponent offence |
+
+* **Point-in-time state** (`state.py`). Games are replayed in date order. Every game is predicted from the
+  state *before* its date, then learned from. The live site calls the same feature functions on the
+  state after the last completed game, so the backtest and the live projections run the same code.
+  Leakage tests check that features never change when later games, or the game's own result, change.
+* **Shrinkage.** `rate = (weighted stat + m × league rate) / (weighted hours + m)`, using position-group
+  (F/D) league rates. The prior strength `m`, the recency half-life (8/20/50 games), the save-% prior
+  (500/1,500/4,000 shots) and the dispersion (Poisson or NB size) are all chosen by log score on the tuning window.
+  Factors that don't improve that score are dropped.
+* **Expected ice time** is the player's recency-weighted average, shrunk toward the position average by
+  2 games. It is a point estimate in 1.0, and NB dispersion absorbs the TOI uncertainty. The TOI
+  *distribution* (§1), line/PP-unit inputs, rest/B2B terms and the game simulation (§6) come later.
+* **Goalies.** The projected starter is the goalie with most of the team's last 10 starts, and the start
+  probability is his share. A Quick Entry confirmation sets it to 100%. Goalie props are projected only
+  for the most likely starter. Opposing skaters' scoring uses the start-weighted mix of goalies.
+* **Not modeled in 1.0:** first goal, goalie win, saves + win, shutout and game lines. They need the game
+  simulation and are listed as "Not modeled yet".
+
 ## Module layout
 
 ```
@@ -202,6 +234,25 @@ The breakdown is always displayed. Confidence buckets (50–59, 60–69, …) ar
 ---
 
 ## 11. Validation & backtesting
+
+**Publication gate (Phase 3, implemented in `models/fit.py`).**
+1. All completed games are replayed. Every skater appearance and goalie start gets a prediction made
+   only from earlier dates.
+2. The first 21 days of history only build state. The earliest 60% of the remaining dates **tune**
+   the settings, and the latest 40% are the **test**. Nothing tuned ever sees the test window.
+3. On the test window, each stat's mean log score is compared with two baselines: a Poisson at the
+   player's **season average** (falling back to last season, then the position average), and a Poisson
+   at his **last-10 average**. The comparison is paired per game, with a standard error.
+4. A stat passes only if the 95% lower bound of the improvement is above zero against **both**
+   baselines, and its randomized-PIT histogram is close to flat (largest bin gap within
+   0.02 + 3·√(0.09/n)). It also needs at least 3,000 test rows (150 for goalies).
+5. The test knows the actual starting goalies and who dressed (`lineup_mode = lineup_oracle`). Live
+   projections don't, and they carry "goalie/lineup unconfirmed" in `missing_inputs`. The `live_tracked`
+   mode arrives with Phase 7 grading.
+
+Results are stored in `backtest_runs`, per model family, and in `model_versions.oos_metrics`, and
+published as `models.json`.
+
 
 **Walk-forward, never random splits.**
 ```

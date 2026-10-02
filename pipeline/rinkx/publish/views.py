@@ -10,6 +10,7 @@ import sqlite3
 from typing import Any
 
 from rinkx.analytics import hitrates
+from rinkx.publish import projections
 
 NOT_CONNECTED = "not_connected"  # the feed that would provide this isn't built yet
 INSUFFICIENT = "insufficient_sample"
@@ -90,6 +91,7 @@ def _side(conn: sqlite3.Connection, g: sqlite3.Row, home: bool) -> dict[str, Any
     team_id = g["home_team_id"] if home else g["away_team_id"]
     record = latest_standing(conn, team_id, g["season_id"], g["game_date"])
     ctx = _context(conn, g["id"], team_id)
+    goalie = projections.goalie_start(conn, g, team_id)
     return {
         "team": _team(g, "h_" if home else "a_"),
         "score": g["home_score"] if home else g["away_score"],
@@ -97,8 +99,8 @@ def _side(conn: sqlite3.Connection, g: sqlite3.Row, home: bool) -> dict[str, Any
         "record_reason": None if record else "data_unavailable",
         "context": ctx,
         "context_reason": None if ctx else "data_unavailable",
-        "goalie": None,
-        "goalie_reason": NOT_CONNECTED,
+        "goalie": goalie,  # projected from recent starts, or confirmed via Quick Entry
+        "goalie_reason": None if goalie else "data_unavailable",
         "injuries": None,
         "injuries_reason": NOT_CONNECTED,
     }
@@ -225,6 +227,7 @@ def game_detail(conn: sqlite3.Connection, nhl_game_id: int) -> dict[str, Any]:
         out[side]["roster"] = _roster(conn, team_id)
         out[side]["lines"] = None
         out[side]["lines_reason"] = NOT_CONNECTED
+    out["projections"] = projections.game_projections(conn, g)
     box = _boxscore(conn, g["id"])
     out["boxscore"] = box
     out["boxscore_reason"] = None if box else ("not_final" if g["status"] != "final" else "data_unavailable")
@@ -428,4 +431,5 @@ def player(conn: sqlite3.Connection, nhl_player_id: int, season_id: int | None) 
         "last_season_games": prior,
         "hit_rates": rates,
         "hit_rates_basis": basis,
+        "projection": projections.player_projection(conn, p["id"]),
     }

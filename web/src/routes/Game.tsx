@@ -4,6 +4,13 @@ import { useEncrypted } from "../lib/data/fetch";
 import type { GameDetail, Side } from "../lib/data/types";
 import { clock, localTime, longDate, mmss, num, signed } from "../lib/format";
 import { RestChip, statusLabel } from "./Games";
+import {
+  GoalieLine,
+  MODEL_REASON_TEXT,
+  QuickEntryLink,
+  SideProjectionTable,
+  TestedNote,
+} from "../components/Projections";
 
 function ContextTable({ away, home }: { away: Side; home: Side }) {
   const rows: [string, (s: Side) => string | null][] = [
@@ -240,8 +247,20 @@ export function Game() {
 
       <div className="grid gap-3 sm:grid-cols-2">
         <Panel title="Starting goalies">
-          <Missing reason={g.home.goalie_reason} />
-          <p className="mt-1 text-xs text-muted">Projected and confirmed starters arrive in Phase 3.</p>
+          <ul className="flex flex-col gap-2 text-sm">
+            {[g.away, g.home].map((s) => (
+              <li key={s.team.abbrev} className="flex items-start gap-2">
+                <span className="num w-10 shrink-0 text-muted">{s.team.abbrev}</span>
+                <GoalieLine g={s.goalie} gameId={g.id} team={s.team.abbrev} />
+              </li>
+            ))}
+          </ul>
+          {!done && (
+            <p className="mt-2 text-xs text-muted">
+              Projected = share of the team's last 10 starts. Confirm a starter with Quick Entry (needs a source
+              link).
+            </p>
+          )}
         </Panel>
         <Panel title="Game environment (total, moneyline)">
           <Missing reason={g.environment_reason} />
@@ -254,6 +273,31 @@ export function Game() {
           <Missing reason={g.home.lines_reason} />
         </Panel>
       </div>
+
+      {!done && (
+        <Panel
+          title="Projections"
+          right={
+            <QuickEntryLink template="player-out" fields={{ game: String(g.id) }}>
+              Mark a player out
+            </QuickEntryLink>
+          }
+        >
+          {g.projections.reason ? (
+            <p className="text-sm text-muted">{MODEL_REASON_TEXT[g.projections.reason]}</p>
+          ) : (
+            <div className="flex flex-col gap-5">
+              <SideProjectionTable side={g.projections.away} abbrev={g.away.team.abbrev} />
+              <SideProjectionTable side={g.projections.home} abbrev={g.home.team.abbrev} />
+              <p className="text-xs text-muted">
+                Lineups aren't confirmed: every rostered skater with NHL history is listed, assuming he dresses.
+                Mark scratches with Quick Entry.
+              </p>
+              <TestedNote testedAt={g.projections.models.tested_at} />
+            </div>
+          )}
+        </Panel>
+      )}
 
       <Panel title="Team context">
         <ContextTable away={g.away} home={g.home} />

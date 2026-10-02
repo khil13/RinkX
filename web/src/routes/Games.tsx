@@ -91,7 +91,31 @@ function GameCard({ g }: { g: GameSummary }) {
       </div>
       <div className="flex flex-wrap gap-x-4 gap-y-1 border-t border-line px-4 py-2 text-xs text-muted">
         <span>
-          Goalies: <Missing reason={g.home.goalie_reason} />
+          Goalies:{" "}
+          {g.away.goalie || g.home.goalie ? (
+            [g.away, g.home].map((s, i) => (
+              <span key={s.team.abbrev}>
+                {i > 0 && " · "}
+                {s.goalie ? (
+                  <>
+                    {s.goalie.name.split(" ").slice(-1)[0]}
+                    <span className="text-[10px]">
+                      {" "}
+                      {s.goalie.status === "projected"
+                        ? `(proj. ${Math.round(s.goalie.probability * 100)}%)`
+                        : s.goalie.status === "confirmed"
+                          ? "(confirmed)"
+                          : ""}
+                    </span>
+                  </>
+                ) : (
+                  "?"
+                )}
+              </span>
+            ))
+          ) : (
+            <Missing reason={g.home.goalie_reason} />
+          )}
         </span>
         <span>
           Odds: <Missing reason={g.environment_reason} />
