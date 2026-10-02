@@ -16,6 +16,7 @@ from rinkx.ingestion.nhl.jobs import NhlOptions, run_nhl
 from rinkx.ingestion.odds.client import OddsClient, UrllibTransport
 from rinkx.ingestion.odds.jobs import run_odds
 from rinkx.models.project import run_models
+from rinkx.pricing.price import run_pricing
 from rinkx.publish.build import build_bundle, missing_setup
 from rinkx.publish.schemas import Manifest
 from rinkx.quick_entry import GhIssues, IssueTracker, finish, run_quick_entry
@@ -122,5 +123,6 @@ def _run_stages(
         qe = run_quick_entry(conn, tracker, owner, now)
 
     run_models(conn, now, settings.today or slate_date(now), qe.reasons if qe else None)
+    run_pricing(conn, now)  # model vs market for every open line with a current projection
     conn.commit()
     return finish(conn, tracker, qe, started) if tracker is not None and qe is not None else []

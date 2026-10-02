@@ -40,6 +40,60 @@ def _movement(conn: sqlite3.Connection, prop_line_id: int) -> list[dict[str, Any
     ]
 
 
+def _pricing(conn: sqlite3.Connection, prop_line_id: int, full: bool) -> dict[str, Any] | None:
+    """Latest frozen prediction for this line (Phase 5), if any."""
+    r = conn.execute(
+        "SELECT * FROM predictions WHERE prop_line_id = ? ORDER BY id DESC LIMIT 1", (prop_line_id,)
+    ).fetchone()
+    if r is None:
+        return None
+    parts = json.loads(r["confidence_parts"])
+    out: dict[str, Any] = {
+        "prediction_id": r["id"],
+        "p_model_over": r["p_model_over"],
+        "p_model_under": r["p_model_under"],
+        "p_push": r["p_push"],
+        "p_novig_over": r["p_novig_over"],
+        "p_implied_over": r["p_implied_over"],
+        "edge_over": r["edge_over"],
+        "edge_under": r["edge_under"],
+        "ev_over": r["ev_over"],
+        "ev_under": r["ev_under"],
+        "side": r["side"],
+        "confidence": r["confidence"],
+        "devig_method": r["devig_method"],
+        "priced_at": r["created_at"],
+    }
+    if full:
+        out["confidence_parts"] = parts
+        out["calculation"] = json.loads(r["calculation"])
+    return out
+
+
+def _lean(books: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """The best priced side across books (highest EV among sides that cleared the lean rules)."""
+    best: dict[str, Any] | None = None
+    for b in books:
+        pr = b.get("pricing")
+        if not pr or pr["side"] == "none":
+            continue
+        over = pr["side"] in ("over", "yes", "home")
+        ev = pr["ev_over"] if over else pr["ev_under"]
+        if best is None or (ev or 0) > best["ev"]:
+            best = {
+                "book": b["book"],
+                "book_name": b["book_name"],
+                "side": pr["side"],
+                "line": b["line"],
+                "price": b["over"] if over else b["under"],
+                "edge": pr["edge_over"] if over else pr["edge_under"],
+                "ev": ev,
+                "confidence": pr["confidence"],
+                "p_model": pr["p_model_over"] if over else pr["p_model_under"],
+            }
+    return best
+
+
 LINE_SQL = """
 SELECT l.id, l.line, l.over_price, l.under_price, l.status, l.last_seen_at, l.last_changed_at,
        m.code AS market, m.name AS market_name, m.kind, b.code AS book, b.name AS book_name,
@@ -74,6 +128,7 @@ def _group(conn: sqlite3.Connection, rows: list[sqlite3.Row], with_movement: boo
             }
             if with_movement:
                 entry["movement"] = _movement(conn, r["id"])
+            entry["pricing"] = _pricing(conn, r["id"], full=with_movement)
             books.append(entry)
         # Compare prices only at the most common line (a 2.5 price isn't comparable to a 3.5 one).
         lines = [b["line"] for b in books]

@@ -1,0 +1,5 @@
+# When RinkX labels a side (docs/05-models.md §7). Below these, a priced line shows the numbers
+# but no lean ("No lean"). Phase 7 backtests will tune them.
+min_edge_pts: 3.0          # model minus no-vig probability, in percentage points
+data_quality_floor: 0.6    # projection data quality required for a lean
+implausible_edge_pts: 15.0 # above this, confidence drops: big edges are usually missing information

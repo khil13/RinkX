@@ -247,13 +247,21 @@ test("sportsbook lines: comparison table, best price, no-vig, movement (syntheti
   await expect(sog.getByTitle("Best price").first()).toBeVisible();
   await expect(sog.getByText(/^\d+%$/).first()).toBeVisible(); // no-vig consensus
   await expect(page.getByRole("table", { name: "Moneyline lines" })).toBeVisible();
-  await expect(page.getByText(/Prices change; check the book before acting/)).toBeVisible();
+  await expect(page.getByText(/prices change, so check the book before acting/)).toBeVisible();
+  // Phase 5: model probability at the line and a lean (or "No lean") for every row.
+  await expect(sog.locator("thead").getByText("Lean")).toBeVisible();
+  await expect(sog.locator("tbody tr").first()).toContainText(/No lean|edge [+−]\d/);
 
   await page.goto(`${MODELS}#/players/8000001`);
   const card = page.getByRole("article", { name: "Shots on Goal line" });
   await expect(card).toBeVisible();
   await expect(card.getByRole("img", { name: "Line movement" })).toBeVisible();
   await expect(card).toContainText("FanDuel");
+  await expect(card).toContainText(/Model over \d+% vs market \d+%/);
+  await card.getByText("Show the calculation").click();
+  await expect(card.getByText(/^Implied\(/).first()).toBeVisible();
+  await card.getByText(/Confidence breakdown/).click();
+  await expect(card.getByText("Market agreement")).toBeVisible();
 });
 
 test("real-data site without an odds key says lines aren't connected", async ({ page }) => {
