@@ -6,9 +6,11 @@ RinkX answers **"why does the model project this player at this number?"** It do
 
 ## Status
 
-**Phase 2 complete:** NHL schedule, standings, rosters, box scores, play-by-play and official ice-time splits ingested hourly from the free NHL API, including last season. Pages: Games (daily slate), Game, Players, and Player (hit rates over L5–L20/season/last season, full game log with missed games). Goalies, lineups, injuries and odds are clearly marked *not connected yet*. Next: Phase 3 (projection models).
+**Phase 3 complete:** projection models for shots, goals, assists, points, PP points, blocks, hits and goalie saves/goals against. Each comes with a full probability distribution and an *Explain* breakdown. A stat is published only after it beats a season-average and a last-10 baseline on past games it never saw (see **Model Tests** in the app). Starting goalies are projected from recent starts. **Quick Entry** issue forms confirm a goalie or rule a player out, and the projections update with a before → after. Built on Phase 1–2: hourly NHL schedule, box scores, play-by-play, ice-time splits, hit rates and game logs. Odds and injuries are still marked *not connected yet*. Next: Phase 4 (line comparison).
 
-**Speed up the backfill:** Actions → pipeline → Run workflow → set *Games to load this run* to 400.
+**Speed up the backfill:** Actions → pipeline → Run workflow → set *Games to load this run* to 400. The models need loaded history before they can pass their test, so nothing is projected until then.
+
+**Quick Entry:** on a Game page, tap *Confirm goalie* or *Mark a player out*. It opens a prefilled GitHub issue; add a source link and submit. The pipeline applies it within a few minutes and closes the issue.
 
 **First time?** Follow [docs/setup.md](docs/setup.md).
 

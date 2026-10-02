@@ -50,6 +50,13 @@ When the run finishes, reload the site and enter your passphrase. Tick **Remembe
 | Data store (`rinkx-*.db.enc`) | the `store` release | yes, but encrypted (AES-256-GCM, STORE_KEY) |
 | DATA_KEY, STORE_KEY | Actions secrets + your password manager | **no** |
 | Passphrase | your head / password manager | **no** |
+| Quick Entry issues | this repo's Issues | **yes**: they hold only what you typed and its public source link. The pipeline's reply never includes projections. |
+
+### Quick Entry (confirm a goalie, rule a player out)
+
+On a Game page in the app, tap **Confirm goalie** or **Mark a player out**. This opens a GitHub issue form with the game already filled in. Add the player and a **source link**, then submit. Submitting starts the pipeline. A few minutes later the projections are recalculated, the app shows *Updated after goalie confirmed: before → after*, and the issue is commented on and closed. If something didn't match (an unknown player, a game that already started, no source link), the comment says why and nothing is changed.
+
+Only issues **you** open count. Anyone else's issues are ignored and start nothing. The buttons appear only on the published site (`<you>.github.io/RinkX`). Elsewhere, open **Issues → New issue → Quick Entry** yourself.
 
 ### Changing the passphrase
 

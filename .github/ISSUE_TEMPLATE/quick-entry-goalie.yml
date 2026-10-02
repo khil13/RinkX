@@ -1,0 +1,46 @@
+name: "Quick Entry: goalie"
+description: Confirm a starting goalie for an upcoming game. Owner only; applied on the next pipeline run.
+title: "Quick Entry: goalie"
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The RinkX pipeline starts automatically when you submit this, applies it, recalculates the
+        game's projections, then comments and closes the issue. **This repository is public**: the
+        comment never includes projections. Issues opened by anyone except the owner are ignored.
+  - type: input
+    id: game
+    attributes:
+      label: Game
+      description: NHL game id (filled in when you open this from the app), or the date as YYYY-MM-DD together with a team.
+    validations:
+      required: true
+  - type: input
+    id: team
+    attributes:
+      label: Team
+      description: 3-letter abbreviation, e.g. BOS.
+  - type: input
+    id: goalie
+    attributes:
+      label: Goalie
+      description: NHL player id or full name.
+    validations:
+      required: true
+  - type: dropdown
+    id: status
+    attributes:
+      label: Status
+      options:
+        - Confirmed
+        - Likely
+    validations:
+      required: true
+  - type: input
+    id: source
+    attributes:
+      label: Source URL
+      description: Where this was reported (team account, beat reporter, etc.). Required.
+      placeholder: https://
+    validations:
+      required: true

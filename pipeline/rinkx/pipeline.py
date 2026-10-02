@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import sqlite3
 import tempfile
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -12,15 +13,18 @@ from pathlib import Path
 from rinkx.config import Settings
 from rinkx.ingestion.http import Fetcher, HttpFetcher, ReplayFetcher
 from rinkx.ingestion.nhl.jobs import NhlOptions, run_nhl
+from rinkx.models.project import run_models
 from rinkx.publish.build import build_bundle, missing_setup
 from rinkx.publish.schemas import Manifest
+from rinkx.quick_entry import GhIssues, IssueTracker, finish, run_quick_entry
 from rinkx.store import remote
 from rinkx.store.db import connect, migrate, snapshot
-from rinkx.timeutil import utcnow
+from rinkx.timeutil import iso, slate_date, utcnow
 
 log = logging.getLogger("rinkx")
 
-# Stages are added phase by phase: ingest (Phase 1), then features, models, price, alerts, grade.
+# Stages are added phase by phase: ingest (Phase 1), Quick Entry + models (Phase 3), then price,
+# alerts, grade.
 
 
 @dataclass
@@ -30,7 +34,14 @@ class RunResult:
     store_pushed: str | None
 
 
-def run(settings: Settings, out_dir: Path, *, push: bool = True, now: datetime | None = None) -> RunResult:
+def run(
+    settings: Settings,
+    out_dir: Path,
+    *,
+    push: bool = True,
+    now: datetime | None = None,
+    tracker: IssueTracker | None = None,
+) -> RunResult:
     now = now or utcnow()
     settings.workdir.mkdir(parents=True, exist_ok=True)
 
@@ -56,7 +67,7 @@ def run(settings: Settings, out_dir: Path, *, push: bool = True, now: datetime |
     try:
         version = migrate(conn, settings.db_dir)
         log.info("schema version %d", version)
-        _run_stages(conn, settings, now)
+        after_save = _run_stages(conn, settings, now, tracker)
         manifest = build_bundle(conn, out_dir, settings, now=now, store_asset=pulled, today=settings.today)
         pushed = None
         if push:
@@ -65,12 +76,38 @@ def run(settings: Settings, out_dir: Path, *, push: bool = True, now: datetime |
             pushed = remote.push(backend, store_key, snap)  # named by wall-clock time
             snap.unlink(missing_ok=True)
             log.info("store pushed: %s", pushed)
+        # Only now that the store is saved: comment on and close Quick Entry issues.
+        for action in after_save:
+            try:
+                action()
+            except Exception as exc:  # retried next run (the entry itself is already saved)
+                log.warning("quick entry follow-up failed: %s", exc)
     finally:
         conn.close()
     return RunResult(manifest, pulled, pushed)
 
 
-def _run_stages(conn: sqlite3.Connection, settings: Settings, now: datetime) -> None:
+def _issue_tracker(settings: Settings) -> IssueTracker | None:
+    if settings.store_backend == "github" and settings.github_repository:
+        return GhIssues(settings.github_repository)
+    return None
+
+
+def _run_stages(
+    conn: sqlite3.Connection, settings: Settings, now: datetime, tracker: IssueTracker | None
+) -> list[Callable[[], None]]:
+    """Run every stage; return follow-up actions to perform once the store is saved."""
     if "nhl" in settings.sources:
         fetcher: Fetcher = ReplayFetcher(settings.fixtures_dir) if settings.fixtures_dir is not None else HttpFetcher()
         run_nhl(conn, fetcher, now, NhlOptions(today=settings.today, boxscore_limit=settings.boxscore_limit))
+
+    tracker = tracker or _issue_tracker(settings)
+    started = iso(now)
+    qe = None
+    if tracker is not None and settings.github_repository:
+        owner = settings.github_repository.split("/")[0]
+        qe = run_quick_entry(conn, tracker, owner, now)
+
+    run_models(conn, now, settings.today or slate_date(now), qe.reasons if qe else None)
+    conn.commit()
+    return finish(conn, tracker, qe, started) if tracker is not None and qe is not None else []

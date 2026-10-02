@@ -15,7 +15,7 @@ from typing import Any
 from rinkx import __version__, crypto
 from rinkx.config import ConfigError, Settings
 from rinkx.ingestion.nhl.jobs import current_season
-from rinkx.publish import guards, views
+from rinkx.publish import guards, projections, views
 from rinkx.publish.schemas import BuildInfo, Envelope, FeedStatus, FileEntry, Manifest, Meta
 from rinkx.store.db import schema_version
 from rinkx.timeutil import iso, parse_iso, slate_date
@@ -144,6 +144,7 @@ def _league_files(conn: sqlite3.Connection, today: date) -> dict[str, tuple[Any,
         out[f"slate/{d}.json"] = (views.slate(conn, d), oldest)
         for (gid,) in conn.execute("SELECT nhl_game_id FROM games WHERE game_date = ?", (d,)).fetchall():
             out[f"games/{gid}.json"] = (views.game_detail(conn, gid), oldest)
+    out["models.json"] = (projections.models_report(conn), None)
     if conn.execute("SELECT 1 FROM teams LIMIT 1").fetchone():
         out["teams.json"] = (views.teams(conn, season, today.isoformat()), None)
     if conn.execute("SELECT 1 FROM players LIMIT 1").fetchone():
@@ -204,7 +205,16 @@ def build_bundle(
         _write(staging, KEYFILE, keyfile)
 
         synthetic = bool(guards.synthetic_row_counts(conn))
-        sources = [r[0] for r in conn.execute("SELECT code FROM data_sources WHERE is_enabled = 1 ORDER BY code")]
+        sources = [
+            r[0]
+            for r in conn.execute(
+                "SELECT code FROM data_sources WHERE is_enabled = 1 AND category <> 'models' ORDER BY code"
+            )
+        ]
+        model_versions = {
+            r[0]: r[1]
+            for r in conn.execute("SELECT model_family, version FROM model_versions WHERE status = 'champion'")
+        }
         encrypted: dict[str, tuple[Any, str | None]] = {
             "admin/health.json": (_health(conn, store_asset, build), None),
         }
@@ -217,7 +227,7 @@ def build_bundle(
                     data_status="synthetic" if synthetic else "live",
                     oldest_input_at=oldest,
                     sources=sources,
-                    model_versions={},
+                    model_versions=model_versions,
                 ),
             )
             _write(staging, rel + ".enc", crypto.encrypt_json(env.model_dump(mode="json"), rel, data_key))

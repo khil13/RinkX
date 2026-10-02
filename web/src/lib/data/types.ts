@@ -123,8 +123,9 @@ export interface Side {
   record_reason: Reason | null;
   context: ScheduleContext | null;
   context_reason: Reason | null;
-  goalie: null;
-  goalie_reason: Reason;
+  /** Upcoming games: the projected or Quick-Entry-confirmed starter. */
+  goalie: GoalieStart | null;
+  goalie_reason: Reason | null;
   injuries: null;
   injuries_reason: Reason;
   // game detail only
@@ -187,6 +188,7 @@ export interface GoalieLine {
 export interface GameDetail extends GameSummary {
   boxscore: { skaters: SkaterLine[]; goalies: GoalieLine[] } | null;
   boxscore_reason: Reason | null;
+  projections: GameProjections;
 }
 
 export interface Slate {
@@ -301,4 +303,133 @@ export interface PlayerPage {
   last_season_games: (SkaterGame | GoalieGame)[];
   hit_rates: Record<string, HitRateStat>;
   hit_rates_basis: "games_played" | "starts";
+  projection: PlayerProjection;
+}
+
+// ---- Phase 3: projections (pipeline/rinkx/publish/projections.py) ----
+
+export interface GoalieStart {
+  id: number;
+  name: string;
+  /** confirmed = Quick Entry with a source; projected = from recent starts; actual = box score */
+  status: "confirmed" | "projected" | "unknown" | "actual";
+  probability: number;
+  source: string | null;
+  reported_at: string | null;
+}
+
+export interface Factor {
+  name: string;
+  /** multiplicative effect on the projected mean, e.g. 0.08 = +8% */
+  effect: number;
+  detail: string;
+}
+
+export interface MarketProjection {
+  market: string;
+  label: string;
+  kind: "over_under" | "yes_no";
+  stat: string;
+  mean: number;
+  median: number | null;
+  sd: number | null;
+  /** P(X >= k) for k = 0.. */
+  p_ge: number[];
+  data_quality: number;
+  missing_inputs: string[];
+  computed_at: string;
+  trigger_reason: string;
+  previous: { mean: number; computed_at: string; reason: string } | null;
+  // player page only
+  pmf?: number[];
+  factors_for?: Factor[];
+  factors_against?: Factor[];
+  inputs?: Record<string, string | number | null>;
+  as_of?: string;
+}
+
+export type ModelReason =
+  | "models_not_ready"
+  | "no_model_passed"
+  | "game_started"
+  | "outside_window"
+  | "ruled_out"
+  | "no_upcoming_projection";
+
+export interface ModelStatus {
+  status: "ok" | "insufficient_history" | "not_run" | null;
+  tested_at: string | null;
+  passed: string[];
+}
+
+export interface ProjectedPlayer {
+  id: number;
+  name: string;
+  position: string;
+  toi_s: number | null;
+  pp_toi_s: number | null;
+  markets: Record<string, MarketProjection>;
+}
+
+export interface SideProjections {
+  goalie: GoalieStart | null;
+  players: ProjectedPlayer[];
+  out: { id: number; name: string; reason: string | null; source: string }[];
+}
+
+export interface GameProjections {
+  models: ModelStatus;
+  reason: ModelReason | null;
+  home: SideProjections;
+  away: SideProjections;
+}
+
+export interface PlayerProjection {
+  models: ModelStatus;
+  game: { id: number; date: string; start_time_utc: string; home: boolean; opponent: string } | null;
+  markets: MarketProjection[];
+  reason: ModelReason | null;
+}
+
+export interface Baseline {
+  log_score: number;
+  model_minus_baseline: { mean: number; se: number; lo: number };
+}
+
+export interface StatTest {
+  label: string;
+  family: string;
+  n_tune: number;
+  n_test: number;
+  passed: boolean;
+  reason: "did_not_beat_baselines" | "miscalibrated" | "insufficient_history" | null;
+  log_score?: number;
+  baselines?: { season: Baseline; l10: Baseline };
+  pit?: number[];
+  pit_max_dev?: number;
+  pit_tolerance?: number;
+  mean_pred?: number;
+  mean_actual?: number;
+  choice?: {
+    kind: string;
+    factors: string[];
+    half_life_games: number;
+    m: number;
+    size: number | null;
+    sa_size: number | null;
+    k_sv_shots: number;
+  } | null;
+}
+
+export interface ModelsReport {
+  version: string;
+  status: "ok" | "insufficient_history" | "not_run";
+  tested_at: string | null;
+  history?: { from: string; to: string } | null;
+  tune?: { from: string; to_before: string } | null;
+  test?: { from: string; to: string } | null;
+  lineup_mode?: string;
+  stats: Record<string, StatTest>;
+  markets: Record<string, { stat: string; label: string }>;
+  not_modeled: { market: string; label: string; reason: string }[];
 }

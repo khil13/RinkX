@@ -7,6 +7,7 @@ import { Admin } from "./routes/Admin";
 import { Dashboard } from "./routes/Dashboard";
 import { Game } from "./routes/Game";
 import { Games } from "./routes/Games";
+import { Models } from "./routes/Models";
 import { Placeholder } from "./routes/Placeholder";
 import { Player, Players } from "./routes/Players";
 import { Setup } from "./routes/Setup";
@@ -16,6 +17,7 @@ const BUILT: Record<string, () => React.ReactElement> = {
   "/": () => <Dashboard />,
   "/games": () => <Games />,
   "/players": () => <Players />,
+  "/models": () => <Models />,
   "/admin": () => <Admin />,
 };
 

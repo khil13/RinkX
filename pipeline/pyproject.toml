@@ -5,8 +5,10 @@ description = "RinkX data pipeline: ingest, model, price, publish (runs in GitHu
 requires-python = ">=3.11"
 dependencies = [
   "cryptography>=43",
+  "numpy>=2.0",
   "pydantic>=2.7",
   "pyyaml>=6",
+  "scipy>=1.13",
 ]
 
 [project.optional-dependencies]
@@ -15,6 +17,7 @@ dev = [
   "ruff>=0.6",
   "mypy>=1.11",
   "types-PyYAML",
+  "scipy-stubs",
 ]
 
 [project.scripts]

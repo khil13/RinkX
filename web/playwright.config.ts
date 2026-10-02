@@ -14,6 +14,7 @@ export default defineConfig({
       [4173, "league"],
       [4174, "setup"],
       [4175, "empty"],
+      [4176, "models"],
     ] as const
   ).map(([port, site]) => ({
     command: `${python} -m http.server ${port} --bind 127.0.0.1 --directory tests/e2e/.sites/${site}`,
