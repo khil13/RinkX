@@ -316,3 +316,15 @@ def test_player_out_removes_projection(tmp_path):
 def test_parse_issue_form():
     body = "### Game\n\n2025020001\n\n### Team\n\n_No response_\n\n### Source URL\n\nhttps://a.b/c\n"
     assert parse_form(body) == {"game": "2025020001", "team": "", "source url": "https://a.b/c"}
+
+
+def test_retest_when_history_grows(tmp_path):
+    conn, _ = synth.build(str(tmp_path / "grow.db"), days=15, seed=2)
+    n = len(history.load(conn))
+    project.run_models(conn, NOW, START + timedelta(days=15))
+    stored, _ = project.latest_report(conn)
+    assert stored["status"] == "insufficient_history" and stored["n_games"] == n
+    soon = NOW + timedelta(hours=1)
+    assert not project._needs_evaluation(conn, soon, n)  # nothing new: no re-test
+    assert project._needs_evaluation(conn, soon, n + 1)  # couldn't test before; new games arrived
+    assert project._needs_evaluation(conn, NOW + timedelta(hours=21), n)  # daily re-test
