@@ -33,6 +33,8 @@ VENUE_STATS = ("hits", "blocks")
 POS_TOI_FALLBACK_H = {"F": 15.5 / 60, "D": 21.0 / 60}  # only used before any game is loaded
 FIN_C: tuple[float, ...] = (150.0, 500.0, 1500.0)  # team finishing %: prior strength in shots
 EVEN_PRIOR = 10.0  # OT/shootout splits: shrink toward 50/50 by this many games
+PLAYOFF_K_H = 200.0  # playoff factor: shrink toward "no effect" by this many skater-hours
+PLAYOFF_K_GAMES = 40.0  # ...and by this many team-games for team shot volume
 
 
 def basis_of(stat: str) -> str:
@@ -106,6 +108,9 @@ class League:
     ha: dict[str, list[float]] = field(default_factory=lambda: {s: [0.0] * 4 for s in SKATER_STATS})
     team_n: dict[str, float] = field(default_factory=lambda: dict.fromkeys(SKATER_STATS, 0.0))
     team_tot: dict[str, float] = field(default_factory=lambda: dict.fromkeys(SKATER_STATS, 0.0))
+    # playoff vs regular-season rates, all positions: [x_playoff, b_playoff, x_regular, b_regular]
+    po: dict[str, list[float]] = field(default_factory=lambda: {s: [0.0] * 4 for s in SKATER_STATS})
+    po_shots: list[float] = field(default_factory=lambda: [0.0] * 4)  # team shots: [po_sum, po_n, reg_sum, reg_n]
     saves: float = 0.0
     sa: float = 0.0
     starter_sa: float = 0.0
@@ -187,6 +192,25 @@ class State:
             return 1.0
         return (xh / bh if home else xa / ba) / overall
 
+    def playoff_factor(self, stat: str, playoff: bool) -> float:
+        """Playoff games vs regular season, league-wide, shrunk toward no effect. 1.0 outside the playoffs."""
+        if not playoff:
+            return 1.0
+        x_po, b_po, x_reg, b_reg = self.league.po[stat]
+        if not b_reg or not x_reg:
+            return 1.0
+        reg = x_reg / b_reg
+        return ((x_po + PLAYOFF_K_H * reg) / (b_po + PLAYOFF_K_H)) / reg
+
+    def playoff_shots_factor(self, playoff: bool) -> float:
+        if not playoff:
+            return 1.0
+        po_sum, po_n, reg_sum, reg_n = self.league.po_shots
+        if not reg_n or not reg_sum:
+            return 1.0
+        reg = reg_sum / reg_n
+        return ((po_sum + PLAYOFF_K_GAMES * reg) / (po_n + PLAYOFF_K_GAMES)) / reg
+
     def venue_factor(self, arena_team: int | None, stat: str) -> float:
         """Arena scorekeeping: totals in this team's home games vs. its road games, both shrunk."""
         if arena_team is None or stat not in VENUE_STATS:
@@ -233,6 +257,7 @@ class State:
         arena_team: int | None,
         opp_goalies: list[tuple[int, float]],
         season: int,
+        playoff: bool = False,
     ) -> dict[str, float]:
         st = self.skaters.get(player) or SkaterState()
         f: dict[str, float] = {"games": float(st.games)}
@@ -252,6 +277,7 @@ class State:
             f[f"prior.{s}"] = prior
             f[f"home.{s}"] = self.home_factor(s, home)
             f[f"venue.{s}"] = self.venue_factor(arena_team, s)
+            f[f"po.{s}"] = self.playoff_factor(s, playoff)
             f[f"opp.{s}"] = self.team_factor(opp, s, "against")
             # Baselines (what a simple method would say): season average and last-10 average.
             fallback = prior * (pp_avg if basis_of(s) == "pp" else toi_avg)
@@ -265,7 +291,7 @@ class State:
             f[f"gf.{j}"] = self.goalie_factor(opp_goalies, k)
         return f
 
-    def goalie_features(self, goalie: int, team: int, opp: int, season: int) -> dict[str, float]:
+    def goalie_features(self, goalie: int, team: int, opp: int, season: int, playoff: bool = False) -> dict[str, float]:
         g = self.goalies.get(goalie) or GoalieState()
         lg = self.league
         f: dict[str, float] = {"starts": float(g.starts), "sa_seen": g.sa}
@@ -273,6 +299,7 @@ class State:
         f["mu_league"] = lg.starter_sa / lg.starts if lg.starts else 0.0
         f["fd"] = self.team_factor(team, "shots", "against")  # own team's shots allowed
         f["fo"] = self.team_factor(opp, "shots", "for")  # opponent's shot volume
+        f["po"] = self.playoff_shots_factor(playoff)
         for j, k in enumerate(K_SV):
             f[f"sv.{j}"] = self.goalie_sv(goalie, k)
         sv_l = f["league_sv"]
@@ -354,7 +381,7 @@ class State:
 
     # ---- learning ------------------------------------------------------------------------
 
-    def _learn_skater(self, line: SkaterLine, season: int, date: str) -> None:
+    def _learn_skater(self, line: SkaterLine, season: int, date: str, playoff: bool = False) -> None:
         st = self.skaters[line.player]
         st.games += 1
         st.last_date = date
@@ -397,6 +424,10 @@ class State:
             off = 0 if line.home else 2
             ha[off] += v
             ha[off + 1] += basis
+            po = self.league.po[s]
+            off = 0 if playoff else 2
+            po[off] += v
+            po[off + 1] += basis
 
     def _learn_goalie(self, line: GoalieLine, season: int) -> None:
         if line.sa is None or line.saves is None:
@@ -468,6 +499,10 @@ class State:
                     t.for_n[s] += 1
                     lg.team_tot[s] += mine
                     lg.team_n[s] += 1
+                    if s == "shots":
+                        off = 0 if game.playoff else 2
+                        lg.po_shots[off] += mine
+                        lg.po_shots[off + 1] += 1
                 if theirs is not None:
                     t.against[s] += theirs
                     t.against_n[s] += 1
@@ -486,7 +521,7 @@ class State:
 
     def learn(self, game: GameRecord) -> None:
         for line in game.skaters:
-            self._learn_skater(line, game.season, game.date)
+            self._learn_skater(line, game.season, game.date, game.playoff)
         for gl in game.goalies:
             self._learn_goalie(gl, game.season)
         self._learn_teams(game)
@@ -518,6 +553,7 @@ def walk(games: list[GameRecord], state: State | None = None, *, emit: bool = Tr
                     arena,
                     [(opp_g, 1.0)] if opp_g is not None else [],
                     game.season,
+                    game.playoff,
                 )
                 feats |= {
                     "meta.game": float(game.game_id),
@@ -542,7 +578,7 @@ def walk(games: list[GameRecord], state: State | None = None, *, emit: bool = Tr
             for gl in game.goalies:
                 if not gl.started or gl.sa is None:
                     continue
-                feats = state.goalie_features(gl.player, gl.team, gl.opp, game.season)
+                feats = state.goalie_features(gl.player, gl.team, gl.opp, game.season, game.playoff)
                 yield Row(
                     "goalie",
                     game.game_id,

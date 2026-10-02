@@ -36,7 +36,7 @@ from rinkx.models.dist import INF, F
 from rinkx.models.history import GOALIE_STATS, SKATER_STATS
 from rinkx.models.state import HALF_LIVES, K_SV, H, Row, basis_of
 
-MODEL_VERSION = "1.1"
+MODEL_VERSION = "1.2"
 M_GRID: tuple[float, ...] = (0.25, 0.5, 1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 64.0)  # hours of ice time
 FINISH_GRID: tuple[float, ...] = (25.0, 50.0, 100.0, 200.0, 400.0, 800.0)  # shots
 BURN_IN_DAYS = 21  # the first weeks of history only build state; they are never scored
@@ -45,18 +45,20 @@ MIN_TEST = {"skater": 3000, "goalie": 150}
 BASELINE_FLOOR = 0.02
 
 # Factors each stat may use. The tuner drops any that don't improve the tuning-window score.
+# "playoff" is 1.0 in regular-season games; the tuner can only drop it if a tuning window
+# contains playoff games, so it is kept by default and judged by the test like everything else.
 SKATER_FACTORS: dict[str, tuple[str, ...]] = {
-    "shots": ("opp", "home"),
-    "goals": ("opp_shots", "goalie", "home"),
-    "assists": ("opp_shots", "goalie", "home"),
-    "points": ("opp_shots", "goalie", "home"),
-    "pp_points": ("opp", "home"),
-    "pp_goals": ("opp", "home"),
-    "pp_assists": ("opp", "home"),
-    "blocks": ("opp", "home", "venue"),
-    "hits": ("opp", "home", "venue"),
+    "shots": ("opp", "home", "playoff"),
+    "goals": ("opp_shots", "goalie", "home", "playoff"),
+    "assists": ("opp_shots", "goalie", "home", "playoff"),
+    "points": ("opp_shots", "goalie", "home", "playoff"),
+    "pp_points": ("opp", "home", "playoff"),
+    "pp_goals": ("opp", "home", "playoff"),
+    "pp_assists": ("opp", "home", "playoff"),
+    "blocks": ("opp", "home", "venue", "playoff"),
+    "hits": ("opp", "home", "venue", "playoff"),
 }
-GOALIE_FACTORS = ("fd", "fo")
+GOALIE_FACTORS = ("fd", "fo", "po")
 
 FAMILY = {
     "shots": "skater_shots",
@@ -189,8 +191,10 @@ def factor(c: Cols, stat: str, name: str, ch: Choice) -> F:
         "goalie": f"gf.{ch.k_sv}",
         "home": f"home.{stat}",
         "venue": f"venue.{stat}",
+        "playoff": f"po.{stat}",
         "fd": "fd",
         "fo": "fo",
+        "po": "po",
     }[name]
     return c[key]
 
@@ -263,7 +267,8 @@ def _tune_skater(c: Cols, y: F, stat: str, shots: Choice | None) -> tuple[Choice
     allf = SKATER_FACTORS[stat]
     for kind in kinds:
         grid = FINISH_GRID if kind == "finish" else M_GRID
-        factors = tuple(f for f in allf if not (kind == "finish" and f == "opp_shots"))  # already in shots
+        # opponent and playoff shot volume are already in the shots model
+        factors = tuple(f for f in allf if not (kind == "finish" and f in ("opp_shots", "playoff")))
         best: tuple[Choice, float] | None = None
         for hl in range(H):
             for m in grid:
@@ -365,7 +370,13 @@ def evaluate(tables: dict[str, Table]) -> dict[str, Any]:
     for kind, stats in (("skater", SKATER_STATS), ("goalie", GOALIE_STATS)):
         table = tables.get(kind)
         for stat in stats:
-            entry: dict[str, Any] = {"label": LABELS[stat], "family": FAMILY[stat], "n_tune": 0, "n_test": 0}
+            entry: dict[str, Any] = {
+                "label": LABELS[stat],
+                "family": FAMILY[stat],
+                "unit": "player-games" if kind == "skater" else "goalie starts",
+                "n_tune": 0,
+                "n_test": 0,
+            }
             report["stats"][stat] = entry
             if table is None or len(table) == 0:
                 entry.update(passed=False, reason="insufficient_history")

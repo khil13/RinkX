@@ -29,6 +29,8 @@ const FACTOR_NAMES: Record<string, string> = {
   fd: "own defence",
   fo: "opponent offence",
   fin: "team finishing",
+  playoff: "playoff games",
+  po: "playoff games",
 };
 
 function Pit({ hist }: { hist: number[] }) {
@@ -76,7 +78,7 @@ function StatCard({ stat, t }: { stat: string; t: StatTest }) {
       </header>
       {!t.passed && t.reason && <p className="text-xs text-muted">{REASON[t.reason]}</p>}
       <p className="num text-xs text-muted">
-        {t.n_test.toLocaleString()} test games · {t.n_tune.toLocaleString()} tuning games
+        {t.n_test.toLocaleString()} test {t.unit ?? "games"} · {t.n_tune.toLocaleString()} tuning {t.unit ?? "games"}
       </p>
       {t.baselines && (
         <div className="flex flex-col gap-0.5">

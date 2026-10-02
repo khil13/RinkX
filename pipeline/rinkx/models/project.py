@@ -315,6 +315,12 @@ def _context_factor(name: str, v: float, stat: str, ctx: dict[str, Any]) -> dict
             "effect": v - 1,
             "detail": f"League-wide, {label} run {_pct(v)} {'at home' if ctx['home'] else 'on the road'}.",
         }
+    if name == "playoff":
+        return {
+            "name": "Playoff game",
+            "effect": v - 1,
+            "detail": f"League-wide, {label} run {_pct(v)} in playoff games vs the regular season (shrunk).",
+        }
     if name == "venue":
         return {
             "name": "Arena scorekeeping",
@@ -339,6 +345,14 @@ def explain_goalie(f: dict[str, float], ch: Choice, ctx: dict[str, Any]) -> Expl
                     "name": "His team's defence",
                     "effect": v - 1,
                     "detail": f"{ctx['team']} allows {_pct(v)} shots vs the league average.",
+                }
+            )
+        elif name == "po":
+            factors.append(
+                {
+                    "name": "Playoff game",
+                    "effect": v - 1,
+                    "detail": f"League-wide, teams take {_pct(v)} shots in playoff games vs the regular season.",
                 }
             )
         else:
@@ -534,7 +548,7 @@ def project_game(
             if pid in out or pid not in st.skaters:
                 continue  # ruled out, or no NHL history to project from
             pos = history.pos_group(position)
-            f = st.skater_features(pid, pos, team, opp, home, arena, opp_mix.mix, g["season_id"])
+            f = st.skater_features(pid, pos, team, opp, home, arena, opp_mix.mix, g["season_id"], g["game_type"] == "O")
             ctx = ctx_base | {"pos": "defenceman" if pos == "D" else "forward"}
             if env is not None and gch is not None and "first_goal" in game_passed and goals_ch is not None:
                 side = "h" if home else "a"
@@ -607,7 +621,7 @@ def project_game(
         if mine.mix:
             gid, prob = mine.mix[0]
             if gid not in out:
-                f = st.goalie_features(gid, team, opp, g["season_id"])
+                f = st.goalie_features(gid, team, opp, g["season_id"], g["game_type"] == "O")
                 for stat, ch in choices.items():
                     if ch.kind != "goalie":
                         continue

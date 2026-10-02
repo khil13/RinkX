@@ -423,6 +423,8 @@ export interface Baseline {
 export interface StatTest {
   label: string;
   family: string;
+  /** what one test row is: player-games, goalie starts, team-games, games */
+  unit?: string;
   n_tune: number;
   n_test: number;
   passed: boolean;
