@@ -124,7 +124,10 @@ export function GoalieImpactLine({ i }: { i: GoalieImpact | null }) {
     <span className="num w-full text-[11px] text-muted" aria-label="Goalie numbers">
       {i.starts} starts · SV% {sv(i.save_pct)} (league {sv(i.league_save_pct)}) · last 5 {sv(i.last5_save_pct)} ·{" "}
       {i.sa_per_start} SA and {i.ga_per_start} GA per start · {i.starts_last_7_days} start
-      {i.starts_last_7_days === 1 ? "" : "s"} in 7 days · advanced metrics: unavailable (no xG source)
+      {i.starts_last_7_days === 1 ? "" : "s"} in 7 days ·{" "}
+      {i.advanced
+        ? `goals saved above expected ${i.advanced.gsax >= 0 ? "+" : "−"}${Math.abs(i.advanced.gsax).toFixed(1)} (xG against ${i.advanced.xg_against.toFixed(1)}, GA ${i.advanced.goals_against}, ${i.advanced.starts} starts; RinkX xG)`
+        : "expected-goals numbers: INSUFFICIENT DATA"}
     </span>
   );
 }

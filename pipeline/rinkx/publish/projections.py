@@ -10,7 +10,7 @@ import json
 import sqlite3
 from typing import Any
 
-from rinkx.models import project, promotion
+from rinkx.models import project, promotion, xg
 from rinkx.models.fit import FAMILY, GAME_MARKETS, LABELS, MARKETS, MODEL_VERSION, VERSIONS
 from rinkx.publish import profile
 
@@ -274,6 +274,7 @@ def _player_reason(conn: sqlite3.Connection, player_pk: int, status: dict[str, A
 VERSION_ADDS = {
     "1.5": "back-to-back terms; line and PP-unit ice time; linemate quality",
     "1.6": "shots: shot attempts, recent form, opponent vs his position, team pace, PP-time change",
+    "1.7": "goals: finishing shrunk toward his own shot quality (RinkX expected goals) instead of the league average",
 }
 
 
@@ -321,6 +322,7 @@ def models_report(conn: sqlite3.Connection) -> dict[str, Any]:
             "stats": {},
             "markets": markets,
             "not_modeled": not_modeled,
+            "xg": xg.summary(conn),
         }
     stats = {}
     for s, e in report["stats"].items():
@@ -340,4 +342,5 @@ def models_report(conn: sqlite3.Connection) -> dict[str, Any]:
         "stats": stats,
         "markets": markets,
         "not_modeled": not_modeled,
+        "xg": xg.summary(conn),
     }

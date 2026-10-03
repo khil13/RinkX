@@ -1,6 +1,6 @@
 import { Notice, Panel, Spinner } from "../components/ui";
 import { useEncrypted } from "../lib/data/fetch";
-import type { ChallengerStat, ModelsReport, StatTest } from "../lib/data/types";
+import type { XgSummary, ChallengerStat, ModelsReport, StatTest } from "../lib/data/types";
 import { longDate, localTime } from "../lib/format";
 
 const BASELINE_LABEL: Record<string, string> = {
@@ -206,6 +206,75 @@ function Promotion({ r }: { r: ModelsReport }) {
   );
 }
 
+const XG_REASON: Record<string, string> = {
+  insufficient_history: "not enough shots with locations loaded yet",
+  did_not_beat_baseline: "it did not beat the league-average goal rate on the later games",
+  miscalibrated: "its probabilities were not calibrated on the later games",
+};
+
+function XgPanel({ x }: { x: XgSummary | null }) {
+  const m = x?.metrics ?? {};
+  return (
+    <Panel title="Expected goals (xG)">
+      <div className="flex flex-col gap-2 text-sm" aria-label="Expected goals model">
+        <p className="text-xs text-muted">
+          RinkX's own shot-quality model: the chance an unblocked attempt becomes a goal from its distance, angle,
+          shot type, strength and whether it was a rebound. Fit on earlier games, scored on later ones it never saw.
+          Used for player xG, goals saved above expected and model 1.7's finishing only if it passes.
+        </p>
+        {!x ? (
+          <p className="text-muted">Not fit yet: DATA UNAVAILABLE.</p>
+        ) : (
+          <>
+            <p>
+              <span className={x.passed ? "text-over" : "text-warn"}>{x.passed ? "Passed" : "Not used"}</span>
+              {!x.passed && x.reason && <span className="text-muted">: {XG_REASON[x.reason] ?? x.reason}</span>}
+              <span className="text-xs text-muted">
+                {" "}
+                · fit {localTime(x.fitted_at)} on {x.n_train.toLocaleString()} attempts
+                {x.train[0] && ` (${longDate(x.train[0])} – ${longDate(x.train[1]!)})`}, tested on{" "}
+                {x.n_test.toLocaleString()}
+                {x.test[0] && ` (${longDate(x.test[0])} – ${longDate(x.test[1]!)})`}
+              </span>
+            </p>
+            {m.log_loss !== undefined && (
+              <dl className="num grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
+                <div>
+                  <dt className="font-sans text-muted">Log loss</dt>
+                  <dd>{m.log_loss.toFixed(4)}</dd>
+                </div>
+                <div>
+                  <dt className="font-sans text-muted">League rate only</dt>
+                  <dd>{m.baseline_log_loss?.toFixed(4)}</dd>
+                </div>
+                <div>
+                  <dt className="font-sans text-muted">Distance and angle only</dt>
+                  <dd>{m.distance_only_log_loss?.toFixed(4)}</dd>
+                </div>
+                <div>
+                  <dt className="font-sans text-muted">AUC · calibration gap</dt>
+                  <dd>
+                    {m.auc?.toFixed(3) ?? "—"} · {m.ece !== undefined ? `${(m.ece * 100).toFixed(1)} pts` : "—"}
+                  </dd>
+                </div>
+              </dl>
+            )}
+            {m.goal_rate_test !== undefined && (
+              <p className="text-xs text-muted">
+                Later games: {(m.goal_rate_test * 100).toFixed(1)}% of attempts were goals; the model expected{" "}
+                {(m.mean_xg_test! * 100).toFixed(1)}%. Lower log loss is better.
+              </p>
+            )}
+            {!x.passed && x.in_use && (
+              <p className="text-xs text-muted">Still using the fit from {localTime(x.in_use.fitted_at)}, which passed.</p>
+            )}
+          </>
+        )}
+      </div>
+    </Panel>
+  );
+}
+
 export function Models() {
   const res = useEncrypted<ModelsReport>("models.json");
   if (res.state === "loading") return <Spinner label="Loading model tests…" />;
@@ -278,6 +347,8 @@ export function Models() {
       </p>
 
       {r.promotion && r.promotion.families.length > 0 && <Promotion r={r} />}
+
+      <XgPanel x={r.xg ?? null} />
 
       {r.not_modeled.length > 0 && (
         <Panel title="Not modeled yet">

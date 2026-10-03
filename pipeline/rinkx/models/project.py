@@ -465,8 +465,9 @@ def explain_skater(f: dict[str, float], ch: Choice, shots: Choice | None, ctx: d
         assert shots is not None
         sog = float(fit.skater_mean(c, shots, None)[0])
         ref_sog = f["prior.shots"] * f["pos_toi"]
-        fin = float(fit.finish(c, i, ch.m)[0])
+        fin = float(fit.finish(c, i, ch.m, ch.xg_k)[0])
         own = f[f"x.shots.{i}"] / (f[f"x.shots.{i}"] + ch.m)
+        quality = float(fit.shot_quality(c, i, ch.xg_k)[0]) if ch.xg_k > 0 and f.get("prior.xq") else None
         factors.append(
             {
                 "name": "Shot volume",
@@ -478,8 +479,14 @@ def explain_skater(f: dict[str, float], ch: Choice, shots: Choice | None, ctx: d
             {
                 "name": "Finishing",
                 "effect": fin / f["prior_finish"] - 1 if f["prior_finish"] else 0.0,
-                "detail": f"Scores on {fin:.1%} of shots (his record weighted {own:.0%}, league average "
-                f"{f['prior_finish']:.1%} the rest; shooting % is mostly noise in small samples).",
+                "detail": f"Scores on {fin:.1%} of shots (his record weighted {own:.0%}, "
+                + (
+                    f"the quality of his shots the rest: {quality:.1%} by RinkX expected goals, vs "
+                    f"{f['prior_finish']:.1%} league average; shooting % is mostly noise in small samples)."
+                    if quality is not None
+                    else f"league average {f['prior_finish']:.1%} the rest; shooting % is mostly noise in small "
+                    "samples)."
+                ),
             }
         )
         reference = ref_sog * f["prior_finish"]

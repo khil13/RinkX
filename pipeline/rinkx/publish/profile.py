@@ -101,12 +101,37 @@ def skater_profile(conn: sqlite3.Connection, player: int, season: int | None, to
             "opp_vs_position": round(vs_pos, 3) if vs_pos else None,
             "position_group": "defence" if pos == "D" else "forwards",
         }
+    shooting |= expected_goals(conn, player, season)
     return {"shooting": shooting, "usage": usage, "matchup": matchup, "shot_map": shot_events(conn, player, season)}
+
+
+def expected_goals(conn: sqlite3.Connection, player: int, season: int | None) -> dict[str, Any]:
+    """His season xG (RinkX model, unblocked attempts) next to his goals in the same games.
+    None when no game of his has scored attempts (the model hasn't passed its test, or no data)."""
+    row = conn.execute(
+        "SELECT count(DISTINCT e.game_id), sum(e.xg), sum(e.event_type = 'goal') FROM pbp_shot_events e "
+        "JOIN games g ON g.id = e.game_id WHERE e.shooter_id = ? AND g.season_id = ? AND e.xg IS NOT NULL",
+        (player, season),
+    ).fetchone()
+    games = conn.execute(
+        "SELECT count(*) FROM player_game_stats s JOIN games g ON g.id = s.game_id WHERE s.player_id = ? "
+        "AND g.season_id = ? AND g.status = 'final' AND EXISTS (SELECT 1 FROM pbp_shot_events e "
+        "WHERE e.game_id = g.id AND e.xg IS NOT NULL)",
+        (player, season),
+    ).fetchone()[0]
+    if not games or row[1] is None:
+        return {"xg": None, "xg_goals": None, "xg_games": games or 0, "ixg_per_game": None}
+    return {
+        "xg": round(row[1], 2),
+        "xg_goals": int(row[2] or 0),
+        "xg_games": int(games),
+        "ixg_per_game": round(row[1] / games, 3),
+    }
 
 
 def shot_events(conn: sqlite3.Connection, player: int, season: int | None) -> dict[str, Any]:
     rows = conn.execute(
-        "SELECT g.game_date, e.event_type, e.x_coord, e.y_coord, e.strength_state, t.abbrev AS opp "
+        "SELECT g.game_date, e.event_type, e.x_coord, e.y_coord, e.strength_state, e.xg, t.abbrev AS opp "
         "FROM pbp_shot_events e JOIN games g ON g.id = e.game_id JOIN teams t ON t.id = "
         "CASE WHEN g.home_team_id = e.team_id THEN g.away_team_id ELSE g.home_team_id END "
         "WHERE e.shooter_id = ? AND g.season_id = ? ORDER BY g.start_time_utc DESC",
@@ -127,6 +152,7 @@ def shot_events(conn: sqlite3.Connection, player: int, season: int | None) -> di
                 "x": r["x_coord"],
                 "y": r["y_coord"],
                 "hd": dist <= HD_DIST and abs(r["y_coord"]) <= HD_WIDTH,
+                "xg": None if r["xg"] is None else round(r["xg"], 3),
                 "opp": r["opp"],
             }
         )
@@ -169,5 +195,31 @@ def goalie_impact(conn: sqlite3.Connection, goalie: int, before: str, season: in
         "last5_save_pct": round(sv5 / sa5, 4) if sa5 else None,
         "starts_last_7_days": sum(r["game_date"] >= week for r in rows),
         "last_start": rows[0]["game_date"],
-        "advanced": None,  # no expected-goals source connected: shown as unavailable
+        "advanced": goalie_xg(conn, goalie, before, season),
+    }
+
+
+MIN_XG_STARTS = 3
+
+
+def goalie_xg(conn: sqlite3.Connection, goalie: int, before: str, season: int | None) -> dict[str, Any] | None:
+    """Goals saved above expected this season: RinkX xG of the unblocked, non-empty-net attempts he
+    faced minus the goals they produced. None (unavailable) until enough of his starts have xG."""
+    row = conn.execute(
+        "SELECT count(DISTINCT e.game_id), sum(e.xg), sum(e.event_type = 'goal') FROM pbp_shot_events e "
+        "JOIN games g ON g.id = e.game_id JOIN goalie_game_stats s ON s.game_id = g.id AND s.player_id = e.goalie_id "
+        "WHERE e.goalie_id = ? AND s.started = 1 AND g.season_id = ? AND g.game_date < ? AND g.status = 'final' "
+        "AND e.xg IS NOT NULL",
+        (goalie, season, before),
+    ).fetchone()
+    starts, xga, ga = int(row[0] or 0), row[1], int(row[2] or 0)
+    if starts < MIN_XG_STARTS or xga is None:
+        return None
+    return {
+        "starts": starts,
+        "xg_against": round(xga, 2),
+        "goals_against": ga,
+        "gsax": round(xga - ga, 2),
+        "gsax_per_start": round((xga - ga) / starts, 3),
+        "source": "RinkX expected goals (unblocked attempts, empty net excluded)",
     }

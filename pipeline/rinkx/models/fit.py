@@ -46,14 +46,17 @@ VERSIONS: dict[str, frozenset[str]] = {
     "1.5": frozenset({"rest", "lines"}),  # back-to-back terms; line and PP-unit deployment, linemates
     # shots: shot attempts, recent form, opponent's allowance to his position, team pace, PP-time change
     "1.6": frozenset({"rest", "lines", "shot_inputs"}),
+    # goals: finishing shrunk toward his own shot quality (expected goals per shot), not the league's
+    "1.7": frozenset({"rest", "lines", "shot_inputs", "xg"}),
 }
 BASE_VERSION = "1.4"  # champion of a family that has none yet
-MODEL_VERSION = "1.6"  # the newest version
+MODEL_VERSION = "1.7"  # the newest version
 SLOT_W_GRID: tuple[float, ...] = (0.25, 0.5, 0.75)  # weight on the line slot's ice time
 MATES_G_GRID: tuple[float, ...] = (0.25, 0.5, 1.0)  # strength of the linemate-quality factor
 MATES_STATS = ("goals", "assists", "points")
 ATT_W_GRID: tuple[float, ...] = (0.25, 0.5, 0.75)  # weight on the shot-attempts route to the shot rate
 PP_G_GRID: tuple[float, ...] = (0.1, 0.25, 0.5)  # strength of the PP-time-change factor
+XG_K_GRID: tuple[float, ...] = (25.0, 100.0, 400.0)  # his shot quality: shrunk toward the league's by this many shots
 M_GRID: tuple[float, ...] = (0.25, 0.5, 1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 64.0)  # hours of ice time
 FINISH_GRID: tuple[float, ...] = (25.0, 50.0, 100.0, 200.0, 400.0, 800.0)  # shots
 BURN_IN_DAYS = 21  # the first weeks of history only build state; they are never scored
@@ -161,6 +164,7 @@ class Choice:
     mates_g: float = 0.5  # linemate factor = (current linemates' quality / his usual linemates') ** mates_g
     att_w: float = 0.0  # shots: weight on the rate implied by his shot attempts (x league shots per attempt)
     pp_g: float = 0.25  # shots: PP-time-change factor = (recent PP time / long-run PP time) ** pp_g
+    xg_k: float = 0.0  # goals (finish): shrink toward his own xG per shot, itself shrunk by xg_k shots (0 = league)
 
     def to_json(self) -> dict[str, Any]:
         d = asdict(self)
@@ -186,6 +190,7 @@ class Choice:
             mates_g=float(d.get("mates_g", 0.5)),
             att_w=float(d.get("att_w", 0.0)),
             pp_g=float(d.get("pp_g", 0.25)),
+            xg_k=float(d.get("xg_k", 0.0)),
         )
 
 
@@ -263,8 +268,18 @@ def rate(c: Cols, stat: str, hl: int, m: float, att_w: float = 0.0) -> F:
     return np.asarray(np.where(has, (1 - att_w) * own + att_w * via_att, own), dtype=float)
 
 
-def finish(c: Cols, hl: int, m: float) -> F:
-    return (c[f"x.goals.{hl}"] + m * c["prior_finish"]) / (c[f"x.shots.{hl}"] + m)
+def shot_quality(c: Cols, hl: int, xg_k: float) -> F:
+    """His expected goals per shot on goal, shrunk toward the league's by xg_k shots and put on the
+    league's goals-per-shot scale. With no xG it is the league's goals per shot (prior_finish)."""
+    lg_q = c["prior.xq"]
+    own = (c[f"x.xg.{hl}"] + xg_k * lg_q) / (c[f"x.xg_sog.{hl}"] + xg_k)
+    scale = np.where(lg_q > 0, c["prior_finish"] / np.maximum(lg_q, 1e-9), 1.0)
+    return np.asarray(np.where(lg_q > 0, own * scale, c["prior_finish"]), dtype=float)
+
+
+def finish(c: Cols, hl: int, m: float, xg_k: float = 0.0) -> F:
+    prior = c["prior_finish"] if xg_k <= 0 or "prior.xq" not in c else shot_quality(c, hl, xg_k)
+    return (c[f"x.goals.{hl}"] + m * prior) / (c[f"x.shots.{hl}"] + m)
 
 
 def expected_basis(c: Cols, stat: str, ch: Choice) -> F:
@@ -281,7 +296,7 @@ def expected_basis(c: Cols, stat: str, ch: Choice) -> F:
 def skater_mean(c: Cols, ch: Choice, shots: Choice | None) -> F:
     if ch.kind == "finish":
         assert shots is not None
-        lam = skater_mean(c, shots, None) * finish(c, ch.hl, ch.m)
+        lam = skater_mean(c, shots, None) * finish(c, ch.hl, ch.m, ch.xg_k)
     else:
         lam = rate(c, ch.stat, ch.hl, ch.m, ch.att_w) * expected_basis(c, ch.stat, ch)
     for name in ch.factors:
@@ -366,6 +381,15 @@ def _tune_skater(c: Cols, y: F, stat: str, shots: Choice | None, version: str) -
                 if s > score:
                     best = (replace(trial, size=size), s)
                     score = s
+        if "xg" in VERSIONS[version] and kind == "finish" and "prior.xq" in c:  # shot quality, kept only if it helps
+            ch, score = best
+            for k in XG_K_GRID:
+                for m in grid:
+                    trial = replace(ch, xg_k=k, m=m)
+                    size, s = dist.best_size(y, skater_mean(c, trial, shots))
+                    if s > score:
+                        best = (replace(trial, size=size), s)
+                        score = s
         candidates.append(_ablate(c, y, best, shots))
     return max(candidates, key=lambda t: t[1])
 

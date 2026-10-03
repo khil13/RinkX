@@ -122,6 +122,19 @@ def load(conn: sqlite3.Connection, before: str | None = None) -> list[GameRecord
         if gid in games:
             games[gid].first_goal_player = shooter
 
+    # Expected goals (rinkx.models.xg), per shooter, in games whose attempts have been scored:
+    # the xG of his unblocked attempts and how many of his shots on goal carry an xG.
+    xg_games: set[int] = set()
+    xg_of: dict[tuple[int, int], tuple[float, float]] = {}
+    for gid, shooter, xg_sum, sog in conn.execute(
+        "SELECT e.game_id, e.shooter_id, sum(e.xg), sum(e.event_type IN ('shot','goal')) FROM pbp_shot_events e "
+        f"JOIN games g ON g.id = e.game_id WHERE {cond} AND e.xg IS NOT NULL GROUP BY e.game_id, e.shooter_id",
+        args,
+    ):
+        xg_games.add(gid)
+        if shooter is not None:
+            xg_of[(gid, shooter)] = (float(xg_sum), float(sog))
+
     units = game_units(conn, cond, args)
     skaters: dict[int, list[SkaterLine]] = defaultdict(list)
     for r in conn.execute(
@@ -144,6 +157,8 @@ def load(conn: sqlite3.Connection, before: str | None = None) -> list[GameRecord
             "hits": _f(r[14]),
             "attempts": _f(r[15]),  # individual shot attempts (stats API); not a projected stat
         }
+        xg, xg_sog = xg_of.get((r[0], r[1]), (0.0, 0.0)) if r[0] in xg_games else (None, None)
+        stats["xg"], stats["xg_sog"] = xg, xg_sog  # not projected either
         u = units.get(r[0], {}).get(r[1])
         skaters[r[0]].append(
             SkaterLine(
