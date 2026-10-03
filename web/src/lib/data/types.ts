@@ -690,6 +690,25 @@ export interface PropRow {
   scores?: PropScores | null;
 }
 
+/** The frozen inputs behind a prop's scores (pipeline/rinkx/pricing/scores.py). */
+export interface PropFacts {
+  side: string;
+  line: number | null;
+  price: number | null;
+  projection?: number;
+  projection_diff?: number;
+  l10_hit?: [number, number];
+  season_hit?: [number, number];
+  expected_toi_s?: number;
+  expected_pp_toi_s?: number;
+  line_slot?: string;
+  pp_unit?: number;
+  opp_shots_allowed?: number | null;
+  opp_vs_position?: number | null;
+  team_shots_expected?: number | null;
+  shot_environment?: number | null;
+}
+
 export interface ScorePart {
   part: string;
   label: string;
@@ -706,6 +725,7 @@ export interface PropScores {
   shot_env_parts: ScorePart[];
   value: number | null;
   config_version: string;
+  facts: PropFacts;
   why: { label: string; value: string }[];
   summary: string;
 }

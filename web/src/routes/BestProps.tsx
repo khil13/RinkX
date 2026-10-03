@@ -1,4 +1,4 @@
-import { ConfidenceVsValue, ScoreBadge, ScoreDetails, WhyThisProp } from "../components/Scores";
+import { ConfidenceVsValue, PublicBetting, ScoreBadge, ScoreDetails, WhyThisProp } from "../components/Scores";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router";
 import { odds, ConfidenceBreakdown, pts, SIDE_LABEL } from "../components/Lines";
@@ -9,8 +9,9 @@ import { useEncrypted } from "../lib/data/fetch";
 import { legFromRow, parlayStore, useParlayLegs } from "../lib/parlayStore";
 import type { BestProps as BestPropsData, PropRow } from "../lib/data/types";
 import { clock, localTime, longDate } from "../lib/format";
+import { ADVANCED, type Advanced, matches, SORT_LABELS, SORTS, type SortKey } from "../lib/propFilters";
+import { Freshness } from "../components/Freshness";
 
-type SortKey = "ev" | "edge" | "confidence" | "start";
 
 interface Filters {
   date: string;
@@ -21,9 +22,20 @@ interface Filters {
   minEdge: number;
   minConf: number;
   sort: SortKey;
+  adv: Advanced;
 }
 
-const DEFAULTS: Filters = { date: "", game: "", market: "", book: "", side: "", minEdge: 0, minConf: 0, sort: "ev" };
+const DEFAULTS: Filters = {
+  date: "",
+  game: "",
+  market: "",
+  book: "",
+  side: "",
+  minEdge: 0,
+  minConf: 0,
+  sort: "ev",
+  adv: ADVANCED,
+};
 const STORE_FILTERS = "rinkx.props.filters";
 const STORE_SEEN = "rinkx.props.seen"; // line key -> prediction id last seen on this device
 
@@ -208,6 +220,7 @@ export function Drawer({ r, onClose }: { r: PropRow; onClose: () => void }) {
         <WhyThisProp r={r} />
         <ScoreDetails r={r} />
         <ConfidenceVsValue r={r} />
+        <PublicBetting />
         {parts && (
           <section>
             <h3 className="mb-1 text-xs font-semibold uppercase tracking-wider text-muted">
@@ -269,16 +282,57 @@ function Select({
   );
 }
 
-const SORTS: Record<SortKey, (a: PropRow, b: PropRow) => number> = {
-  ev: (a, b) => (b.ev ?? -9) - (a.ev ?? -9),
-  edge: (a, b) => (b.edge ?? -9) - (a.edge ?? -9),
-  confidence: (a, b) => (b.confidence ?? -1) - (a.confidence ?? -1),
-  start: (a, b) => a.game.start_time_utc.localeCompare(b.game.start_time_utc),
-};
+
+function AdvancedFilters({ a, teams, onChange }: { a: Advanced; teams: string[]; onChange: (a: Advanced) => void }) {
+  const set = (patch: Partial<Advanced>) => onChange({ ...a, ...patch });
+  const active = JSON.stringify(a) !== JSON.stringify(ADVANCED);
+  const input = "min-h-9 rounded border border-line bg-panel px-2 text-sm text-text";
+  return (
+    <details className="mt-2" open={active}>
+      <summary className="cursor-pointer text-xs text-accent">More filters{active ? " (on)" : ""}</summary>
+      <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4" role="group" aria-label="More filters">
+        <label className="flex flex-col gap-0.5 text-[11px] text-muted">
+          Player
+          <input className={input} value={a.player} onChange={(e) => set({ player: e.target.value })} placeholder="Name" />
+        </label>
+        <Select label="Team" value={a.team} onChange={(v) => set({ team: v })} options={[["", "Any team"], ...teams.map((t) => [t, t] as [string, string])]} />
+        <label className="flex flex-col gap-0.5 text-[11px] text-muted">
+          Line
+          <input className={input} inputMode="decimal" value={a.line} onChange={(e) => set({ line: e.target.value })} placeholder="e.g. 2.5" />
+        </label>
+        <Select label="Home/away" value={a.venue} onChange={(v) => set({ venue: v as Advanced["venue"] })}
+          options={[["", "Either"], ["home", "Home"], ["away", "Away"]]} />
+        <label className="flex flex-col gap-0.5 text-[11px] text-muted">
+          Odds from
+          <input className={input} inputMode="numeric" value={a.minOdds} onChange={(e) => set({ minOdds: e.target.value })} placeholder="-200" />
+        </label>
+        <label className="flex flex-col gap-0.5 text-[11px] text-muted">
+          Odds to
+          <input className={input} inputMode="numeric" value={a.maxOdds} onChange={(e) => set({ maxOdds: e.target.value })} placeholder="+300" />
+        </label>
+        <Select label="Min model probability" value={a.minProb} onChange={(v) => set({ minProb: Number(v) })}
+          options={[[0, "Any"], [50, "50%+"], [55, "55%+"], [60, "60%+"], [65, "65%+"]]} />
+        <Select label="Min Prop Intelligence" value={a.minScore} onChange={(v) => set({ minScore: Number(v) })}
+          options={[[0, "Any"], [60, "60+"], [70, "70+"], [80, "80+"], [90, "90+"]]} />
+        <Select label="Min last-10 hit rate" value={a.minHit} onChange={(v) => set({ minHit: Number(v) })}
+          options={[[0, "Any"], [50, "50%+"], [60, "60%+"], [70, "70%+"], [80, "80%+"]]} />
+        <label className="flex min-h-9 items-center gap-2 text-sm">
+          <input type="checkbox" checked={a.pp1} onChange={(e) => set({ pp1: e.target.checked })} /> PP1 only
+        </label>
+        <label className="flex min-h-9 items-center gap-2 text-sm">
+          <input type="checkbox" checked={a.topLine} onChange={(e) => set({ topLine: e.target.checked })} /> Top line / pair only
+        </label>
+      </div>
+    </details>
+  );
+}
 
 export function BestProps({ all = false }: { all?: boolean }) {
   const res = useEncrypted<BestPropsData>("props/best.json");
-  const [f, setF] = useState<Filters>(() => load(STORE_FILTERS, DEFAULTS));
+  const [f, setF] = useState<Filters>(() => {
+    const v = load(STORE_FILTERS, DEFAULTS);
+    return { ...v, adv: { ...ADVANCED, ...(v.adv ?? {}) }, sort: v.sort in SORTS ? v.sort : "ev" };
+  });
   const [open, setOpen] = useState<PropRow | null>(null);
   const data = res.state === "ready" ? res.value.data : null;
 
@@ -315,7 +369,8 @@ export function BestProps({ all = false }: { all?: boolean }) {
             (!f.book || r.book === f.book) &&
             (!f.side || (r.lean ?? r.side_scored) === f.side) &&
             (r.edge ?? -1) * 100 >= f.minEdge &&
-            (r.confidence ?? 0) >= f.minConf,
+            (r.confidence ?? 0) >= f.minConf &&
+            matches(r, f.adv),
         )
         .sort(SORTS[f.sort]),
     [pool, f],
@@ -351,6 +406,7 @@ export function BestProps({ all = false }: { all?: boolean }) {
           {localTime(data.generated_at)}
         </span>
       </header>
+      <Freshness at={res.value.meta.generated_at} staleAfterMin={120} source="RinkX pipeline (lines via The Odds API)" />
       <p className="text-xs text-muted">
         {all
           ? "Every sportsbook line RinkX has priced for upcoming games, including ones with no lean."
@@ -375,8 +431,10 @@ export function BestProps({ all = false }: { all?: boolean }) {
           <Select label="Min confidence" value={f.minConf} onChange={(v) => update({ minConf: Number(v) })}
             options={[[0, "Any"], [50, "50+"], [60, "60+"], [70, "70+"]]} />
           <Select label="Sort by" value={f.sort} onChange={(v) => update({ sort: v as SortKey })}
-            options={[["ev", "Expected value"], ["edge", "Edge"], ["confidence", "Confidence"], ["start", "Start time"]]} />
+            options={Object.entries(SORT_LABELS) as [string, string][]} />
         </div>
+        <AdvancedFilters a={f.adv} teams={uniq(data.rows.flatMap((r) => [r.game.home, r.game.away])).sort()}
+          onChange={(adv) => update({ adv })} />
         {JSON.stringify(f) !== JSON.stringify(DEFAULTS) && (
           <button type="button" onClick={() => update(DEFAULTS)} className="mt-2 min-h-9 text-xs text-accent underline">
             Reset filters

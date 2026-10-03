@@ -2,10 +2,11 @@ import { Link, useParams } from "react-router";
 import { InjuryLine } from "../components/Injuries";
 import { Missing, Notice, Panel, Spinner } from "../components/ui";
 import { useEncrypted } from "../lib/data/fetch";
-import type { GameDetail, Side } from "../lib/data/types";
+import type { BestProps as BestPropsData, GameDetail, Side } from "../lib/data/types";
 import { clock, localTime, longDate, mmss, num, signed } from "../lib/format";
 import { RestChip, statusLabel } from "./Games";
 import { GameLinesPanel } from "../components/Lines";
+import { PropGroups } from "../components/PropGroups";
 import {
   GameOutlook,
   GoalieLine,
@@ -200,6 +201,21 @@ function Boxscore({ game }: { game: GameDetail }) {
   );
 }
 
+function GamePropCenter({ gameId }: { gameId: number }) {
+  const res = useEncrypted<BestPropsData>("props/best.json");
+  if (res.state !== "ready") return null;
+  const rows = res.value.data.rows.filter((r) => r.game.id === gameId);
+  return (
+    <Panel title="Prop center">
+      {rows.length === 0 ? (
+        <p className="text-sm text-muted">DATA UNAVAILABLE: no sportsbook lines priced for this game yet.</p>
+      ) : (
+        <PropGroups rows={rows} label="Game prop center" />
+      )}
+    </Panel>
+  );
+}
+
 export function Game() {
   const { id } = useParams();
   const res = useEncrypted<GameDetail>(`games/${id}.json`);
@@ -332,6 +348,8 @@ export function Game() {
           )}
         </Panel>
       )}
+
+      {!done && <GamePropCenter gameId={g.id} />}
 
       <Panel title="Sportsbook lines">
         <GameLinesPanel lines={g.lines} />

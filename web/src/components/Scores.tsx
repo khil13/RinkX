@@ -137,3 +137,12 @@ export function WhyThisProp({ r }: { r: PropRow }) {
     </section>
   );
 }
+
+export function PublicBetting() {
+  return (
+    <p className="text-xs text-muted" aria-label="Public betting data">
+      Public betting (tickets % and money %): <span className="font-semibold">DATA UNAVAILABLE</span>. No licensed
+      source is connected, and RinkX does not estimate or infer betting percentages.
+    </p>
+  );
+}

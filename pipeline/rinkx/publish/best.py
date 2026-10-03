@@ -116,6 +116,7 @@ def _scores(r: sqlite3.Row, *, p_model: float, p_market: float | None, edge: flo
         "shot_env_parts": json.loads(r["shot_env_parts"]),
         "value": r["value_score"],
         "config_version": r["config_version"],
+        "facts": facts,
         "why": why.bullets(facts, label=label, p_model=p_model, p_market=p_market, edge=edge),
         "summary": why.summary(facts, label=label, edge=edge, p_model=p_model, p_market=p_market),
     }

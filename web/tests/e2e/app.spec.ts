@@ -624,3 +624,41 @@ test("saves + win: the confirmed starter's joint projection by save line (synthe
   await expect(lines).toContainText("20+ saves");
   await expect(lines).toContainText("30+ saves");
 });
+
+test("today: top props, by market, moves, goalies and a daily report from published data (synthetic)", async ({ page }) => {
+  await unlock(page, true, MODELS);
+  await page.goto(`${MODELS}#/today`);
+  await expect(page.getByRole("heading", { name: /Today's slate/ })).toBeVisible();
+  await expect(page.getByLabel("Data freshness")).toContainText(/Updated/);
+  await expect(page.getByRole("list", { name: "Top 10 props" }).getByRole("listitem").first()).toContainText("Syn P8000002");
+  await expect(page.getByLabel("Today by market").getByLabel("Best SOG props")).toContainText("Syn P8000002");
+  await expect(page.getByRole("list", { name: "Starting goalies" })).toContainText("T00");
+  const report = page.getByLabel("Daily report");
+  await expect(report).toContainText("BEST PROPS TODAY".toLowerCase(), { ignoreCase: true });
+  await expect(report).toContainText(/model \d+\.\d% · market \d+\.\d% · edge \+\d+\.\d pts/);
+  await expect(report).toContainText("No goal lean today.");
+  await expect(page.getByLabel("Public betting data")).toContainText("DATA UNAVAILABLE");
+});
+
+test("game prop center and advanced filters (synthetic)", async ({ page }) => {
+  await unlock(page, true, MODELS);
+  await page.goto(`${MODELS}#/props`);
+  await page.getByText("More filters").click();
+  const more = page.getByRole("group", { name: "More filters" });
+  await more.getByLabel("Player").fill("P8000002");
+  await expect(page.getByRole("list", { name: "Props" }).getByRole("listitem")).toHaveCount(2); // two books
+  await more.getByLabel("Min last-10 hit rate").selectOption("80");
+  const n = await page.getByRole("list", { name: "Props" }).getByRole("listitem").count();
+  expect(n).toBeLessThanOrEqual(2);
+  await page.getByRole("button", { name: "Reset filters" }).click();
+  await expect(page.getByRole("list", { name: "Props" }).getByRole("listitem")).toHaveCount(6);
+
+  const card = page.getByRole("list", { name: "Props" }).getByRole("listitem").first();
+  const gameText = await card.textContent();
+  expect(gameText).toContain("T01 @ T00");
+  await page.goto(`${MODELS}#/games`);
+  await page.getByRole("link", { name: /T01.*T00/ }).first().click();
+  const center = page.getByLabel("Game prop center");
+  await expect(center.getByLabel("Best SOG props")).toContainText("Syn P8000002");
+  await expect(center.getByLabel("Best hit props")).toContainText("No priced lines in this market.");
+});

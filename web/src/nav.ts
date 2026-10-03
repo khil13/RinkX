@@ -8,6 +8,7 @@ export interface NavItem {
 
 export const NAV: NavItem[] = [
   { to: "/", label: "Dashboard", phase: 0 },
+  { to: "/today", label: "Today", phase: 6 },
   { to: "/games", label: "Games", phase: 1 },
   { to: "/props", label: "Props", phase: 5 },
   { to: "/props/best", label: "Card of the Day", phase: 6 },
@@ -23,4 +24,4 @@ export const NAV: NavItem[] = [
 ];
 
 // Pages that exist; the rest show their roadmap phase in the nav.
-export const BUILT_ROUTES = new Set(["/", "/games", "/props", "/props/best", "/players", "/models", "/performance", "/news", "/parlay", "/settings", "/goalies", "/lines", "/admin"]);
+export const BUILT_ROUTES = new Set(["/", "/today", "/games", "/props", "/props/best", "/players", "/models", "/performance", "/news", "/parlay", "/settings", "/goalies", "/lines", "/admin"]);
