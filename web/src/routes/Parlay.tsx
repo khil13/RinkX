@@ -1,9 +1,12 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { Link } from "react-router";
-import { odds, SIDE_LABEL } from "../components/Lines";
+import { odds, pts, SIDE_LABEL } from "../components/Lines";
 import { pct } from "../components/Projections";
 import { Notice, Panel, Spinner } from "../components/ui";
-import { useEncrypted, useEncryptedMany } from "../lib/data/fetch";
+import { useEncrypted, useEncryptedMany, useManifest } from "../lib/data/fetch";
+import { build, type Built, corrLabel, RISK, type Risk } from "../lib/autoParlay";
+import type { BestProps } from "../lib/data/types";
+import { betText } from "./BestProps";
 import { type Correlations, evaluate, type GroupUsed, type Leg, MAX_LEGS, type PairSource, toAmerican } from "../lib/parlay";
 import type { SimInputs } from "../lib/sim";
 import { parlayStore, useParlayLegs } from "../lib/parlayStore";
@@ -49,13 +52,150 @@ function GroupLine({ g, legs }: { g: GroupUsed; legs: Leg[] }) {
         {g.method === "simulation" ? (
           <>
             simulated: together {((g.together! / g.n!) * 100).toFixed(1)}% of {g.n!.toLocaleString()} games, ×
-            {g.lift!.toFixed(2)} vs independent
+            {g.lift!.toFixed(2)} vs independent · Correlation: {corrLabel(g.lift! - 1)}
           </>
         ) : (
           <>correlations ({WHY_NOT[g.why_not_sim ?? "no_sim"]})</>
         )}
       </span>
     </li>
+  );
+}
+
+function AutoBuilder() {
+  const props = useEncrypted<BestProps>("props/best.json");
+  const corrRes = useEncrypted<Correlations>("correlations.json");
+  const manifest = useManifest().data;
+  const [legsN, setLegsN] = useState(3);
+  const [risk, setRisk] = useState<Risk>("balanced");
+  const [market, setMarket] = useState("");
+  const [built, setBuilt] = useState<Built | null>(null);
+  if (props.state !== "ready") return null;
+  const rows = props.value.data.rows;
+  const corr = corrRes.state === "ready" ? corrRes.value.data : null;
+  const markets = Array.from(new Set(rows.map((r) => `${r.market}|${r.market_label}`)));
+  const date = manifest?.slate_date && rows.some((r) => r.game.date === manifest.slate_date) ? manifest.slate_date : null;
+  const run = (n: number, rk: Risk, mk: string) =>
+    setBuilt(build(rows, corr, { legs: n, risk: rk, markets: mk ? [mk] : null, date }));
+  const sel = "min-h-9 rounded border border-line bg-panel px-2 text-sm text-text";
+  return (
+    <Panel title="Build from the slate">
+      <div className="flex flex-wrap items-end gap-2" role="group" aria-label="Parlay builder options">
+        <label className="flex flex-col text-[11px] text-muted">
+          Market
+          <select className={sel} value={market} onChange={(e) => setMarket(e.target.value)}>
+            <option value="">All markets</option>
+            {markets.map((m) => {
+              const [code, label] = m.split("|");
+              return (
+                <option key={code} value={code}>
+                  {label}
+                </option>
+              );
+            })}
+          </select>
+        </label>
+        <label className="flex flex-col text-[11px] text-muted">
+          Legs
+          <select className={sel} value={legsN} onChange={(e) => setLegsN(Number(e.target.value))}>
+            {[2, 3, 4, 5, 6, 7, 8].map((n) => (
+              <option key={n}>{n}</option>
+            ))}
+          </select>
+        </label>
+        <label className="flex flex-col text-[11px] text-muted">
+          Risk
+          <select className={sel} value={risk} onChange={(e) => setRisk(e.target.value as Risk)}>
+            {(Object.keys(RISK) as Risk[]).map((k) => (
+              <option key={k} value={k}>
+                {RISK[k].label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <button type="button" className="min-h-9 rounded-md border border-accent/60 px-3 text-sm" onClick={() => run(legsN, risk, market)}>
+          Build
+        </button>
+        <button type="button" className="min-h-9 rounded-md border border-accent bg-accent/15 px-3 text-sm font-semibold" onClick={() => run(8, "balanced", "")}>
+          🔥 BUILD MY 8-LEG
+        </button>
+      </div>
+      <p className="mt-2 text-[11px] text-muted">
+        {RISK[risk].label}: legs with model probability ≥ {Math.round(RISK[risk].minProb * 100)}%, edge ≥{" "}
+        {Math.round(RISK[risk].minEdge * 100)} pts, Prop Intelligence ≥ {RISK[risk].minScore}, confidence ≥{" "}
+        {RISK[risk].minConfidence}, at most {RISK[risk].maxPerGame} per game, no price that moved sharply against
+        the leg; each step adds the leg that most improves {RISK[risk].objective}, counting how legs move together.
+        The 8-leg build uses Balanced across every market{date ? ` on ${longDate(date)}` : ""}.
+      </p>
+      {built && (
+        <div className="mt-3 flex flex-col gap-2" aria-label="Built parlay">
+          {built.legs.length === 0 ? (
+            <Notice>
+              INSUFFICIENT DATA: no prop meets the {RISK[risk].label.toLowerCase()} rules ({built.eligible} eligible of{" "}
+              {built.considered} priced lines). Nothing is forced in.
+            </Notice>
+          ) : (
+            <>
+              {built.short && (
+                <p className="text-xs text-warn">
+                  Only {built.legs.length} legs meet the rules; nothing weaker was added to reach the number asked for.
+                </p>
+              )}
+              <table className="num w-full text-xs">
+                <thead className="text-muted">
+                  <tr>
+                    <th className="text-left font-normal">Leg</th>
+                    <th className="text-right font-normal">Odds</th>
+                    <th className="text-right font-normal">Model</th>
+                    <th className="text-right font-normal">Market</th>
+                    <th className="text-right font-normal">Edge</th>
+                    <th className="text-right font-normal">PI</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {built.legs.map(({ row: r }) => (
+                    <tr key={r.prediction_id}>
+                      <td className="py-0.5">
+                        <span className="font-semibold">{r.subject.type === "player" ? r.subject.name : `${r.game.away} @ ${r.game.home}`}</span>{" "}
+                        {betText(r)} <span className="text-muted">· {r.book_name}</span>
+                      </td>
+                      <td className="text-right">{odds(r.price)}</td>
+                      <td className="text-right">{pct(r.p_model)}</td>
+                      <td className="text-right">{r.p_market !== null ? pct(r.p_market) : "—"}</td>
+                      <td className="text-right">{pts(r.edge)}</td>
+                      <td className="text-right">{r.scores?.intelligence ?? "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {built.result && (
+                <p className="num text-sm">
+                  Estimated combined probability <span className="font-semibold">{pct(built.result.p_adjusted)}</span> (if
+                  independent {pct(built.result.p_independent)}) · prices multiplied{" "}
+                  {odds(toAmerican(built.result.offered_decimal))} · EV {built.result.ev >= 0 ? "+" : "−"}
+                  {Math.abs(built.result.ev * 100).toFixed(1)}%
+                </p>
+              )}
+              <button
+                type="button"
+                className="min-h-9 self-start rounded-md border border-line px-3 text-sm hover:border-accent/50"
+                onClick={() => {
+                  parlayStore.clear();
+                  built.legs.forEach((x) => parlayStore.add(x.leg));
+                }}
+              >
+                Use these legs
+              </button>
+              <p className="text-[11px] text-muted">
+                The estimate here uses correlations; once the legs are added below, legs in the same game are
+                re-combined with the same-game simulation. Long parlays lose most of the time even when every leg is
+                priced well.
+              </p>
+            </>
+          )}
+        </div>
+      )}
+    </Panel>
   );
 }
 
@@ -96,6 +236,8 @@ export function Parlay() {
         Parlays multiply the bookmaker's margin and the variance: even when every leg is priced fairly, most parlays
         lose, and long losing runs are normal. Treat the numbers below as estimates with real uncertainty.
       </Notice>
+
+      <AutoBuilder />
 
       {legs.length === 0 ? (
         <Notice>
@@ -221,7 +363,7 @@ export function Parlay() {
                     <span className="num text-xs text-muted">
                       {p.source === "estimate" ? (
                         <>
-                          ρ {p.rho >= 0 ? "+" : "−"}
+                          <span className="font-semibold text-text">Correlation: {corrLabel(p.rho, p.ci)}</span> · ρ {p.rho >= 0 ? "+" : "−"}
                           {Math.abs(p.rho).toFixed(2)} (95% {p.ci?.[0].toFixed(2)} to {p.ci?.[1].toFixed(2)}, n=
                           {p.n?.toLocaleString()})
                         </>

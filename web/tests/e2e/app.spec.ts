@@ -690,3 +690,25 @@ test("lines & PP tracker, goalie numbers and the synthetic player profile (synth
   await expect(prof.getByLabel("Props")).toContainText("Shots on Goal");
   await expect(prof.getByLabel("Shot map")).toContainText("DATA UNAVAILABLE");
 });
+
+test("parlay builder from the slate: risk levels and BUILD MY 8-LEG (synthetic)", async ({ page }) => {
+  await unlock(page, true, MODELS);
+  await page.goto(`${MODELS}#/parlay`);
+  const opts = page.getByRole("group", { name: "Parlay builder options" });
+  await opts.getByLabel("Legs").selectOption("2");
+  await opts.getByLabel("Risk").selectOption("aggressive");
+  await opts.getByRole("button", { name: "Build", exact: true }).click();
+  const built = page.getByLabel("Built parlay");
+  await expect(built).toBeVisible();
+  const text = (await built.textContent()) ?? "";
+  if (text.includes("INSUFFICIENT DATA")) {
+    await expect(built).toContainText("Nothing is forced in");
+  } else {
+    await expect(built.getByRole("table")).toContainText("Syn P");
+    await expect(built).toContainText(/Estimated combined probability \d+(\.\d)?%/);
+    await built.getByRole("button", { name: "Use these legs" }).click();
+    await expect(page.getByRole("list", { name: "Parlay legs" }).getByRole("listitem").first()).toBeVisible();
+  }
+  await opts.getByRole("button", { name: "🔥 BUILD MY 8-LEG" }).click();
+  await expect(built).toContainText(/Only \d legs meet the rules|INSUFFICIENT DATA|Estimated combined probability/);
+});
