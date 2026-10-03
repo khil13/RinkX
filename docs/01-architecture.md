@@ -79,7 +79,7 @@ flowchart LR
 | Workflow | Trigger | Does |
 |---|---|---|
 | `pipeline.yml` | Several cron schedules + `workflow_dispatch` + pushes to `main` | **One workflow for all scheduled work**, which gives a single "Run workflow" button and a single place where runs queue. The run decides its stages from the time and the slate: |
-| ↳ game-day window | every 10 min, 15:00–03:59 UTC (11 am–midnight ET) | Exits in under 30 s if no game starts within 8 h. Otherwise: goalies, injuries, odds (budget-aware), game status → recompute affected projections → reprice → alerts → publish if the bundle changed. |
+| ↳ game-day window | every 10 min, 15:00–03:59 UTC (11 am–midnight ET) | A `gate` job (`scripts/game_day_gate.py`, standard library only, a few seconds) reads the NHL schedule and lets the run through only if a game starts within 4.5 h; otherwise the build is skipped. When it runs it is a full run: goalies, injuries, odds (budget-aware, including the closing fetch), projections, pricing, alerts (including the pre-game check), publish. If the schedule can't be read, it runs. |
 | ↳ hourly | minute 17 | Schedule, rosters, news, odds on non-game days at a low cadence. *(Phase 0 runs only this, and only publishes.)* |
 | ↳ nightly | 09:37 UTC (5:37 am ET) | Final boxscores + PBP, shift-chart lineups, grading and CLV, rolling features, correlations. |
 | ↳ weekly | Monday 10:13 UTC | *Not built (Phase 7 decision):* the hourly run already re-tests the models every 20 h and grades every run. A new model version runs as the challenger and is promoted only after it beats the champion on graded props. |
@@ -89,7 +89,7 @@ flowchart LR
 | `keepalive.yml` | weekly | Re-enables the scheduled workflows through the API. GitHub silently disables schedules in public repos after 60 days without repository activity, and pipeline runs don't count as activity. |
 | `ci.yml` | push / PR | Lint, typecheck, unit tests, schema tests, copy lint, contract tests. |
 
-**Serialization.** `pipeline.yml` and `quick-entry.yml` share `concurrency: { group: rinkx-store, cancel-in-progress: false }`, so two runs never write the store at once. GitHub keeps only the newest pending run in a group. That is fine here, because the next run does a full refresh anyway.
+**Serialization.** The `build` job of `pipeline.yml` and `store.yml` share `concurrency: { group: rinkx-store, cancel-in-progress: false }`, so two runs never write the store at once. The group is on the build job, not the whole workflow, so a game-day run that the gate skips never displaces a queued run that has work to do. The watchdog counts a run as successful only if its build job ran and succeeded. GitHub keeps only the newest pending run in a group. That is fine here, because the next run does a full refresh anyway.
 
 **Timing honesty.** Scheduled runs are commonly delayed by 5–30 minutes under GitHub load, and occasionally skipped. RinkX is therefore a **near-live** tool, not real-time:
 * The UI always shows "Updated N min ago" from the manifest.

@@ -39,6 +39,11 @@ class Repo(Protocol):
     def close(self, number: int) -> None: ...
 
 
+def built(jobs: list[dict[str, Any]]) -> bool:
+    """Whether a pipeline run's build job ran and succeeded (not skipped by the game-day gate)."""
+    return any(j.get("name") == "build" and j.get("conclusion") == "success" for j in jobs)
+
+
 class GhRepo:
     """The repository through the `gh` CLI (GH_TOKEN in Actions)."""
 
@@ -52,11 +57,17 @@ class GhRepo:
         return proc.stdout
 
     def last_success(self) -> datetime | None:
+        """The newest pipeline run whose build job succeeded. A game-day run that the gate let skip
+        (no game soon) also ends "success", but did no work, so it doesn't count."""
         out = self._gh(
-            "run", "list", "--workflow", "pipeline.yml", "--status", "success", "--limit", "1", "--json", "updatedAt"
-        )
-        runs = json.loads(out)
-        return parse_iso(runs[0]["updatedAt"]) if runs else None
+            "run", "list", "--workflow", "pipeline.yml", "--status", "success", "--limit", "40", "--json",
+            "databaseId,updatedAt",
+        )  # fmt: skip
+        for run in json.loads(out):
+            jobs = json.loads(self._gh("run", "view", str(run["databaseId"]), "--json", "jobs"))["jobs"]
+            if built(jobs):
+                return parse_iso(run["updatedAt"])
+        return None
 
     def open_issue(self) -> int | None:
         out = self._gh(

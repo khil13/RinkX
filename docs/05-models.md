@@ -160,6 +160,12 @@ behind the goal line. A logistic regression with a light ridge penalty maps them
 * **Cadence.** It is refit at most every 20 hours, or when shot history grows 10%. Each run scores new
   attempts with the last fit that passed. A fit that fails leaves the last one that passed in use. With none,
   every xG number on the site says INSUFFICIENT DATA.
+* **Tested on real shots.** `tests/test_xg_real.py` fits it on about 22,000 unblocked attempts from the first 260
+  games of 2025-26 (recorded by `scripts/record_xg_shots.py`; team, location, type and strength only). On the
+  later 40% of those games it passes its gate: log loss 0.224 vs 0.247 for the league rate and 0.228 for distance
+  and angle only, AUC 0.74, calibration gap 0.8 points, 7.0% expected vs 6.7% actual. A wrist shot from the slot
+  comes out near 26%, one from the point near 1%. Once distance and angle are known, a follow-up attempt within
+  3 seconds is not more likely to score on these games, so the rebound term stays small (slightly negative).
 * **Where it shows.** On the player prop profile (xG per game, goals vs xG, xG on each shot-map dot), as goals
   saved above expected on starting-goalie lines (xG of attempts faced minus goals, after 3+ starts with xG),
   and in model 1.7.

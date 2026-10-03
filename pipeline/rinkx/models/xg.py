@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import math
 import sqlite3
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
@@ -94,6 +95,12 @@ def load(conn: sqlite3.Connection, cond: str = "g.status = 'final'") -> Shots:
         f"JOIN games g ON g.id = e.game_id WHERE {cond} AND e.event_type IN ('shot','miss','goal') "
         "ORDER BY e.game_id, e.period, e.period_seconds, e.event_idx"
     ).fetchall()
+    return from_rows(rows)
+
+
+def from_rows(rows: Iterable[Sequence[Any]]) -> Shots:
+    """Shots from rows of (id, game, date, period, period_seconds, event_type, team, x, y, shot_type,
+    strength, empty_net), unblocked attempts only, in game order. Rebounds are found from the order."""
     ids, dates, X, y = [], [], [], []
     last: dict[tuple[int, int, int], int] = {}  # (game, period, team) -> seconds of its last attempt
     for r in rows:

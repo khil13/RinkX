@@ -1,0 +1,43 @@
+name: record-xg-shots
+
+# Records real NHL shot attempts (from play-by-play, parsed by the pipeline) as a compact
+# fixture for the xG tests. Runs when this file or the recorder changes on a development
+# branch (or manually), and commits the result back to that branch.
+on:
+  push:
+    branches: ["claude/**"]
+    paths:
+      - ".github/workflows/record-xg-shots.yml"
+      - "scripts/record_xg_shots.py"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: record-xg-shots-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  record:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install ./pipeline
+      - name: Fetch and parse play-by-play
+        run: python scripts/record_xg_shots.py
+      - name: Commit fixture
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add pipeline/tests/fixtures/nhl/xg_shots_20252026.csv.gz
+          if git diff --cached --quiet; then echo "no changes"; exit 0; fi
+          git commit -m "Record real NHL shot attempts for the xG tests"
+          git pull --rebase
+          git push
