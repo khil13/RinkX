@@ -26,7 +26,8 @@ def _implied(a: int) -> float:
 
 def assemble(quotes: list[Quote]) -> list[Line]:
     """Pair sides into lines. When a book lists several over/under points for one player in the
-    main market, the most balanced pair is the main line."""
+    main market, the most balanced pair is the main line. A ladder market (`*_alternate`) gives
+    its lowest rung."""
     groups: dict[tuple[str, str, str | None], list[Quote]] = defaultdict(list)
     for q in quotes:
         groups[(q.book, q.market, q.subject)].append(q)
@@ -53,6 +54,13 @@ def assemble(quotes: list[Quote]) -> list[Line]:
                 return abs(_implied(sides["over"]) - _implied(sides["under"]))
             return 9.0  # one-sided points are main only if nothing better exists
 
+        if market.endswith("_alternate"):
+            # A ladder (1+, 2+, 3+ ...): keep the lowest rung, the usual "1+ points" prop. The
+            # rungs are one-sided, so there is no balanced pair to find.
+            point = min((p for p in by_point if p is not None), default=None)
+            sides = by_point[point]
+            out.append(Line(book, market, subject, point, sides.get("over"), sides.get("under"), upd))
+            continue
         point, sides = min(by_point.items(), key=balance)
         out.append(Line(book, market, subject, point, sides.get("over"), sides.get("under"), upd))
     return out
