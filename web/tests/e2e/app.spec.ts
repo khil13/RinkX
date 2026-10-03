@@ -287,17 +287,17 @@ test("best props: leans only, source and time on every row, filters, sort and th
   await expect(page.getByRole("heading", { name: "Best Props" })).toBeVisible();
   const list = page.getByRole("list", { name: "Props" });
   const cards = list.getByRole("listitem");
-  await expect(cards).toHaveCount(3); // 3 of the 6 priced lines clear the bar
-  await expect(page.getByText(/3 leans of 6 priced lines/)).toBeVisible();
+  await expect(cards).toHaveCount(2); // 2 of the 6 priced lines clear the bar (after live calibration)
+  await expect(page.getByText(/2 leans of 6 priced lines/)).toBeVisible();
   for (const c of await cards.all()) await expect(c).toContainText(/via The Odds API · line seen /);
   await expect(cards.first()).toContainText("Syn P8000002"); // highest expected value first
   await expect(list).not.toContainText("No lean");
 
   const filters = page.getByRole("group", { name: "Filters" });
+  await filters.getByLabel("Side").selectOption("over");
+  await expect(cards).toHaveCount(2);
+  await expect(cards.first()).toContainText("Syn P8000002");
   await filters.getByLabel("Side").selectOption("under");
-  await expect(cards).toHaveCount(1);
-  await expect(cards.first()).toContainText("Syn P8000003");
-  await filters.getByLabel("Side").selectOption("yes");
   await expect(page.getByText("Your filters hide every prop.")).toBeVisible();
   await page.getByRole("button", { name: "Reset filters" }).click();
   await filters.getByLabel("Book").selectOption("betmgm");
@@ -305,7 +305,7 @@ test("best props: leans only, source and time on every row, filters, sort and th
   await expect(page.getByRole("group", { name: "Filters" }).getByLabel("Book")).toHaveValue("betmgm");
   await expect(cards).toHaveCount(1);
   await page.getByRole("button", { name: "Reset filters" }).click();
-  await expect(cards).toHaveCount(3);
+  await expect(cards).toHaveCount(2);
 
   await cards.first().getByRole("button").click();
   const dialog = page.getByRole("dialog", { name: "Prop card" });
@@ -313,6 +313,7 @@ test("best props: leans only, source and time on every row, filters, sort and th
   await expect(dialog).toContainText(/Confidence \d+\/100/);
   await expect(dialog.getByText("Market agreement")).toBeVisible();
   await expect(dialog.getByText(/^Implied\(/).first()).toBeVisible();
+  await expect(dialog.getByText(/^Calibrated from live results: P\(over\) 0\.\d{4} → 0\.\d{4}/)).toBeVisible();
   await expect(dialog).toContainText(/Prediction #\d+ is frozen/);
   await dialog.getByRole("button", { name: "Close" }).click();
   await expect(dialog).toBeHidden();
@@ -323,7 +324,7 @@ test("props: every priced line, sortable, with changes since the last visit mark
   await page.goto(`${MODELS}#/props`);
   const cards = page.getByRole("list", { name: "Props" }).getByRole("listitem");
   await expect(cards).toHaveCount(6);
-  await expect(cards.filter({ hasText: "No lean" })).toHaveCount(3);
+  await expect(cards.filter({ hasText: "No lean" })).toHaveCount(4);
   await expect(page.getByText("NEW", { exact: true })).toHaveCount(0); // first visit: nothing to compare
   await page.getByLabel("Sort by").selectOption("confidence");
   await expect(cards.first()).toContainText("Syn P8000002");
@@ -373,6 +374,10 @@ test("model performance: graded results, calibration vs market, splits and recen
   await expect(recent.first()).toContainText(/actual \d+/);
   await expect(recent.first()).toContainText(/WIN|LOSS|win|loss/);
   await expect(page.getByText(/far too few to tell skill from luck/)).toHaveCount(0); // 600+ bets here
+  const cals = page.getByRole("list", { name: "Calibrators" });
+  await expect(cals).toContainText("Shots on Goal");
+  await expect(cals).toContainText(/applied to pricing|not applied: no improvement/);
+  await expect(cals).toContainText(/held-out Brier 0\.\d{4} → 0\.\d{4}/);
 });
 
 test("model performance before anything is graded says so", async ({ page }) => {

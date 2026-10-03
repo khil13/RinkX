@@ -336,9 +336,17 @@ The breakdown is always displayed. Confidence buckets (50–59, 60–69, …) ar
    - Splits by market, confidence bucket, month and model version.
    - Below 100 bets the page says the sample is too small to judge.
 
+**Live calibration (after Phase 10, `grading/calibration.py`):**
+- **What it fits:** per market, an isotonic map from the model's P(over / yes / home), pushes excluded, to the observed rate. It uses one row per graded prop, in time order, once a market has at least 400 graded props.
+- **When it's used:** the map is fit on the earliest 70% and scored on the latest 30%, which it never saw. It is applied to pricing only if held-out Brier improves by at least 0.0005. The published map is then refit on everything graded.
+- **Refit:** at most daily.
+- **Pricing:** the calibrated probability replaces the raw one at the line, pushes unchanged, and a "Calibrated from live results" line in the calculation shows the before and after with the held-out scores.
+- **History:** past predictions keep the probabilities they were frozen with.
+- **Display:** Model Performance lists each market's status.
+
 *Not built in Phase 7.*
 - A separate weekly workflow: the hourly pipeline already re-tests every 20 h and grades every run.
-- Isotonic calibrators.
+- Isotonic calibrators *(built later: see "Live calibration" above)*.
 - Automated champion/challenger promotion. A model version changes only by merging code, and its
   walk-forward test still decides what is published. Results are split by model version, so
   versions can be compared on live bets.

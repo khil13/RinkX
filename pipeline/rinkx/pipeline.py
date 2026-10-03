@@ -14,6 +14,7 @@ from rinkx.alerts import ntfy
 from rinkx.alerts.evaluate import Sender, run_alerts
 from rinkx.config import Settings
 from rinkx.correlation.estimate import run_correlations
+from rinkx.grading.calibration import run_calibration
 from rinkx.grading.grade import run_grading
 from rinkx.ingestion.http import Fetcher, FixtureFetcher, HttpFetcher, ReplayFetcher
 from rinkx.ingestion.injuries.espn import run_injuries
@@ -181,6 +182,7 @@ def _run_stages(
     run_models(conn, now, today, qe.reasons if qe else None)
     run_pricing(conn, now)  # model vs market for every open line with a current projection
     run_grading(conn, now, today)  # settle predictions for finished games
+    run_calibration(conn, now)  # live isotonic calibrators for the next pricing run
     run_correlations(conn, now)  # parlay correlations, re-estimated at most every 20 h
     if send is None and settings.ntfy_topic:
         send = ntfy.sender(settings.ntfy_topic, settings.ntfy_server)

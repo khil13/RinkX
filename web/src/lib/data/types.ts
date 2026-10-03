@@ -730,6 +730,17 @@ export interface Performance {
   by_version: (BetRecord & { key: string })[];
   voids: Record<string, number>;
   recent: GradedBet[];
+  /** live isotonic calibrators by market */
+  calibrators?: {
+    market: string;
+    applied: boolean;
+    reason: "applied" | "no_improvement" | "too_few";
+    n_fit: number;
+    n_holdout: number;
+    brier_raw: number | null;
+    brier_cal: number | null;
+    fitted_at: string;
+  }[];
 }
 
 // ---- News & alerts (Phase 8) ----------------------------------------------------------------------

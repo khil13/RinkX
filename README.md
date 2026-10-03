@@ -99,3 +99,4 @@ RinkX presents probabilities, not certainties. Sports betting carries financial 
 
 - **Injury report:** ESPN's public report is read every run, with a source link on every entry. Players listed out, on IR or suspended get no projection, injured goalies leave the starter mix, and day-to-day players are flagged.
 - **Line-movement markers:** player charts mark goalie confirmations, players ruled out, news and injury changes.
+- **Live calibration:** once a market has 400 graded props, the model's probabilities are recalibrated against how often they actually came true (isotonic regression). The new map is used only if it scored better on recent props it never saw.

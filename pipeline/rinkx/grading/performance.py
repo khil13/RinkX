@@ -244,6 +244,7 @@ def performance(conn: sqlite3.Connection, now: datetime) -> dict[str, Any]:
         "by_version": sorted(_split(settled, lambda r: r["model_version"] or "?"), key=lambda b: b["key"]),
         "voids": dict(voids),
         "recent": [_recent(r) for r in reversed(bets[-50:])],
+        "calibrators": _calibrators(conn),
     }
 
 
@@ -262,3 +263,9 @@ def track_records(conn: sqlite3.Connection) -> dict[int, float]:
         if expected > 0:
             out[market] = statistics.fmean(float(r["profit_units"]) for r in rows) / expected
     return out
+
+
+def _calibrators(conn: sqlite3.Connection) -> list[dict[str, Any]]:
+    from rinkx.grading import calibration  # calibration imports this module
+
+    return calibration.published(conn)
