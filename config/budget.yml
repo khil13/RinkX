@@ -15,7 +15,9 @@ props:
     far: 24               # more than 12 h before puck drop
     near: 6               # 3-12 h before
     close: 2              # under 3 h before
-  first_look_markets: 2    # a game's first fetch: just the first markets below (every game gets a cheap look)
+  first_look_markets: 3    # a game's first fetch: just the first markets below (every game gets a cheap look).
+                           # The Odds API charges only for markets it returns, so one a book doesn't offer
+                           # yet (points, early in the season) costs nothing until it appears.
   closing:                 # one more fetch just before puck drop, for games where the model has leans,
     hours_before: 1.5      # so the closing price (closing-line value) is measured on the bets that matter
     markets: 2             # markets with leans first
@@ -23,8 +25,8 @@ props:
   markets:
     - player_shots_on_goal
     - player_points
-    - player_total_saves
     - player_goal_scorer_anytime
+    - player_total_saves
     - player_assists
     - player_blocked_shots
     - player_goals
