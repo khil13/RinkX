@@ -28,7 +28,7 @@ from rinkx.models.dist import INF, F
 from rinkx.models.state import FIN_C, K_SV
 
 MAXG = 15  # goals per team in regulation, support 0..MAXG
-GAME_FACTORS = ("fin", "goalie", "home")
+GAME_FACTORS = ("fin", "goalie", "home", "rest")
 EPS = 1e-6
 MIN_GAMES = 300  # games in each of the tuning and test windows
 MIN_FIRST_GOAL_ROWS = 3000
@@ -79,6 +79,8 @@ def team_lambda(c: Cols, side: str, ch: GameChoice) -> F:
         lam = lam * c[f"{side}.gf.{ch.k_sv}"]
     if "home" in ch.factors:
         lam = lam * c[f"{side}.home"]
+    if "rest" in ch.factors:
+        lam = lam * c[f"{side}.rest"]
     return np.asarray(np.maximum(lam, dist.MIN_MU), dtype=float)
 
 
@@ -251,7 +253,7 @@ def _stack_sides(c: Cols) -> tuple[Cols, F]:
     return out, y
 
 
-def tune(c: Cols) -> GameChoice:
+def tune(c: Cols, factors: tuple[str, ...] = GAME_FACTORS) -> GameChoice:
     """Pick finishing prior, save-% prior, factors and dispersion by team-goal log score."""
     sc, y = _stack_sides(c)
 
@@ -262,13 +264,13 @@ def tune(c: Cols) -> GameChoice:
     best: tuple[GameChoice, float] | None = None
     for fin in range(len(FIN_C)):
         for k in range(len(K_SV)):
-            ch = GameChoice(fin, k)
+            ch = GameChoice(fin, k, factors)
             size, s = score(ch)
             if best is None or s > best[1]:
                 best = (replace(ch, size=size), s)
     assert best is not None
     ch, s_best = best
-    for name in GAME_FACTORS:
+    for name in factors:
         trial = replace(ch, factors=tuple(f for f in ch.factors if f != name))
         size, s = score(trial)
         if s > s_best:
@@ -350,6 +352,7 @@ def evaluate(
     goals_mean_fn: Any,  # Cols -> expected goals per skater row (tuned goals model), or None
     scored_from: str,
     test_start: str,
+    factors: tuple[str, ...] = GAME_FACTORS,
 ) -> None:
     """Adds team_goals / win / shutout / first_goal entries and the game choice to `report`."""
     units = {
@@ -378,7 +381,7 @@ def evaluate(
         for e in entries.values():
             e.update(passed=False, reason="insufficient_history")
         return
-    ch = tune(_subset(c, tune_m))
+    ch = tune(_subset(c, tune_m), factors)
     report["choices"]["game"] = ch.to_json()
     for s in GAME_STATS:
         report["choices"][s] = ch.to_json()

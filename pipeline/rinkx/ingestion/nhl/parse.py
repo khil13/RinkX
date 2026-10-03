@@ -435,6 +435,8 @@ class ShotEvent:
     x: int | None  # normalized so the shooting team attacks toward +x
     y: int | None
     shot_type: str | None
+    assist1_id: int | None = None  # goals only
+    assist2_id: int | None = None
 
 
 @dataclass(frozen=True)
@@ -506,6 +508,8 @@ def parse_play_by_play(payload: dict[str, Any]) -> PlayByPlay:
                 x=x,
                 y=y,
                 shot_type=d.get("shotType"),
+                assist1_id=d.get("assist1PlayerId") if kind == "goal" else None,
+                assist2_id=d.get("assist2PlayerId") if kind == "goal" else None,
             )
         )
         if kind == "goal":

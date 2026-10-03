@@ -346,8 +346,8 @@ def write_play_by_play(conn: sqlite3.Connection, game_id: int, pbp: PlayByPlay, 
         conn.execute(
             """INSERT INTO pbp_shot_events (game_id, event_idx, period, period_seconds, event_type, shooter_id,
                  goalie_id, blocker_id, team_id, strength_state, x_coord, y_coord, shot_type, is_teammate_block,
-                 is_empty_net, source_id, fetched_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                 is_empty_net, assist1_id, assist2_id, source_id, fetched_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 game_id,
                 e.event_idx,
@@ -364,6 +364,8 @@ def write_play_by_play(conn: sqlite3.Connection, game_id: int, pbp: PlayByPlay, 
                 e.shot_type,
                 int(e.teammate_block),
                 int(e.empty_net),
+                pid(e.assist1_id),
+                pid(e.assist2_id),
                 source_id,
                 fetched_at,
             ),
@@ -380,8 +382,8 @@ def write_play_by_play(conn: sqlite3.Connection, game_id: int, pbp: PlayByPlay, 
                     (game_id, pid(nhl_id)),
                 )
     conn.execute(
-        "INSERT INTO game_enrichment (game_id, pbp_at) VALUES (?, ?) "
-        "ON CONFLICT(game_id) DO UPDATE SET pbp_at = excluded.pbp_at",
+        "INSERT INTO game_enrichment (game_id, pbp_at, pbp_version) VALUES (?, ?, 2) "
+        "ON CONFLICT(game_id) DO UPDATE SET pbp_at = excluded.pbp_at, pbp_version = 2",
         (game_id, fetched_at),
     )
     return len(pbp.shots)

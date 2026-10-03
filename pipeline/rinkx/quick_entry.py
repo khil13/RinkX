@@ -243,9 +243,90 @@ def apply(conn: sqlite3.Connection, issue: Issue, source_id: int, now: datetime)
             verb = "ruled out of" if status == "out" else "back in for"
             msg = f"Applied: {p['full_name']} {verb} {matchup} on {game['game_date']}."
             return Outcome(issue, True, msg, game["id"], "player_out" if status == "out" else "lineup_change")
+        if kind.startswith("line"):
+            return _apply_line(conn, issue, form, game, teams, team, matchup, source, source_id, now)
         raise Rejected(f"Unknown Quick Entry type '{kind}'. Use one of the Quick Entry issue forms.")
     except Rejected as exc:
         return Outcome(issue, False, f"Not applied: {exc}")
+
+
+LINE_UNITS = {"F1", "F2", "F3", "F4", "D1", "D2", "D3"}
+
+
+def _last_unit(conn: sqlite3.Connection, player: int) -> str | None:
+    """His even-strength unit in his most recent game with line data."""
+    row = conn.execute(
+        "SELECT c.unit FROM line_combinations c JOIN lineup_snapshots s ON s.id = c.snapshot_id "
+        "JOIN games g ON g.id = s.game_id WHERE c.player_id = ? AND s.status = 'actual' "
+        "ORDER BY g.start_time_utc DESC LIMIT 1",
+        (player,),
+    ).fetchone()
+    return row[0] if row and row[0] in LINE_UNITS else None
+
+
+def _apply_line(
+    conn: sqlite3.Connection,
+    issue: Issue,
+    form: dict[str, str],
+    game: sqlite3.Row,
+    teams: tuple[int, int],
+    team: int | None,
+    matchup: str,
+    source: str,
+    source_id: int,
+    now: datetime,
+) -> Outcome:
+    """A player's new even-strength line (optionally with his new linemates) and/or power-play unit."""
+    p = _resolve_player(conn, _field(form, "player"), (team,) if team else teams, goalie=False)
+    team = team or p["current_team_id"]
+    if team not in teams:
+        raise Rejected("That player's team is not playing in this game.")
+    line = _field(form, "line").upper()
+    line = "" if line.startswith("UNCHANGED") else line.split()[0] if line else ""
+    if line and line not in LINE_UNITS:
+        raise Rejected("Line must be F1-F4, D1-D3 or Unchanged.")
+    pp_text = _field(form, "power play").lower()
+    pp: int | str | None = "unchanged"
+    if pp_text.startswith("pp1"):
+        pp = 1
+    elif pp_text.startswith("pp2"):
+        pp = 2
+    elif pp_text.startswith("off"):
+        pp = None
+    mates_text = _field(form, "linemates")
+    mates = [_resolve_player(conn, m.strip(), (team,), goalie=False) for m in mates_text.split(",") if m.strip()]
+    if mates and not line:
+        raise Rejected("Linemates need a line (F1-F4 or D1-D3).")
+    if len(mates) > (2 if line.startswith("F") else 1):
+        raise Rejected("A forward line has two linemates; a defence pair has one.")
+    if not line and pp == "unchanged":
+        raise Rejected("Give a new line, a power-play change, or both.")
+    unit = line or _last_unit(conn, p["id"])
+    if unit is None and pp is None:
+        raise Rejected("His current line isn't known yet; give his line together with the power-play change.")
+    snap = conn.execute(
+        "INSERT INTO lineup_snapshots (team_id, game_id, status, observed_at, provenance, source_id, source_ref, "
+        "fetched_at, pp_specified) VALUES (?, ?, 'confirmed', ?, 'manual', ?, ?, ?, ?)",
+        (team, game["id"], issue.created_at, source_id, source, iso(now), int(pp != "unchanged")),
+    ).lastrowid
+    if unit is not None:
+        for who in (p, *mates):
+            conn.execute(
+                "INSERT INTO line_combinations (snapshot_id, unit, slot, player_id) VALUES (?, ?, 'X', ?)",
+                (snap, unit, who["id"]),
+            )
+    if isinstance(pp, int):
+        conn.execute(
+            "INSERT INTO powerplay_units (snapshot_id, unit, slot, player_id) VALUES (?, ?, 1, ?)",
+            (snap, f"PP{pp}", p["id"]),
+        )
+    bits = []
+    if line:
+        bits.append(f"to {line}" + (f" with {', '.join(m['full_name'] for m in mates)}" if mates else ""))
+    if pp != "unchanged":
+        bits.append(f"on PP{pp}" if pp else "off the power play")
+    msg = f"Applied: {p['full_name']} {' and '.join(bits)} for {matchup} on {game['game_date']}."
+    return Outcome(issue, True, msg, game["id"], "lineup_change")
 
 
 def _apply_news(

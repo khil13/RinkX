@@ -178,7 +178,7 @@ def test_live_projections_explain_and_goalie_change(tmp_path):
     game_id = _add_upcoming(conn)
     today = START + timedelta(days=DAYS)
     project.run_models(conn, NOW, today)
-    stored, _ = project.latest_report(conn)
+    stored, _ = project.published_report(conn)  # each family's champion
     assert stored is not None
     passed = {s for s, e in stored["stats"].items() if e.get("passed")}
     rows = conn.execute(

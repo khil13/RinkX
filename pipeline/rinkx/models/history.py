@@ -25,6 +25,9 @@ class SkaterLine:
     toi_s: float | None
     pp_toi_s: float | None
     stats: dict[str, float | None]
+    unit: str | None = None  # even-strength unit he played in: F1-F4 / D1-D3 (from shift charts)
+    pp_unit: int | None = None  # 1 or 2; None = not on a PP unit (or unknown, see `has_lines`)
+    mates: tuple[int, ...] = ()  # players.id of his linemates (forwards) or partner (defence)
 
 
 @dataclass(frozen=True)
@@ -59,6 +62,7 @@ class GameRecord:
     ended_in: str | None = None  # 'REG' | 'OT' | 'SO'
     first_goal_player: int | None = None  # players.id; None if no goal or no play-by-play
     has_pbp: bool = False
+    has_lines: bool = False  # line combinations derived from this game's shift chart
     home_so_win: bool | None = None
     skaters: list[SkaterLine] = field(default_factory=list)
     goalies: list[GoalieLine] = field(default_factory=list)
@@ -118,6 +122,7 @@ def load(conn: sqlite3.Connection, before: str | None = None) -> list[GameRecord
         if gid in games:
             games[gid].first_goal_player = shooter
 
+    units = game_units(conn, cond, args)
     skaters: dict[int, list[SkaterLine]] = defaultdict(list)
     for r in conn.execute(
         "SELECT s.game_id, s.player_id, s.team_id, s.opponent_team_id, s.is_home, p.position, s.toi_s, s.pp_toi_s, "
@@ -138,7 +143,20 @@ def load(conn: sqlite3.Connection, before: str | None = None) -> list[GameRecord
             "blocks": _f(r[13]),
             "hits": _f(r[14]),
         }
-        skaters[r[0]].append(SkaterLine(r[1], r[2], r[3], bool(r[4]), pos_group(r[5]), _f(r[6]), _f(r[7]), stats))
+        u = units.get(r[0], {}).get(r[1])
+        skaters[r[0]].append(
+            SkaterLine(
+                r[1],
+                r[2],
+                r[3],
+                bool(r[4]),
+                pos_group(r[5]),
+                _f(r[6]),
+                _f(r[7]),
+                stats,
+                *(u if u else (None, None, ())),
+            )
+        )
 
     goalies: dict[int, list[GoalieLine]] = defaultdict(list)
     for r in conn.execute(
@@ -166,10 +184,39 @@ def load(conn: sqlite3.Connection, before: str | None = None) -> list[GameRecord
 
     out = []
     for gid, rec in games.items():
+        rec.has_lines = gid in units
         rec.skaters = skaters.get(gid, [])
         rec.goalies = goalies.get(gid, [])
         if rec.skaters:
             out.append(rec)
+    return out
+
+
+def game_units(
+    conn: sqlite3.Connection, cond: str = "1", args: tuple[object, ...] = ()
+) -> dict[int, dict[int, tuple[str | None, int | None, tuple[int, ...]]]]:
+    """game -> player -> (unit, PP unit, linemates), from the lines actually played (shift charts)."""
+    rows = conn.execute(
+        "SELECT s.game_id, s.team_id, c.unit, c.player_id FROM lineup_snapshots s "
+        "JOIN line_combinations c ON c.snapshot_id = s.id JOIN games g ON g.id = s.game_id "
+        f"WHERE s.status = 'actual' AND {cond}",
+        args,
+    ).fetchall()
+    pp = conn.execute(
+        "SELECT s.game_id, u.unit, u.player_id FROM lineup_snapshots s "
+        "JOIN powerplay_units u ON u.snapshot_id = s.id JOIN games g ON g.id = s.game_id "
+        f"WHERE s.status = 'actual' AND u.unit IN ('PP1','PP2') AND {cond}",
+        args,
+    ).fetchall()
+    members: dict[tuple[int, int, str], list[int]] = defaultdict(list)
+    for gid, team, unit, pid in rows:
+        members[(gid, team, unit)].append(pid)
+    pp_of = {(gid, pid): int(unit[2]) for gid, unit, pid in pp}
+    out: dict[int, dict[int, tuple[str | None, int | None, tuple[int, ...]]]] = defaultdict(dict)
+    for (gid, _team, unit), pids in members.items():
+        for pid in pids:
+            mates = tuple(sorted(m for m in pids if m != pid)) if unit not in ("EXTRA", "SCRATCH", "G") else ()
+            out[gid][pid] = (unit if unit[0] in "FD" else None, pp_of.get((gid, pid)), mates)
     return out
 
 

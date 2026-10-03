@@ -287,3 +287,72 @@ def test_goalie_hit_rates_use_starts_only(conn):
     assert page["hit_rates_basis"] == "starts"
     assert page["hit_rates"]["sv"]["windows"]["L5"]["counts"][0] == 1  # 15 saves >= 15
     assert page["hit_rates"]["sv"]["windows"]["L5"]["counts"][1] == 0  # but not >= 20
+
+
+def test_shift_chart_gives_lines_pairs_and_pp_units(conn):
+    """Lines, pairs and PP units derived from the recorded shift chart (who shared the ice)."""
+    from rinkx.models import history
+
+    ingest(conn)
+    gid = one(conn, "SELECT id FROM games WHERE nhl_game_id = 2025021012")
+    assert one(conn, "SELECT shifts_at IS NOT NULL FROM game_enrichment WHERE game_id = ?", gid) == 1
+    snaps = conn.execute(
+        "SELECT s.id, t.abbrev FROM lineup_snapshots s JOIN teams t ON t.id = s.team_id WHERE s.game_id = ? "
+        "AND s.status = 'actual' AND s.provenance = 'derived' ORDER BY t.abbrev",
+        (gid,),
+    ).fetchall()
+    assert [r[1] for r in snaps] == ["BOS", "LAK"]
+    for snap, _ in snaps:
+        units = dict(
+            conn.execute(
+                "SELECT unit, count(*) FROM line_combinations WHERE snapshot_id = ? GROUP BY unit", (snap,)
+            ).fetchall()
+        )
+        assert {u: units.get(u) for u in ("F1", "F2", "F3", "F4", "D1", "D2", "D3")} == {
+            "F1": 3, "F2": 3, "F3": 3, "F4": 3, "D1": 2, "D2": 2, "D3": 2,
+        }  # fmt: skip
+        assert one(conn, "SELECT count(*) FROM powerplay_units WHERE snapshot_id = ? AND unit = 'PP1'", snap) == 5
+    # Every dressed skater is placed exactly once.
+    placed = one(
+        conn,
+        "SELECT count(*) FROM line_combinations c JOIN lineup_snapshots s ON s.id = c.snapshot_id WHERE s.game_id = ?",
+        gid,
+    )
+    assert placed == 36
+
+    def unit_of(nhl_id: int) -> str:
+        return one(
+            conn,
+            "SELECT c.unit FROM line_combinations c JOIN lineup_snapshots s ON s.id = c.snapshot_id "
+            "JOIN players p ON p.id = c.player_id WHERE s.game_id = ? AND p.nhl_player_id = ?",
+            gid,
+            nhl_id,
+        )
+
+    assert unit_of(8471685) == unit_of(8477960)  # Kopitar and Kempe played together
+    # The models see each player's unit, PP unit and linemates.
+    rec = next(g for g in history.load(conn) if g.game_id == gid)
+    assert rec.has_lines
+    kempe_pk = one(conn, "SELECT id FROM players WHERE nhl_player_id = 8477960")
+    kempe = next(s for s in rec.skaters if s.player == kempe_pk)
+    assert kempe.unit is not None and kempe.unit.startswith("F") and len(kempe.mates) == 2
+    assert kempe.pp_unit == 1
+    # Re-ingesting doesn't fetch or duplicate it.
+    ingest(conn)
+    assert one(conn, "SELECT count(*) FROM lineup_snapshots WHERE game_id = ?", gid) == 2
+
+
+def test_shift_chart_parser_is_strict():
+    from rinkx.ingestion.nhl import lines
+    from rinkx.ingestion.nhl.parse import ParseError
+
+    with pytest.raises(ParseError):
+        lines.parse_shift_chart({"rows": []}, 1)
+    bad = {"data": [{"id": 1, "typeCode": 517, "gameId": 2, "playerId": 3, "teamId": 4, "period": 1,
+                     "startTime": "00:10", "endTime": "00:50"}]}  # fmt: skip
+    with pytest.raises(ParseError):
+        lines.parse_shift_chart(bad, 1)  # another game's shift
+    bad["data"][0] |= {"gameId": 1, "endTime": "00:05"}
+    with pytest.raises(ParseError):
+        lines.parse_shift_chart(bad, 1)  # ends before it starts
+    assert lines.parse_shift_chart({"data": []}, 1).shifts == []  # no chart published: empty, not an error
