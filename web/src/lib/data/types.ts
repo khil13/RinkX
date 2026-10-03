@@ -64,6 +64,14 @@ export interface OddsAdmin {
 
 export interface HealthData {
   odds?: OddsAdmin;
+  injuries?: {
+    status: string;
+    at: string | null;
+    detail: { listed?: number; changed?: number; resolved?: number; unmatched?: number; checked_at?: string };
+    error: string | null;
+    active: number;
+    unmatched: { name: string; suggestion: { nhl_id: number; name: string } | null }[];
+  } | null;
   build: BuildInfo;
   store: {
     asset: string | null;
@@ -96,7 +104,26 @@ export interface HealthData {
 // ---- Phase 1: league data (pipeline/rinkx/publish/views.py) ----
 
 /** Why a value is null. Never shown as zero. */
-export type Reason = "not_connected" | "data_unavailable" | "insufficient_sample" | "not_final" | "no_games_this_season";
+export type Reason =
+  | "not_connected"
+  | "data_unavailable"
+  | "insufficient_sample"
+  | "not_final"
+  | "no_games_this_season"
+  | "past_game"
+  | "stale";
+
+/** One player on the injury report (ESPN, unofficial). */
+export interface InjuryEntry {
+  player: { id: number; name: string; position: string };
+  status: "out" | "injured_reserve" | "long_term_ir" | "day_to_day" | "questionable" | "suspended" | "unknown";
+  body_part: string | null;
+  description: string | null;
+  expected_return: string | null;
+  reported_at: string;
+  source: string;
+  source_name: string;
+}
 
 export interface TeamInfo {
   abbrev: string;
@@ -154,8 +181,9 @@ export interface Side {
   /** Upcoming games: the projected or Quick-Entry-confirmed starter. */
   goalie: GoalieStart | null;
   goalie_reason: Reason | null;
-  injuries: null;
-  injuries_reason: Reason;
+  /** upcoming games: the team's injury report; null with a reason otherwise */
+  injuries: InjuryEntry[] | null;
+  injuries_reason: Reason | null;
   // game detail only
   metrics?: TeamMetrics | null;
   metrics_reason?: Reason | null;
@@ -339,6 +367,7 @@ export interface PlayerPage {
   projection: PlayerProjection;
   lines: { game: { id: number; date: string }; markets: LineMarket[]; events?: LineEvent[] } | null;
   news?: NewsItem[];
+  injury?: InjuryEntry | null;
 }
 
 // ---- Phase 3: projections (pipeline/rinkx/publish/projections.py) ----

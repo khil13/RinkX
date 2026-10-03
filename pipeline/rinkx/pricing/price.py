@@ -284,6 +284,8 @@ def _score(
             role_change=change,
             implausible_edge=cfg.implausible_edge,
             track_record=track_record,
+            injury_feed="injuries_not_connected" not in missing,
+            day_to_day="injury_day_to_day" in missing,
         )
     )
 

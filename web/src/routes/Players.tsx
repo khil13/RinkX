@@ -3,6 +3,7 @@ import { Link, useParams } from "react-router";
 import { Missing, Notice, Panel, Spinner } from "../components/ui";
 import { useEncrypted } from "../lib/data/fetch";
 import { HitRates } from "../components/HitRates";
+import { InjuryLine } from "../components/Injuries";
 import { NewsList } from "./News";
 import { PlayerLinesPanel } from "../components/Lines";
 import { MODEL_REASON_TEXT, ProjectionCard, TestedNote } from "../components/Projections";
@@ -209,6 +210,7 @@ export function Player() {
     projection,
     lines,
     news,
+    injury,
   } = res.value.data;
   const goalie = p.position === "G";
   const cells = goalie ? GOALIE_TOTALS : SKATER_TOTALS;
@@ -227,6 +229,11 @@ export function Player() {
           {p.weight_kg && ` · ${p.weight_kg} kg`}
           {p.birth_date && ` · born ${p.birth_date}`}
         </p>
+        {injury && (
+          <div className="mt-2" aria-label="Injury status">
+            <InjuryLine e={injury} link={false} />
+          </div>
+        )}
       </header>
 
       <Panel title={`Season ${seasonLabel(season)}`}>

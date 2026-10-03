@@ -30,6 +30,7 @@ class Inputs:
     toi_cv: float | None = None  # coefficient of variation of the last 5 games' TOI
     role_change: float | None = None  # relative change: last-5 TOI vs the 15 before
     injury_feed: bool = False
+    day_to_day: bool = False  # listed day-to-day on the injury report
     implausible_edge: float = 0.15
     track_record: float | None = None  # realized / expected ROI of graded leans in this market (grading)
 
@@ -128,6 +129,9 @@ def score(c: Inputs) -> Confidence:
     if not c.injury_feed:
         av -= 3
         notes["availability"].append("No injury feed: player status not verified.")
+    if c.day_to_day:
+        av -= 6
+        notes["availability"].append("Listed day-to-day on the injury report: may not play, or may play less.")
     if c.is_goalie_prop and not c.start_confirmed:
         p = c.start_probability if c.start_probability is not None else 0.0
         av -= 12 * (1 - p)

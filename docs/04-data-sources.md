@@ -16,7 +16,7 @@ If a needed category has no compliant source, the app shows **"Data unavailable"
 | Advanced stats (xG, CF, HD) | **Computed in-house** from PBP; **MoneyPuck** downloadable data (attribution) | Evolving-Hockey (subscription, research use) | Natural Stat Trick (manual research only, no scraping) |
 | Line combinations & PP units | Derived from NHL shift charts (actual deployment, post-game) | Licensed lineup feed (e.g. Daily Faceoff partnership, SportsDataIO, Rotowire) | Admin entry with mandatory source URL |
 | Starting goalies | NHL game feed once the game starts (actual) | Licensed feed (Daily Faceoff / Rotowire / SportsDataIO) | Admin entry from official team announcements, with URL |
-| Injuries / scratches / suspensions | NHL roster status (limited); NHL Department of Player Safety announcements (official) | Sportradar, SportsDataIO, Rotowire news feed | Admin entry with URL |
+| Injuries / scratches / suspensions | NHL roster status (limited); NHL Department of Player Safety announcements (official). *Built:* **ESPN's public NHL injury report** (unofficial, `provenance='reported'`), read every run | Sportradar, SportsDataIO, Rotowire news feed | Quick Entry with URL (overrides the report for a game) |
 | Prop lines (multi-book) | — | **The Odds API**, OpticOdds, SportsGameOdds, OddsJam API, Sportradar Odds | — |
 | Game lines (ML, total) | — | Same odds vendor | — |
 | Historical odds / closing lines | Our own snapshots from day one | The Odds API historical endpoints (paid plans), OpticOdds / SportsGameOdds historical | — |
@@ -86,3 +86,17 @@ Every record must carry `source_id`, `source_ref`, `fetched_at`, `provenance` an
 **Implemented in Phase 4** (`pipeline/rinkx/ingestion/odds/resolve.py`). The order is: a stored alias, then the owner's `config/player_aliases.yml`, then an exact name match, then curated nickname rules (Mitch → Mitchell). Fuzzy matches are never applied automatically; they appear as suggestions on the Admin page. The original plan follows.
 
 Player names differ across vendors ("Mitch Marner" vs "Mitchell Marner"). Odds vendors key on names, and the NHL uses numeric IDs. A `player_aliases` mapping table (added in Phase 4) resolves vendor names to `players.id` using exact match, then a curated alias table, then fuzzy match restricted to the game's two rosters. A fuzzy match below the confidence threshold goes to an admin review queue. Unresolved lines are **not shown**, so a line is never attached to the wrong player.
+
+## Injury report (built)
+
+`rinkx/ingestion/injuries/espn.py` reads `site.api.espn.com/.../hockey/nhl/injuries` on every run.
+
+- **Parser:** strict, written against a recorded real response (`pipeline/tests/fixtures/injuries/`, refreshed by `record-injury-fixtures.yml`). A changed shape fails the run and keeps the previous report.
+- **Each fetch is the whole report:** players no longer listed are resolved, a status change starts a new row, and the history is kept. Every row stores its ESPN player-card link as the source.
+- **Names** are matched to NHL ids like sportsbook names (aliases, exact, nickname rule). Unmatched names go to the Admin review list; add them to `config/player_aliases.yml`.
+- **Effect on projections:**
+  - Out, injured reserve, long-term IR or suspended: no projection for the next games, unless a Quick Entry "back in" for that game says otherwise.
+  - An injured goalie is removed from the projected-starter mix.
+  - Day-to-day: projected, flagged as `injury_day_to_day`, data quality −0.1, and −6 on confidence availability.
+  - The report counts only if it was checked within 48 h before the game; otherwise it is ignored and pages say so.
+- **It is unofficial:** statuses are reported, not league-confirmed, and the app says where they came from.

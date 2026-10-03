@@ -551,3 +551,24 @@ test("admin: stored versions and the daily restore drill", async ({ page }) => {
   await expect(panel).toContainText(/Restore drill\s*passed/);
   await expect(panel).toContainText(/Keep offline copies of STORE_KEY and DATA_KEY/);
 });
+
+test("injury report (recorded ESPN response): player status with source, game note, admin review list", async ({ page }) => {
+  await unlock(page);
+  await page.goto(`${CONFIGURED}#/players/8479325`);
+  await expect(page.getByRole("heading", { name: "Charlie McAvoy" })).toBeVisible();
+  const status = page.getByLabel("Injury status");
+  await expect(status.getByText("SUSPENDED", { exact: true })).toBeVisible();
+  await expect(status).toContainText(/expected back/);
+  await expect(status.getByRole("link", { name: "source" })).toHaveAttribute("href", /^https:\/\/www\.espn\.com\//);
+  await page.goto(`${CONFIGURED}#/players/8477942`);
+  await expect(page.getByLabel("Injury status").getByText("IR", { exact: true })).toBeVisible();
+
+  await page.goto(`${CONFIGURED}#/games/2025021012`);
+  await expect(page.getByRole("heading", { name: "Box score" })).toBeVisible();
+  await expect(page.getByText("Shown for upcoming games only")).toBeVisible(); // the report describes now, not the past
+
+  await page.goto(`${CONFIGURED}#/admin`);
+  const panel = page.locator("section", { has: page.getByRole("heading", { name: "Injury report (ESPN)" }) });
+  await expect(panel).toContainText("109 listed, 4 matched and active, 105 unmatched");
+  await expect(panel).toContainText("partial");
+});

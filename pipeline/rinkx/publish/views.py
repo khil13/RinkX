@@ -11,6 +11,8 @@ from datetime import datetime
 from typing import Any
 
 from rinkx.analytics import hitrates
+from rinkx.ingestion.injuries import espn as injuries
+from rinkx.models import project
 from rinkx.publish import lines, news, projections
 
 NOT_CONNECTED = "not_connected"  # the feed that would provide this isn't built yet
@@ -102,9 +104,31 @@ def _side(conn: sqlite3.Connection, g: sqlite3.Row, home: bool) -> dict[str, Any
         "context_reason": None if ctx else "data_unavailable",
         "goalie": goalie,  # projected from recent starts, or confirmed via Quick Entry
         "goalie_reason": None if goalie else "data_unavailable",
-        "injuries": None,
-        "injuries_reason": NOT_CONNECTED,
+        **_injuries(conn, g, team_id),
     }
+
+
+def _injury(r: sqlite3.Row) -> dict[str, Any]:
+    return {
+        "player": {"id": r["nhl_player_id"], "name": r["full_name"], "position": r["position"]},
+        "status": r["status"],
+        "body_part": r["body_part"],
+        "description": r["description"],
+        "expected_return": r["expected_return"],
+        "reported_at": r["reported_at"],
+        "source": r["source_ref"],
+        "source_name": "ESPN injury report",
+    }
+
+
+def _injuries(conn: sqlite3.Connection, g: sqlite3.Row, team_id: int) -> dict[str, Any]:
+    """The team's injury report, for upcoming games only (it describes now, not the past)."""
+    if g["status"] not in ("scheduled", "pregame"):
+        return {"injuries": None, "injuries_reason": "past_game"}
+    ever = conn.execute(injuries.LAST_CHECK_SQL, (injuries.SOURCE.code,)).fetchone()
+    if not project.injury_report_fresh(conn, g["id"]):
+        return {"injuries": None, "injuries_reason": "stale" if ever else NOT_CONNECTED}
+    return {"injuries": [_injury(r) for r in injuries.active(conn, team_id=team_id)], "injuries_reason": None}
 
 
 def game_summary(conn: sqlite3.Connection, g: sqlite3.Row) -> dict[str, Any]:
@@ -442,4 +466,5 @@ def player(
         "projection": projections.player_projection(conn, p["id"]),
         "lines": lines.player_lines(conn, p["id"]),
         "news": news.for_player(conn, p["id"], now) if now is not None else [],
+        "injury": next((_injury(r) for r in injuries.active(conn, player_id=p["id"])), None),
     }

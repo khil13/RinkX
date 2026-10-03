@@ -178,7 +178,7 @@ def test_publishes_league_files_from_replayed_nhl_data(tmp_path: Path, keys):
         return crypto.decrypt_json(json.loads((out / f"{rel}.enc").read_text()), rel, key)
 
     slate = read("slate/2026-03-10.json")
-    assert slate["meta"]["sources"] == ["nhl_stats_api", "nhl_web_boxscore", "nhl_web_schedule"]
+    assert slate["meta"]["sources"] == ["espn_injuries", "nhl_stats_api", "nhl_web_boxscore", "nhl_web_schedule"]
     games = slate["data"]["games"]
     assert len(games) == 13
     bos = next(g for g in games if g["id"] == 2025021012)

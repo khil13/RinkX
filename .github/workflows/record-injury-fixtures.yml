@@ -35,7 +35,7 @@ jobs:
           test "$code" = "200"
           jq . "$out/espn.raw" > "$out/espn_injuries.json" && rm "$out/espn.raw"
           jq -n --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg u "$url" \
-            '{recorded_at: $at, url: $u, note: "Unmodified response (pretty-printed), used only as a parser test fixture."}' \
+            '{recorded_at: $at, url: $u, note: "Unmodified response (pretty-printed), used only as a parser test fixture.", files: [{file: "espn_injuries.json", url: $u}]}' \
             > "$out/index.json"
           jq '{teams: (.injuries | length), entries: ([.injuries[].injuries | length] | add),
                team_keys: (.injuries[0] | keys), entry_keys: (.injuries[0].injuries[0] | keys? // [])}' \

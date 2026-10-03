@@ -24,7 +24,8 @@ export const MODEL_REASON_TEXT: Record<ModelReason, string> = {
 const MISSING_TEXT: Record<string, string> = {
   lineup_unconfirmed: "Lineup not confirmed: assumes he dresses",
   goalie_unconfirmed: "Starting goalie not confirmed",
-  injuries_not_connected: "No injury feed yet",
+  injuries_not_connected: "No recent injury report",
+  injury_day_to_day: "Day-to-day on the injury report",
   odds_not_connected: "No odds yet: game environment from team history only",
 };
 
