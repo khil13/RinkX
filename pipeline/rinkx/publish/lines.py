@@ -181,7 +181,45 @@ def player_lines(conn: sqlite3.Connection, player_pk: int) -> dict[str, Any] | N
     if g is None:
         return None
     rows = conn.execute(LINE_SQL.format(where="l.game_id = ? AND l.player_id = ?"), (g[0], player_pk)).fetchall()
-    return {"game": {"id": g[1], "date": g[2]}, "markets": _group(conn, rows, with_movement=True)}
+    return {
+        "game": {"id": g[1], "date": g[2]},
+        "markets": _group(conn, rows, with_movement=True),
+        "events": line_events(conn, g[0], player_pk),
+    }
+
+
+def line_events(conn: sqlite3.Connection, game_pk: int, player_pk: int) -> list[dict[str, Any]]:
+    """What happened while the lines were moving, for markers on the movement chart: starting
+    goalies confirmed for this game, players ruled out or back in, news about this player or
+    either team, and injury-report changes for this player. Each carries its time and source."""
+    out: list[dict[str, Any]] = []
+    for r in conn.execute(
+        "SELECT s.reported_at, s.status, p.full_name, t.abbrev, s.source_ref FROM goalie_starts s "
+        "JOIN players p ON p.id = s.player_id JOIN teams t ON t.id = s.team_id "
+        "WHERE s.game_id = ? AND s.status = 'confirmed' AND s.provenance <> 'derived'",
+        (game_pk,),
+    ):
+        out.append({"at": r[0], "kind": "goalie", "label": f"{r[3]} goalie confirmed: {r[2]}", "source": r[4]})
+    for r in conn.execute(
+        "SELECT a.reported_at, a.status, p.full_name, a.source_ref FROM game_availability a "
+        "JOIN players p ON p.id = a.player_id WHERE a.game_id = ?",
+        (game_pk,),
+    ):
+        verb = "ruled out" if r[1] == "out" else "back in"
+        out.append({"at": r[0], "kind": "availability", "label": f"{r[2]} {verb}", "source": r[3]})
+    teams = conn.execute("SELECT home_team_id, away_team_id FROM games WHERE id = ?", (game_pk,)).fetchone()
+    for r in conn.execute(
+        "SELECT DISTINCT n.published_at, n.category, n.headline, n.url FROM news n "
+        "JOIN news_entities e ON e.news_id = n.id WHERE e.player_id = ? OR e.team_id IN (?, ?)",
+        (player_pk, teams[0], teams[1]),
+    ):
+        out.append({"at": r[0], "kind": "news", "label": f"{r[1].title()}: {r[2]}", "source": r[3]})
+    for r in conn.execute(
+        "SELECT reported_at, status, description, source_ref FROM injuries WHERE player_id = ?", (player_pk,)
+    ):
+        label = f"Injury report: {r[1].replace('_', ' ')}" + (f" ({r[2]})" if r[2] else "")
+        out.append({"at": r[0], "kind": "injury", "label": label, "source": r[3]})
+    return sorted(out, key=lambda e: e["at"])
 
 
 def odds_admin(conn: sqlite3.Connection) -> dict[str, Any]:

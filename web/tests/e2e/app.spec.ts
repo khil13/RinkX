@@ -261,6 +261,10 @@ test("sportsbook lines: comparison table, best price, no-vig, movement (syntheti
   const card = page.getByRole("article", { name: "Shots on Goal line" });
   await expect(card).toBeVisible();
   await expect(card.getByRole("img", { name: "Line movement" })).toBeVisible();
+  // Event markers: what happened while the line moved (Quick Entry goalie + news), with sources.
+  const events = card.getByRole("list", { name: "Events during this line" });
+  await expect(events).toContainText(/goalie confirmed: /);
+  await expect(events).toContainText("Injury: Synthetic note: day-to-day with a minor injury");
   await expect(card).toContainText("FanDuel");
   await expect(card).toContainText(/Model over \d+% vs market \d+%/);
   await card.getByText("Show the calculation").click();

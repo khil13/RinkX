@@ -337,7 +337,7 @@ export interface PlayerPage {
   hit_rates: Record<string, HitRateStat>;
   hit_rates_basis: "games_played" | "starts";
   projection: PlayerProjection;
-  lines: { game: { id: number; date: string }; markets: LineMarket[] } | null;
+  lines: { game: { id: number; date: string }; markets: LineMarket[]; events?: LineEvent[] } | null;
   news?: NewsItem[];
 }
 
@@ -764,4 +764,12 @@ export interface MovementBoard {
   generated_at: string;
   source: string;
   rows: MovementRow[];
+}
+
+/** Something that happened while a line was moving (marker on the movement chart). */
+export interface LineEvent {
+  at: string;
+  kind: "goalie" | "availability" | "news" | "injury";
+  label: string;
+  source: string | null;
 }

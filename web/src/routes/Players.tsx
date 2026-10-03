@@ -277,7 +277,7 @@ export function Player() {
 
       {lines && lines.markets.length > 0 && (
         <Panel title={`Sportsbook lines · ${longDate(lines.game.date)}`}>
-          <PlayerLinesPanel markets={lines.markets} />
+          <PlayerLinesPanel markets={lines.markets} events={lines.events} />
         </Panel>
       )}
 

@@ -232,6 +232,13 @@ def test_news_quick_entry_feeds_news_page_and_alert(league, tmp_path):
     assert item["url"] == "https://x.org/a" and item["category"] == "injury"
     assert item["reliability"] == "beat_reporter" and item["player"]["id"] == nhl_pid
     assert for_player(conn, pid, NOW)[0]["headline"] == "Out week-to-week (lower body)"
+    # The same item is an event marker on that player's line-movement chart.
+    from rinkx.publish.lines import line_events
+
+    ev = line_events(conn, _gid, pid)
+    assert ev == [
+        {"at": iso(NOW), "kind": "news", "label": "Injury: Out week-to-week (lower body)", "source": "https://x.org/a"}
+    ]
 
     path = _yml(tmp_path, "alerts:\n  - {key: injuries, type: news, categories: [injury]}\n")
     assert al.run_alerts(conn, NOW, send=None, site_url=None, path=path) == 1
