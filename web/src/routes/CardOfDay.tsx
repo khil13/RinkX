@@ -112,7 +112,7 @@ function PlayerGroups({ groups, onOpen }: { groups: CardGroup[]; onOpen: (r: Pro
             {g.shown.length === 0 ? (
               <p className="text-xs text-muted">
                 {g.priced === 0
-                  ? "No lines posted by your books for this date yet."
+                  ? "No lines fetched for this market on this date yet. The free odds plan covers only part of each slate; lines are refreshed through the day."
                   : `${g.priced} line${g.priced === 1 ? "" : "s"} priced; none clears the bar (edge ≥ 3 pts, positive EV, good data).`}
               </p>
             ) : (

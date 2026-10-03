@@ -322,7 +322,7 @@ test("card of the day: the date's best team and player props, one per player, in
   await expect(picks).toHaveCount(1);
   // Player picks are grouped by market; an empty group says why.
   await expect(page.getByLabel("Card: Shots on goal")).toContainText("Syn P8000002");
-  await expect(page.getByLabel("Card: Points")).toContainText("No lines posted by your books for this date yet.");
+  await expect(page.getByLabel("Card: Points")).toContainText("No lines fetched for this market on this date yet.");
   await expect(picks.first()).toContainText("Syn P8000002");
   await expect(picks.first()).toContainText(/Over 2\.5 Shots on Goal −140 at BetMGM/);
   await expect(picks.first()).toContainText(/via The Odds API · line seen /);
