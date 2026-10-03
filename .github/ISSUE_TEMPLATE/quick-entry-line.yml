@@ -1,0 +1,71 @@
+name: "Quick Entry: line change"
+description: A skater's new line, linemates or power-play unit for an upcoming game. Owner only; applied on the next pipeline run.
+title: "Quick Entry: line"
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The RinkX pipeline starts automatically when you submit this, applies it, recalculates the
+        game's projections, then comments and closes the issue. **This repository is public**: the
+        comment never includes projections. Issues opened by anyone except the owner are ignored.
+
+        Without an entry, each player is assumed to play where he did last game (from the NHL shift
+        chart). The model uses his line's usual ice time and his linemates only if they helped in testing.
+  - type: input
+    id: game
+    attributes:
+      label: Game
+      description: NHL game id (filled in when you open this from the app), or the date as YYYY-MM-DD together with a team.
+    validations:
+      required: true
+  - type: input
+    id: team
+    attributes:
+      label: Team
+      description: 3-letter abbreviation, e.g. BOS.
+  - type: input
+    id: player
+    attributes:
+      label: Player
+      description: NHL player id or full name.
+    validations:
+      required: true
+  - type: dropdown
+    id: line
+    attributes:
+      label: Line
+      options:
+        - Unchanged
+        - F1 (first line)
+        - F2
+        - F3
+        - F4
+        - D1 (top pair)
+        - D2
+        - D3
+    validations:
+      required: true
+  - type: input
+    id: linemates
+    attributes:
+      label: Linemates
+      description: Optional. His new linemates, comma-separated (names or NHL ids); two for a forward, one for a defenceman.
+  - type: dropdown
+    id: pp
+    attributes:
+      label: Power play
+      options:
+        - Unchanged
+        - PP1
+        - PP2
+        - Off the power play
+    validations:
+      required: true
+  - type: input
+    id: source
+    attributes:
+      label: Source URL
+      description: Where this was reported (team account, beat reporter, practice lines). Required.
+      placeholder: https://
+    validations:
+      required: true

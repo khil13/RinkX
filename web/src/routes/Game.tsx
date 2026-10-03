@@ -307,9 +307,14 @@ export function Game() {
         <Panel
           title="Projections"
           right={
-            <QuickEntryLink template="player-out" fields={{ game: String(g.id) }}>
-              Mark a player out
-            </QuickEntryLink>
+            <span className="flex gap-1.5">
+              <QuickEntryLink template="player-out" fields={{ game: String(g.id) }}>
+                Mark a player out
+              </QuickEntryLink>
+              <QuickEntryLink template="line" fields={{ game: String(g.id) }}>
+                Line change
+              </QuickEntryLink>
+            </span>
           }
         >
           {g.projections.reason ? (

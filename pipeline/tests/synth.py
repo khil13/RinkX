@@ -11,6 +11,7 @@ from __future__ import annotations
 import sqlite3
 from dataclasses import dataclass, field
 from datetime import date, timedelta
+from typing import Any
 
 import numpy as np
 
@@ -36,7 +37,14 @@ def build(
     seed: int = 1,
     start: date = date(2025, 10, 7),
     season: int = 20252026,
+    lines: bool = False,
+    line_changes: bool = False,
+    back_to_backs: bool = False,
 ) -> tuple[sqlite3.Connection, Truth]:
+    """`lines`: store each game's lines and PP units (as if derived from shift charts).
+    `line_changes`: every 10 days each team swaps a top-line forward with a bottom-six one; ice time
+    follows the new role at once. `back_to_backs`: a random schedule with back-to-backs, on which a
+    team takes B2B_SHOTS as many shots. All three default off, so default leagues are unchanged."""
     rng = np.random.default_rng(seed)
     conn = connect(path)
     migrate(conn, REPO_ROOT / "db")
@@ -99,10 +107,25 @@ def build(
         truth.goalies[tid] = gl
 
     game_no = 0
+    last_played: dict[int, date] = {}
     for d in range(days):
         day = start + timedelta(days=d)
-        # half the league plays each day, alternating, in random pairings
-        playing = [t for i, t in enumerate(team_ids) if (i + d) % 2 == 0]
+        if line_changes and d > 0 and d % 10 == 0:
+            for tid in team_ids:  # a top-line forward and a bottom-six one trade roles
+                fwd = [i for i, r in enumerate(roster[tid]) if r[1] != "D"]
+                top = [i for i in fwd if roster[tid][i][2] >= 19.0]
+                low = [i for i in fwd if roster[tid][i][2] <= 14.0]
+                a, b = int(rng.choice(top)), int(rng.choice(low))
+                ra, rb = roster[tid][a], roster[tid][b]
+                roster[tid][a] = (ra[0], ra[1], rb[2], *ra[3:])
+                roster[tid][b] = (rb[0], rb[1], ra[2], *rb[3:])
+        if back_to_backs:
+            playing = [t for t in team_ids if rng.random() < 0.55]
+            if len(playing) % 2:
+                playing.pop()
+        else:
+            # half the league plays each day, alternating, in random pairings
+            playing = [t for i, t in enumerate(team_ids) if (i + d) % 2 == 0]
         rng.shuffle(playing)
         for i in range(0, len(playing) - 1, 2):
             home, away = playing[i], playing[i + 1]
@@ -124,6 +147,8 @@ def build(
                     toi = max(5.0, rng.normal(toi_min, 2.0)) * 60
                     pp = max(0.0, rng.normal(2.0 if toi_min > 17 else 0.3, 0.5)) * 60
                     lam = shot_rate * (toi / 3600) * defence[opp] * (1.03 if is_home else 0.97)
+                    if back_to_backs and last_played.get(team) == day - timedelta(days=1):
+                        lam *= B2B_SHOTS
                     shots = int(rng.negative_binomial(8, 8 / (8 + lam)))
                     p_goal = sh_pct * (1 - truth.sv[starter]) / (1 - 0.905)
                     goals = int(rng.binomial(shots, min(p_goal, 0.9)))
@@ -165,6 +190,10 @@ def build(
                     (gid, idx, period, int(sec - (period - 1) * 1200), shooter, team, src, FETCHED),
                 )
             conn.execute("INSERT INTO game_enrichment (game_id, pbp_at) VALUES (?, ?)", (gid, FETCHED))
+            if lines or line_changes:
+                for team in (home, away):
+                    _write_lines(conn, gid, team, roster[team], f"{day.isoformat()}T23:00:00Z", src)
+            last_played[home] = last_played[away] = day
             for team, opp, is_home in ((home, away, 1), (away, home, 0)):
                 team_shots = 0
                 for pk, toi, pp, goals, assists, ppg, ppa, shots, hits, blocks in lines[team]:
@@ -232,6 +261,37 @@ def build(
                 )
     conn.commit()
     return conn, truth
+
+
+B2B_SHOTS = 0.85
+
+
+def _write_lines(conn: sqlite3.Connection, gid: int, team: int, players: list[Any], at: str, src: int) -> None:
+    """Units by role: forwards by ice time in threes (F1-F4), defence in twos (D1-D3); PP1 = the
+    top three forwards and top two defence, PP2 the next."""
+    snap = conn.execute(
+        "INSERT INTO lineup_snapshots (team_id, game_id, status, observed_at, provenance, source_id, fetched_at) "
+        "VALUES (?, ?, 'actual', ?, 'synthetic', ?, ?)",
+        (team, gid, at, src, FETCHED),
+    ).lastrowid
+    fwd = sorted((p for p in players if p[1] != "D"), key=lambda p: (-p[2], p[0]))
+    dee = sorted((p for p in players if p[1] == "D"), key=lambda p: (-p[2], p[0]))
+    for i, p in enumerate(fwd):
+        conn.execute(
+            "INSERT INTO line_combinations (snapshot_id, unit, slot, player_id) VALUES (?, ?, 'X', ?)",
+            (snap, f"F{i // 3 + 1}", p[0]),
+        )
+    for i, p in enumerate(dee):
+        conn.execute(
+            "INSERT INTO line_combinations (snapshot_id, unit, slot, player_id) VALUES (?, ?, 'X', ?)",
+            (snap, f"D{i // 2 + 1}", p[0]),
+        )
+    for unit, (fs, ds) in (("PP1", (fwd[:3], dee[:2])), ("PP2", (fwd[3:6], dee[2:4]))):
+        for k, p in enumerate([*fs, *ds]):
+            conn.execute(
+                "INSERT INTO powerplay_units (snapshot_id, unit, slot, player_id) VALUES (?, ?, ?, ?)",
+                (snap, unit, k + 1, p[0]),
+            )
 
 
 UPCOMING_NHL_ID = 2025029999

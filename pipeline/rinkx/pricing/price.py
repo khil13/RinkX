@@ -10,7 +10,6 @@ confidence score with its breakdown, and the step-by-step calculation. Rows are 
 from __future__ import annotations
 
 import json
-import math
 import sqlite3
 import statistics
 from dataclasses import dataclass
@@ -24,9 +23,10 @@ from rinkx.config import REPO_ROOT
 from rinkx.grading import calibration
 from rinkx.grading.performance import track_records
 from rinkx.ingestion.runs import ingestion_run, register_source
+from rinkx.models import promotion
 from rinkx.models.project import MODELS_SOURCE
 from rinkx.pricing import confidence as conf
-from rinkx.pricing.model_probs import AtLine, at_line, yes_no
+from rinkx.pricing.model_probs import AtLine
 from rinkx.pricing.odds import NoVig, devig, ev_per_unit, implied
 from rinkx.timeutil import iso
 
@@ -219,8 +219,8 @@ def _insert(
     pr: Priced,
     c: conf.Confidence | None,
     now: datetime,
-) -> None:
-    conn.execute(
+) -> int:
+    cur = conn.execute(
         f"INSERT INTO predictions ({proj_col}, prop_line_id, game_id, market_id, sportsbook_id, player_id, line, "
         "over_price, under_price, p_model_over, p_model_under, p_push, p_implied_over, p_implied_under, "
         "p_novig_over, p_novig_under, devig_method, edge_over, edge_under, ev_over, ev_under, side, confidence, "
@@ -255,6 +255,7 @@ def _insert(
             iso(now),
         ),
     )
+    return int(cur.lastrowid or 0)
 
 
 def _score(
@@ -314,7 +315,8 @@ def _score(
 
 
 PLAYER_SQL = """
-SELECT pp.id AS proj_id, pp.game_id, pp.player_id, pp.market_id, pp.pmf, pp.data_quality, pp.inputs,
+SELECT pp.id AS proj_id, pp.model_version_id, pp.game_id, pp.player_id, pp.market_id, pp.pmf, pp.data_quality,
+       pp.inputs,
        pp.missing_inputs, m.code AS market, m.kind, m.name AS market_name, pl.position, g.game_date,
        l.id AS line_id, l.sportsbook_id, l.line, l.over_price, l.under_price
 FROM player_projections pp
@@ -326,7 +328,8 @@ WHERE pp.is_current = 1 AND l.status = 'open' AND l.is_main_line = 1
 """
 
 GAME_SQL = """
-SELECT gp.id AS proj_id, gp.game_id, gp.market_id, gp.pmf, gp.inputs, m.code AS market, m.kind, m.name AS market_name,
+SELECT gp.id AS proj_id, gp.model_version_id, gp.side AS proj_side, gp.game_id, gp.market_id, gp.pmf, gp.inputs,
+       m.code AS market, m.kind, m.name AS market_name,
        g.game_date, l.id AS line_id, l.sportsbook_id, l.line, l.over_price, l.under_price
 FROM game_projections gp
 JOIN markets m ON m.id = gp.market_id JOIN games g ON g.id = gp.game_id
@@ -342,7 +345,7 @@ def run_pricing(conn: sqlite3.Connection, now: datetime, cfg: PricingConfig | No
     """Price every open line with a current projection; returns predictions written."""
     cfg = cfg or PricingConfig.load()
     src = register_source(conn, MODELS_SOURCE)
-    written = 0
+    written = shadows = 0
     tracks = track_records(conn)
     cals = calibration.current(conn)
     with ingestion_run(conn, src, "pricing") as run:
@@ -358,14 +361,10 @@ def run_pricing(conn: sqlite3.Connection, now: datetime, cfg: PricingConfig | No
                 kind = r["kind"]
                 if kind == "over_under" and r["line"] is None:
                     continue
-                if r["market"] == "goalie_saves_and_win":
-                    if r["line"] is None:
-                        continue
-                    p_yes = sum(pmf[math.floor(r["line"]) + 1 :])  # pmf: P(k saves AND a win)
-                    at = AtLine(p_yes, 1 - p_yes, 0.0)
-                else:
-                    at = at_line(pmf, r["line"]) if kind == "over_under" else yes_no(pmf)
-                at, cal_note = calibrate(at, cals.get(r["market_id"]))
+                raw = promotion.model_at(r["market"], kind, pmf, r["line"])
+                if raw is None:
+                    continue
+                at, cal_note = calibrate(raw, cals.get(r["market_id"]))
                 pr = price_line(
                     kind,
                     at,
@@ -397,7 +396,7 @@ def run_pricing(conn: sqlite3.Connection, now: datetime, cfg: PricingConfig | No
                     is_game=False,
                     track_record=tracks.get(r["market_id"]),
                 )
-                _insert(
+                pred = _insert(
                     conn,
                     proj_col="projection_id",
                     proj_id=r["proj_id"],
@@ -407,6 +406,20 @@ def run_pricing(conn: sqlite3.Connection, now: datetime, cfg: PricingConfig | No
                     player_id=r["player_id"],
                     pr=pr,
                     c=c,
+                    now=now,
+                )
+                shadows += promotion.record_shadow(
+                    conn,
+                    pred,
+                    game_id=r["game_id"],
+                    player_id=r["player_id"],
+                    side="",
+                    market_id=r["market_id"],
+                    market=r["market"],
+                    kind=kind,
+                    line=r["line"],
+                    champion_version_id=r["model_version_id"],
+                    p_champion=raw.over_given_no_push,
                     now=now,
                 )
                 written += 1
@@ -419,16 +432,11 @@ def run_pricing(conn: sqlite3.Connection, now: datetime, cfg: PricingConfig | No
                 if _latest_same(conn, r["line_id"], "game_projection_id", r["proj_id"], r):
                     continue
                 pmf = json.loads(r["pmf"])["p"]
-                if r["market"] == "game_moneyline":
-                    p_home = pmf[1]
-                    at = AtLine(p_home, 1 - p_home, 0.0)
-                    kind = "moneyline"
-                else:
-                    if r["line"] is None:
-                        continue
-                    at = at_line(pmf, r["line"])
-                    kind = "over_under"
-                at, cal_note = calibrate(at, cals.get(r["market_id"]))
+                kind = "moneyline" if r["market"] == "game_moneyline" else "over_under"
+                raw = promotion.model_at(r["market"], kind, pmf, r["line"])
+                if raw is None:
+                    continue
+                at, cal_note = calibrate(raw, cals.get(r["market_id"]))
                 pr = price_line(
                     kind,
                     at,
@@ -458,7 +466,7 @@ def run_pricing(conn: sqlite3.Connection, now: datetime, cfg: PricingConfig | No
                     is_game=True,
                     track_record=tracks.get(r["market_id"]),
                 )
-                _insert(
+                pred = _insert(
                     conn,
                     proj_col="game_projection_id",
                     proj_id=r["proj_id"],
@@ -470,7 +478,22 @@ def run_pricing(conn: sqlite3.Connection, now: datetime, cfg: PricingConfig | No
                     c=c,
                     now=now,
                 )
+                shadows += promotion.record_shadow(
+                    conn,
+                    pred,
+                    game_id=r["game_id"],
+                    player_id=None,
+                    side=r["proj_side"],
+                    market_id=r["market_id"],
+                    market=r["market"],
+                    kind=kind,
+                    line=r["line"],
+                    champion_version_id=r["model_version_id"],
+                    p_champion=raw.over_given_no_push,
+                    now=now,
+                )
                 written += 1
         run.rows_read = len(prows) + len(grows)
         run.rows_upserted = written
+        run.meta["challenger_shadows"] = shadows
     return written

@@ -511,11 +511,43 @@ export interface StatTest {
     sa_size?: number | null;
     k_sv_shots: number;
     fin_prior_shots?: number;
+    slot_w?: number;
   } | null;
+}
+
+export interface ChallengerStat {
+  passed: boolean;
+  reason: StatTest["reason"];
+  log_score: number | null;
+  n_test: number;
+  choice: StatTest["choice"];
 }
 
 export interface ModelsReport {
   version: string;
+  /** model family -> published (champion) version */
+  versions?: Record<string, string>;
+  all_versions?: string[];
+  challengers?: Record<string, { version: string; adds: string | null; stats: Record<string, ChallengerStat> }>;
+  promotion?: {
+    min_props: number;
+    families: {
+      family: string;
+      champion: string | null;
+      challenger: string | null;
+      live: { n: number; mean_diff: number; se: number | null; lo: number | null; hi: number | null; status: string } | null;
+    }[];
+    history: {
+      family: string;
+      champion: string;
+      challenger: string;
+      decision: "promoted" | "rejected";
+      n_props: number;
+      mean_diff: number;
+      se: number;
+      decided_at: string;
+    }[];
+  };
   status: "ok" | "insufficient_history" | "not_run";
   tested_at: string | null;
   history?: { from: string; to: string } | null;

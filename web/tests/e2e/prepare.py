@@ -173,7 +173,7 @@ def models_site(env: dict[str, str], tmp: Path) -> None:
     days = 200
     today = date(2025, 10, 7) + timedelta(days=days)
     now = datetime(today.year, today.month, today.day, 15, tzinfo=UTC)
-    conn, truth = synth.build(str(tmp / "synthetic.db"), teams=20, days=days, seed=22)
+    conn, truth = synth.build(str(tmp / "synthetic.db"), teams=20, days=days, seed=22, lines=True)
     synth.add_priced_history(conn, truth, days=30)  # frozen pre-game predictions on finished games, to grade
     run_grading(conn, now, today)
     run_calibration(conn, now)  # live calibrators from that graded history

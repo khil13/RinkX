@@ -1,6 +1,6 @@
 import { Notice, Panel, Spinner } from "../components/ui";
 import { useEncrypted } from "../lib/data/fetch";
-import type { ModelsReport, StatTest } from "../lib/data/types";
+import type { ChallengerStat, ModelsReport, StatTest } from "../lib/data/types";
 import { longDate, localTime } from "../lib/format";
 
 const BASELINE_LABEL: Record<string, string> = {
@@ -32,6 +32,8 @@ const FACTOR_NAMES: Record<string, string> = {
   fin: "team finishing",
   playoff: "playoff games",
   po: "playoff games",
+  rest: "back-to-backs",
+  mates: "linemates",
 };
 
 function Pit({ hist }: { hist: number[] }) {
@@ -68,7 +70,7 @@ function Diff({ label, b }: { label: string; b: NonNullable<StatTest["baselines"
   );
 }
 
-function StatCard({ stat, t }: { stat: string; t: StatTest }) {
+function StatCard({ stat, t, chal }: { stat: string; t: StatTest; chal?: ChallengerStat & { version: string } }) {
   return (
     <article className="flex flex-col gap-2 rounded-md border border-line bg-panel-2 p-3" aria-label={`${t.label} test`}>
       <header className="flex items-center justify-between gap-2">
@@ -127,10 +129,80 @@ function StatCard({ stat, t }: { stat: string; t: StatTest }) {
           {t.choice.factors.length > 0 && ` · factors kept: ${t.choice.factors.map((f) => FACTOR_NAMES[f] ?? f).join(", ")}`}
           {" · "}
           {(t.choice.kind === "goalie" ? t.choice.sa_size : t.choice.size) === null ? "Poisson" : "negative binomial"}
+          {t.choice.slot_w ? ` · line slot's ice time weighted ${(t.choice.slot_w * 100).toFixed(0)}%` : ""}
+        </p>
+      )}
+      {chal && (
+        <p className="rounded bg-panel px-2 py-1 text-[11px] text-muted" aria-label="Challenger">
+          Challenger v{chal.version}:{" "}
+          {chal.log_score != null && t.log_score != null ? (
+            <>
+              test score {chal.log_score.toFixed(4)} vs {t.log_score.toFixed(4)} published (
+              {chal.log_score - t.log_score >= 0 ? "+" : ""}
+              {(chal.log_score - t.log_score).toFixed(4)})
+            </>
+          ) : (
+            REASON[chal.reason ?? ""] ?? "not tested"
+          )}
+          {chal.choice?.factors.length ? ` · factors: ${chal.choice.factors.map((f) => FACTOR_NAMES[f] ?? f).join(", ")}` : ""}
+          {chal.choice?.slot_w ? ` · line slot ${(chal.choice.slot_w * 100).toFixed(0)}%` : ""}
         </p>
       )}
       <span className="sr-only">{stat}</span>
     </article>
+  );
+}
+
+const FAMILY_LABEL: Record<string, string> = {
+  skater_shots: "shots",
+  skater_scoring: "scoring",
+  skater_blocks: "blocks",
+  skater_hits: "hits",
+  goalie: "goalie",
+  game_sim: "game model",
+};
+
+function Promotion({ r }: { r: ModelsReport }) {
+  const p = r.promotion!;
+  return (
+    <Panel title="New versions on live results">
+      <p className="mb-2 text-xs text-muted">
+        A newer version that passes its test runs beside the published one without being shown. Every line priced
+        is also priced by it. Once {p.min_props} graded props have been compared, it replaces the published version
+        only if its log score is better by more than chance, and is retired if it is worse.
+      </p>
+      <ul className="flex flex-col gap-1 text-sm" aria-label="Champion and challenger">
+        {p.families.map((f) => (
+          <li key={f.family} className="flex flex-wrap justify-between gap-2">
+            <span>
+              {FAMILY_LABEL[f.family] ?? f.family}: v{f.champion ?? "—"} published
+              {f.challenger ? `, v${f.challenger} challenging` : ""}
+            </span>
+            <span className="num text-xs text-muted">
+              {!f.challenger
+                ? "no challenger"
+                : !f.live
+                  ? `0 of ${p.min_props} graded props`
+                  : `${f.live.n} of ${p.min_props} graded props · ${f.live.mean_diff >= 0 ? "+" : ""}${f.live.mean_diff.toFixed(4)} per prop${
+                      f.live.lo != null ? ` (95% ${f.live.lo.toFixed(4)} to ${f.live.hi?.toFixed(4)})` : ""
+                    }`}
+            </span>
+          </li>
+        ))}
+      </ul>
+      {p.history.length > 0 && (
+        <ul className="mt-2 text-xs text-muted" aria-label="Promotion history">
+          {p.history.map((h) => (
+            <li key={`${h.family}-${h.decided_at}`}>
+              {localTime(h.decided_at)}: {FAMILY_LABEL[h.family] ?? h.family} v{h.challenger}{" "}
+              {h.decision === "promoted" ? `replaced v${h.champion}` : `retired (v${h.champion} kept)`} after{" "}
+              {h.n_props} props ({h.mean_diff >= 0 ? "+" : ""}
+              {h.mean_diff.toFixed(4)} per prop)
+            </li>
+          ))}
+        </ul>
+      )}
+    </Panel>
   );
 }
 
@@ -179,19 +251,24 @@ export function Models() {
             </div>
           </dl>
           <p className="mt-2 text-xs text-muted">
-            Model version {r.version}
-            {r.tested_at && ` · tested ${localTime(r.tested_at)}`}. The test assumes the actual starting goalies and
-            lineups were known in advance, as they usually are by game time; before confirmation, live projections
-            carry that uncertainty and say so.
+            Published versions:{" "}
+            {Object.entries(r.versions ?? {})
+              .map(([f, v]) => `${FAMILY_LABEL[f] ?? f} v${v}`)
+              .join(", ") || r.version}
+            {r.tested_at && ` · tested ${localTime(r.tested_at)}`}. The test assumes the actual starting goalies were
+            known in advance, as they usually are by game time; lines and power-play units are each player's from his
+            previous game, as they are live until a Quick Entry says otherwise.
           </p>
         </Panel>
       )}
 
       {stats.length > 0 && (
         <div className="grid gap-3 sm:grid-cols-2">
-          {stats.map(([s, t]) => (
-            <StatCard key={s} stat={s} t={t} />
-          ))}
+          {stats.map(([s, t]) => {
+            const c = r.challengers?.[t.family];
+            const cs = c?.stats[s];
+            return <StatCard key={s} stat={s} t={t} chal={cs ? { ...cs, version: c.version } : undefined} />;
+          })}
         </div>
       )}
 
@@ -199,6 +276,8 @@ export function Models() {
         Score = average log score per game (higher is better). Differences are per game; the 95% low end must be
         above zero to pass.
       </p>
+
+      {r.promotion && r.promotion.families.length > 0 && <Promotion r={r} />}
 
       {r.not_modeled.length > 0 && (
         <Panel title="Not modeled yet">

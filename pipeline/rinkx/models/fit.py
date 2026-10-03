@@ -36,7 +36,20 @@ from rinkx.models.dist import INF, F
 from rinkx.models.history import GOALIE_STATS, SKATER_STATS
 from rinkx.models.state import HALF_LIVES, K_SV, H, Row, basis_of
 
-MODEL_VERSION = "1.4"
+# Model versions this code can run. Each later version only *adds* candidate inputs, so the
+# earlier ones are reproduced exactly by switching those inputs off. The champion of each model
+# family (what the site publishes) is decided by live results, not by which version is newest:
+# a new version runs alongside as the challenger until it beats the champion on graded props
+# (rinkx.models.promotion).
+VERSIONS: dict[str, frozenset[str]] = {
+    "1.4": frozenset(),
+    "1.5": frozenset({"rest", "lines"}),  # back-to-back terms; line and PP-unit deployment, linemates
+}
+BASE_VERSION = "1.4"  # champion of a family that has none yet
+MODEL_VERSION = "1.5"  # the newest version
+SLOT_W_GRID: tuple[float, ...] = (0.25, 0.5, 0.75)  # weight on the line slot's ice time
+MATES_G_GRID: tuple[float, ...] = (0.25, 0.5, 1.0)  # strength of the linemate-quality factor
+MATES_STATS = ("goals", "assists", "points")
 M_GRID: tuple[float, ...] = (0.25, 0.5, 1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 64.0)  # hours of ice time
 FINISH_GRID: tuple[float, ...] = (25.0, 50.0, 100.0, 200.0, 400.0, 800.0)  # shots
 BURN_IN_DAYS = 21  # the first weeks of history only build state; they are never scored
@@ -48,17 +61,25 @@ BASELINE_FLOOR = 0.02
 # "playoff" is 1.0 in regular-season games; the tuner can only drop it if a tuning window
 # contains playoff games, so it is kept by default and judged by the test like everything else.
 SKATER_FACTORS: dict[str, tuple[str, ...]] = {
-    "shots": ("opp", "home", "playoff"),
-    "goals": ("opp_shots", "goalie", "home", "playoff"),
-    "assists": ("opp_shots", "goalie", "home", "playoff"),
-    "points": ("opp_shots", "goalie", "home", "playoff"),
-    "pp_points": ("opp", "home", "playoff"),
-    "pp_goals": ("opp", "home", "playoff"),
-    "pp_assists": ("opp", "home", "playoff"),
-    "blocks": ("opp", "home", "venue", "playoff"),
-    "hits": ("opp", "home", "venue", "playoff"),
+    "shots": ("opp", "home", "playoff", "rest"),
+    "goals": ("opp_shots", "goalie", "home", "playoff", "rest", "mates"),
+    "assists": ("opp_shots", "goalie", "home", "playoff", "rest", "mates"),
+    "points": ("opp_shots", "goalie", "home", "playoff", "rest", "mates"),
+    "pp_points": ("opp", "home", "playoff", "rest"),
+    "pp_goals": ("opp", "home", "playoff", "rest"),
+    "pp_assists": ("opp", "home", "playoff", "rest"),
+    "blocks": ("opp", "home", "venue", "playoff", "rest"),
+    "hits": ("opp", "home", "venue", "playoff", "rest"),
 }
-GOALIE_FACTORS = ("fd", "fo", "po")
+GOALIE_FACTORS = ("fd", "fo", "po", "rest")
+# Which version input each factor belongs to (factors not listed are in every version).
+FACTOR_INPUT = {"rest": "rest", "mates": "lines"}
+
+
+def allowed(factors: tuple[str, ...], version: str) -> tuple[str, ...]:
+    extra = VERSIONS[version]
+    return tuple(f for f in factors if FACTOR_INPUT.get(f) is None or FACTOR_INPUT[f] in extra)
+
 
 FAMILY = {
     "shots": "skater_shots",
@@ -125,6 +146,8 @@ class Choice:
     k_sv: int = 1  # index into K_SV
     size: float = INF  # NB size; inf = Poisson
     sa_size: float = INF  # goalie: NB size of shots against
+    slot_w: float = 0.0  # weight on the ice time of the player's line slot / PP unit (0 = his own record only)
+    mates_g: float = 0.5  # linemate factor = (current linemates' quality / his usual linemates') ** mates_g
 
     def to_json(self) -> dict[str, Any]:
         d = asdict(self)
@@ -146,6 +169,8 @@ class Choice:
             k_sv=int(d["k_sv"]),
             size=INF if d["size"] is None else float(d["size"]),
             sa_size=INF if d["sa_size"] is None else float(d["sa_size"]),
+            slot_w=float(d.get("slot_w", 0.0)),
+            mates_g=float(d.get("mates_g", 0.5)),
         )
 
 
@@ -187,6 +212,10 @@ def collect(rows: Iterable[Row]) -> dict[str, Table]:
 
 
 def factor(c: Cols, stat: str, name: str, ch: Choice) -> F:
+    if name == "mates":
+        return np.asarray(c[f"mates.{ch.hl}"] ** ch.mates_g, dtype=float)
+    if name == "rest" and ch.kind == "goalie":
+        return c["rest_sa"]
     key = {
         "opp": f"opp.{stat}",
         "opp_shots": "opp.shots",
@@ -194,6 +223,7 @@ def factor(c: Cols, stat: str, name: str, ch: Choice) -> F:
         "home": f"home.{stat}",
         "venue": f"venue.{stat}",
         "playoff": f"po.{stat}",
+        "rest": f"rest.{stat}",
         "fd": "fd",
         "fo": "fo",
         "po": "po",
@@ -209,12 +239,23 @@ def finish(c: Cols, hl: int, m: float) -> F:
     return (c[f"x.goals.{hl}"] + m * c["prior_finish"]) / (c[f"x.shots.{hl}"] + m)
 
 
+def expected_basis(c: Cols, stat: str, ch: Choice) -> F:
+    """Expected ice time (or PP time), in hours: his own shrunk record, blended with the usual
+    ice time of the line slot / PP unit he is now in when slot_w > 0 and the slot is known."""
+    basis = basis_of(stat)
+    eb = c[f"eb.{basis}.{ch.hl}"]
+    if ch.slot_w <= 0 or "slot.has" not in c:
+        return eb
+    has, slot = (c["slot.pphas"], c["slot.pp"]) if basis == "pp" else (c["slot.has"], c["slot.toi"])
+    return np.asarray(eb + ch.slot_w * has * (slot - eb), dtype=float)
+
+
 def skater_mean(c: Cols, ch: Choice, shots: Choice | None) -> F:
     if ch.kind == "finish":
         assert shots is not None
         lam = skater_mean(c, shots, None) * finish(c, ch.hl, ch.m)
     else:
-        lam = rate(c, ch.stat, ch.hl, ch.m) * c[f"eb.{basis_of(ch.stat)}.{ch.hl}"]
+        lam = rate(c, ch.stat, ch.hl, ch.m) * expected_basis(c, ch.stat, ch)
     for name in ch.factors:
         lam = lam * factor(c, ch.stat, name, ch)
     return np.asarray(lam, dtype=float)
@@ -263,14 +304,15 @@ def _subset(c: Cols, mask: NDArray[np.bool_]) -> Cols:
 # ---- tuning ---------------------------------------------------------------------------------
 
 
-def _tune_skater(c: Cols, y: F, stat: str, shots: Choice | None) -> tuple[Choice, float]:
+def _tune_skater(c: Cols, y: F, stat: str, shots: Choice | None, version: str) -> tuple[Choice, float]:
     candidates: list[tuple[Choice, float]] = []
     kinds = ["rate", "finish"] if stat == "goals" and shots is not None else ["rate"]
-    allf = SKATER_FACTORS[stat]
+    allf = allowed(SKATER_FACTORS[stat], version)
+    lines = "lines" in VERSIONS[version]
     for kind in kinds:
         grid = FINISH_GRID if kind == "finish" else M_GRID
-        # opponent and playoff shot volume are already in the shots model
-        factors = tuple(f for f in allf if not (kind == "finish" and f in ("opp_shots", "playoff")))
+        # opponent, playoff and rest effects on shot volume are already in the shots model
+        factors = tuple(f for f in allf if not (kind == "finish" and f in ("opp_shots", "playoff", "rest")))
         best: tuple[Choice, float] | None = None
         for hl in range(H):
             for m in grid:
@@ -279,6 +321,14 @@ def _tune_skater(c: Cols, y: F, stat: str, shots: Choice | None) -> tuple[Choice
                 if best is None or s > best[1]:
                     best = (replace(ch, size=size), s)
         assert best is not None
+        if lines and kind == "rate":  # the slot's ice time: kept only if it helps on the tuning window
+            ch, score = best
+            for w in SLOT_W_GRID:
+                trial = replace(ch, slot_w=w)
+                size, s = dist.best_size(y, skater_mean(c, trial, shots))
+                if s > score:
+                    best = (replace(trial, size=size), s)
+                    score = s
         candidates.append(_ablate(c, y, best, shots))
     return max(candidates, key=lambda t: t[1])
 
@@ -286,6 +336,12 @@ def _tune_skater(c: Cols, y: F, stat: str, shots: Choice | None) -> tuple[Choice
 def _ablate(c: Cols, y: F, best: tuple[Choice, float], shots: Choice | None) -> tuple[Choice, float]:
     """Drop each factor that doesn't help on the tuning window; then pick the save-% prior."""
     ch, score = best
+    if "mates" in ch.factors:
+        for g in MATES_G_GRID:
+            trial = replace(ch, mates_g=g)
+            size, s = dist.best_size(y, skater_mean(c, trial, shots))
+            if s > score:
+                ch, score = replace(trial, size=size), s
     for name in list(ch.factors):
         trial = replace(ch, factors=tuple(f for f in ch.factors if f != name))
         size, s = dist.best_size(y, skater_mean(c, trial, shots))
@@ -300,11 +356,12 @@ def _ablate(c: Cols, y: F, best: tuple[Choice, float], shots: Choice | None) -> 
     return ch, score
 
 
-def _tune_goalie(c: Cols, y: F, sa: F, stat: str) -> tuple[Choice, float]:
-    ch = Choice(stat, "goalie", factors=GOALIE_FACTORS)
+def _tune_goalie(c: Cols, y: F, sa: F, stat: str, version: str) -> tuple[Choice, float]:
+    factors = allowed(GOALIE_FACTORS, version)
+    ch = Choice(stat, "goalie", factors=factors)
     sa_size, sa_score = dist.best_size(sa, goalie_sa_mean(c, ch))
     ch = replace(ch, sa_size=sa_size)
-    for name in GOALIE_FACTORS:
+    for name in factors:
         trial = replace(ch, factors=tuple(f for f in ch.factors if f != name))
         size, s = dist.best_size(sa, goalie_sa_mean(c, trial))
         if s > sa_score:
@@ -342,9 +399,10 @@ def split_dates(dates: Iterable[str]) -> tuple[str, str, str, str] | None:
     return scored[0], test_start, ds[-1], ds[0]
 
 
-def evaluate(tables: dict[str, Table]) -> dict[str, Any]:
-    """Tune every stat on the early window, test on the late window, and decide what ships."""
-    report: dict[str, Any] = {"version": MODEL_VERSION, "stats": {}, "choices": {}}
+def evaluate(tables: dict[str, Table], version: str = MODEL_VERSION) -> dict[str, Any]:
+    """Tune every stat on the early window, test on the late window, and decide what could ship.
+    `version` limits the inputs the tuner may use (VERSIONS)."""
+    report: dict[str, Any] = {"version": version, "stats": {}, "choices": {}}
     sk = tables.get("skater")
     split = split_dates(sk.dates.tolist()) if sk is not None else None
     if split is None:
@@ -395,9 +453,9 @@ def evaluate(tables: dict[str, Table]) -> dict[str, Any]:
             ct, cv = _subset(c_all, tune_m), _subset(c_all, test_m)
             yt, yv = y_all[tune_m], y_all[test_m]
             if kind == "goalie":
-                ch, _ = _tune_goalie(ct, yt, c_all["y.sa"][tune_m], stat)
+                ch, _ = _tune_goalie(ct, yt, c_all["y.sa"][tune_m], stat, version)
             else:
-                ch, _ = _tune_skater(ct, yt, stat, shots_choice)
+                ch, _ = _tune_skater(ct, yt, stat, shots_choice, version)
                 if stat == "shots":
                     shots_choice = ch
             report["choices"][stat] = ch.to_json()
@@ -411,7 +469,15 @@ def evaluate(tables: dict[str, Table]) -> dict[str, Any]:
         def goals_fn(c: Cols) -> F:
             return skater_mean(c, gc, sc)
 
-    game_sim.evaluate(report, tables.get("game"), tables.get("skater"), goals_fn, scored_from, test_start)
+    game_sim.evaluate(
+        report,
+        tables.get("game"),
+        tables.get("skater"),
+        goals_fn,
+        scored_from,
+        test_start,
+        allowed(game_sim.GAME_FACTORS, version),
+    )
     return report
 
 

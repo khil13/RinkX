@@ -1,7 +1,12 @@
 """Model stage: test the models (daily), then project upcoming games (every run).
 
-* The walk-forward test (fit.evaluate) runs when the last one is older than EVAL_MAX_AGE or
-  the model version changed. Its report is stored in backtest_runs / model_versions.
+* The walk-forward test (fit.evaluate) runs for every model version this code can run
+  (fit.VERSIONS) when the last one is older than EVAL_MAX_AGE or history grew. Reports are
+  stored in backtest_runs / model_versions.
+* Each model family has one champion version, and only the champion is published. A newer
+  version that passes its test runs beside it as the challenger: its projections are kept in
+  challenger_projections and priced in the shadow, and rinkx.models.promotion promotes it only
+  once it beats the champion on graded props.
 * Only stats that passed their test are projected. Others are listed on the Models page
   with the reason, and nothing is shown for them.
 * Projections are immutable rows: a change inserts a new row that supersedes the old one,
@@ -23,7 +28,7 @@ import numpy as np
 from rinkx.ingestion.injuries import espn as injuries
 from rinkx.ingestion.runs import SourceSpec, ingestion_run, register_source
 from rinkx.models import dist, fit, game_sim, history
-from rinkx.models.fit import FAMILY, LABELS, MARKETS, MODEL_VERSION, Choice
+from rinkx.models.fit import BASE_VERSION, FAMILY, LABELS, MARKETS, MODEL_VERSION, VERSIONS, Choice
 from rinkx.models.game_sim import GameChoice
 from rinkx.models.state import HALF_LIVES, K_SV, State, basis_of, walk
 from rinkx.timeutil import iso, parse_iso
@@ -56,22 +61,65 @@ ALGORITHMS = {
 # ---- registry -------------------------------------------------------------------------------
 
 
-def _model_version_id(conn: sqlite3.Connection, family: str) -> int:
+def _model_version_id(conn: sqlite3.Connection, family: str, version: str = MODEL_VERSION) -> int:
     row = conn.execute(
-        "SELECT id FROM model_versions WHERE model_family = ? AND version = ?", (family, MODEL_VERSION)
+        "SELECT id FROM model_versions WHERE model_family = ? AND version = ?", (family, version)
     ).fetchone()
     if row:
         return int(row[0])
+    factors = sorted(fit.allowed(tuple(set(sum(fit.SKATER_FACTORS.values(), ()))), version))
     cur = conn.execute(
         "INSERT INTO model_versions (model_family, version, algorithm, feature_list) VALUES (?, ?, ?, ?)",
-        (family, MODEL_VERSION, ALGORITHMS[family], json.dumps(sorted(set(sum(fit.SKATER_FACTORS.values(), ()))))),
+        (family, version, ALGORITHMS[family], json.dumps(factors + sorted(VERSIONS[version]))),
     )
     return int(cur.lastrowid or 0)
 
 
+def champions(conn: sqlite3.Connection) -> dict[str, str]:
+    """family -> champion version (only versions this code can run)."""
+    return {
+        f: v
+        for f, v in conn.execute("SELECT model_family, version FROM model_versions WHERE status = 'champion'")
+        if v in VERSIONS
+    }
+
+
+def challengers(conn: sqlite3.Connection) -> dict[str, str]:
+    """family -> challenger version."""
+    return {
+        f: v
+        for f, v in conn.execute("SELECT model_family, version FROM model_versions WHERE status = 'challenger'")
+        if v in VERSIONS
+    }
+
+
+def _status_after_test(conn: sqlite3.Connection, family: str, version: str, passed: bool, current: str) -> str:
+    """A family with no champion takes the first version (oldest first) that passes its test.
+    After that, a newer version that passes is the challenger until live results decide; one
+    rejected by live results stays retired."""
+    champ = champions(conn).get(family)
+    order = list(VERSIONS)
+    if champ == version:
+        return "champion"
+    if champ is None:
+        if passed:
+            conn.execute(  # a champion this code can no longer run steps aside
+                "UPDATE model_versions SET status = 'retired' WHERE model_family = ? AND status = 'champion'",
+                (family,),
+            )
+            return "champion"
+        return "candidate"
+    if current == "retired":
+        return "retired"
+    if passed and order.index(version) > order.index(champ):
+        return "challenger"
+    return "candidate"
+
+
 def record_evaluation(conn: sqlite3.Connection, report: dict[str, Any], now: datetime) -> None:
+    version = report.get("version", MODEL_VERSION)
     for family in sorted(set(FAMILY.values())):
-        mv = _model_version_id(conn, family)
+        mv = _model_version_id(conn, family, version)
         stats = {s: e for s, e in report["stats"].items() if e["family"] == family}
         # The game model's shared settings are stored under "game" with the game_sim family.
         choices = {s: c for s, c in report["choices"].items() if s in stats or (s == "game" and family == "game_sim")}
@@ -100,40 +148,36 @@ def record_evaluation(conn: sqlite3.Connection, report: dict[str, Any], now: dat
                 iso(now),
             ),
         )
-        if passed:
-            conn.execute(
-                "UPDATE model_versions SET status = 'retired' WHERE model_family = ? AND status = 'champion' "
-                "AND id <> ?",
-                (family, mv),
-            )
+        current = conn.execute("SELECT status FROM model_versions WHERE id = ?", (mv,)).fetchone()[0]
+        status = _status_after_test(conn, family, version, passed, current)
         conn.execute(
             "UPDATE model_versions SET status = ?, hyperparams = ?, oos_metrics = ?, train_start = ?, train_end = ?, "
             "promoted_at = CASE WHEN ? AND status <> 'champion' THEN ? ELSE promoted_at END WHERE id = ?",
             (
-                "champion" if passed else "candidate",
+                status,
                 json.dumps(choices),
                 json.dumps(stats),
                 tune.get("from"),
                 tune.get("to_before"),
-                passed,
+                status == "champion",
                 iso(now),
                 mv,
             ),
         )
 
 
-def latest_report(conn: sqlite3.Connection) -> tuple[dict[str, Any] | None, str | None]:
-    """The most recent stored test of the current model version, merged across families."""
+def latest_report(conn: sqlite3.Connection, version: str = MODEL_VERSION) -> tuple[dict[str, Any] | None, str | None]:
+    """The most recent stored test of one model version, merged across families."""
     rows = conn.execute(
         "SELECT b.metrics, b.config, b.period_start, b.period_end, b.created_at FROM backtest_runs b "
         "JOIN model_versions m ON m.id = b.model_version_id WHERE m.version = ? AND b.created_at = ("
         "SELECT max(b2.created_at) FROM backtest_runs b2 JOIN model_versions m2 ON m2.id = b2.model_version_id "
         "WHERE m2.version = ?)",
-        (MODEL_VERSION, MODEL_VERSION),
+        (version, version),
     ).fetchall()
     if not rows:
         return None, None
-    report: dict[str, Any] = {"version": MODEL_VERSION, "stats": {}, "choices": {}}
+    report: dict[str, Any] = {"version": version, "stats": {}, "choices": {}}
     for r in rows:
         m, cfg = json.loads(r[0]), json.loads(r[1])
         report["status"] = m["status"]
@@ -144,6 +188,42 @@ def latest_report(conn: sqlite3.Connection) -> tuple[dict[str, Any] | None, str 
         report["n_games"] = cfg.get("n_games")
         report["test"] = {"from": r[2], "to": r[3]} if r[2] else None
     return report, rows[0][4]
+
+
+def published_report(conn: sqlite3.Connection) -> tuple[dict[str, Any] | None, str | None]:
+    """What the site publishes: each family's stats and settings from its champion's latest test
+    (the oldest version for a family with no champion yet). `versions` says which is which."""
+    champs = champions(conn)
+    reports = {v: latest_report(conn, v) for v in VERSIONS}
+    have = {v: r for v, r in reports.items() if r[0] is not None}
+    if not have:
+        return None, None
+    out: dict[str, Any] | None = None
+    created: str | None = None
+    versions: dict[str, str] = {}
+    for family in sorted(set(FAMILY.values())):
+        v = champs.get(family) or (BASE_VERSION if BASE_VERSION in have else next(iter(have)))
+        if v not in have:
+            continue
+        rep_v, at = have[v]
+        assert rep_v is not None
+        if out is None:
+            out = {k: val for k, val in rep_v.items() if k not in ("stats", "choices")} | {"stats": {}, "choices": {}}
+            created = at
+        versions[family] = v
+        for st, e in rep_v["stats"].items():
+            if e.get("family") == family:
+                out["stats"][st] = e
+                if st in rep_v["choices"]:
+                    out["choices"][st] = rep_v["choices"][st]
+        if family == "game_sim" and "game" in rep_v["choices"]:
+            out["choices"]["game"] = rep_v["choices"]["game"]
+        created = max(created or at or "", at or "") or None
+    if out is None:
+        return None, None
+    out["versions"] = versions
+    out["version"] = max(versions.values(), key=list(VERSIONS).index) if versions else BASE_VERSION
+    return out, created
 
 
 # ---- availability ---------------------------------------------------------------------------
@@ -237,6 +317,101 @@ def players_out(conn: sqlite3.Connection, game_id: int) -> dict[int, dict[str, A
     return out
 
 
+def played_day_before(conn: sqlite3.Connection, team: int, game_date: str) -> bool:
+    """Back-to-back: the team has a game (played or scheduled) the day before, from the schedule."""
+    prev = (date.fromisoformat(game_date) - timedelta(days=1)).isoformat()
+    return (
+        conn.execute(
+            "SELECT 1 FROM games WHERE game_date = ? AND (home_team_id = ? OR away_team_id = ?) "
+            "AND game_type IN ('R','O') AND status NOT IN ('cancelled','postponed') LIMIT 1",
+            (prev, team, team),
+        ).fetchone()
+        is not None
+    )
+
+
+@dataclass
+class Lineup:
+    """Quick Entry line changes for one team and game, merged oldest first. Per player, only what
+    an entry said: "unit", "pp" (None = off the power play) and "mates" (when linemates were given)."""
+
+    units: dict[int, dict[str, Any]]
+    source_ref: str | None
+    reported_at: str | None
+
+
+def confirmed_lineup(conn: sqlite3.Connection, game_id: int, team_id: int) -> Lineup | None:
+    snaps = conn.execute(
+        "SELECT id, source_ref, observed_at, pp_specified FROM lineup_snapshots WHERE game_id = ? AND team_id = ? "
+        "AND status IN ('confirmed','likely') ORDER BY observed_at, id",
+        (game_id, team_id),
+    ).fetchall()
+    if not snaps:
+        return None
+    units: dict[int, dict[str, Any]] = {}
+    for snap in snaps:
+        members: dict[str, list[int]] = {}
+        for unit, pid in conn.execute(
+            "SELECT unit, player_id FROM line_combinations WHERE snapshot_id = ?", (snap[0],)
+        ):
+            members.setdefault(unit, []).append(pid)
+        pp = dict(
+            conn.execute(
+                "SELECT player_id, CAST(substr(unit, 3) AS INTEGER) FROM powerplay_units WHERE snapshot_id = ? "
+                "AND unit IN ('PP1','PP2')",
+                (snap[0],),
+            ).fetchall()
+        )
+        for unit, pids in members.items():
+            for pid in pids:
+                e = units.setdefault(pid, {})
+                e["unit"] = unit if unit[0] in "FD" else None
+                others = tuple(sorted(m for m in pids if m != pid))
+                if others and unit[0] in "FD":
+                    e["mates"] = others
+                else:
+                    e.pop("mates", None)
+                if snap[3]:
+                    e["pp"] = pp.get(pid)
+        for pid, n in pp.items():
+            units.setdefault(pid, {})["pp"] = n
+    last = snaps[-1]
+    return Lineup(units, last[1], last[2])
+
+
+UNIT_TEXT = {
+    "F1": "the first line",
+    "F2": "the second line",
+    "F3": "the third line",
+    "F4": "the fourth line",
+    "D1": "the top pair",
+    "D2": "the second pair",
+    "D3": "the third pair",
+}
+
+
+def _deployment(st: State, pid: int, lineup: Lineup | None) -> tuple[str | None, int | None, tuple[int, ...]] | None:
+    """(unit, PP unit, linemates) for an upcoming game: his last game's, updated by any Quick Entry."""
+    sk = st.skaters.get(pid)
+    known = sk is not None and sk.unit_date is not None and sk.unit_date == sk.last_date
+    last: tuple[str | None, int | None, tuple[int, ...]] = (
+        (sk.unit, sk.pp_unit, sk.mates)
+        if sk and known
+        else (
+            None,
+            None,
+            (),
+        )
+    )
+    e = lineup.units.get(pid) if lineup is not None else None
+    if not e:
+        return last if known else None
+    unit = e.get("unit", last[0])
+    pp = e["pp"] if "pp" in e else last[1]
+    mates = e["mates"] if "mates" in e else (last[2] if unit == last[0] else ())
+    return unit, pp, mates
+
+
 # ---- explain --------------------------------------------------------------------------------
 
 
@@ -286,17 +461,26 @@ def explain_skater(f: dict[str, float], ch: Choice, shots: Choice | None, ctx: d
         reference = ref_sog * f["prior_finish"]
     else:
         basis = basis_of(stat)
-        eb = f[f"eb.{basis}.{i}"]
+        own_eb = f[f"eb.{basis}.{i}"]
+        eb = float(fit.expected_basis(c, stat, ch)[0])
         pos_b = f["pos_pp"] if basis == "pp" else f["pos_toi"]
         r = float(fit.rate(c, stat, i, ch.m)[0])
         prior = f[f"prior.{stat}"]
         own = f[f"b.{stat}.{i}"] / (f[f"b.{stat}.{i}"] + ch.m)
         what = "power-play time" if basis == "pp" else "ice time"
+        detail = f"Expected {_mmss(eb)} of {what} per game vs {_mmss(pos_b)} for an average {pos}."
+        slot_key, has_key = ("slot.pp", "slot.pphas") if basis == "pp" else ("slot.toi", "slot.has")
+        if ch.slot_w > 0 and f.get(has_key):
+            where = ctx.get("pp_text") if basis == "pp" else ctx.get("unit_text")
+            detail += (
+                f" His own record ({_mmss(own_eb)}) weighted {1 - ch.slot_w:.0%}, the usual {what} of "
+                f"{where or 'his current slot'} ({_mmss(f[slot_key])}) {ch.slot_w:.0%}."
+            )
         factors.append(
             {
                 "name": "Power-play time" if basis == "pp" else "Ice time",
                 "effect": eb / pos_b - 1 if pos_b else 0.0,
-                "detail": f"Expected {_mmss(eb)} of {what} per game vs {_mmss(pos_b)} for an average {pos}.",
+                "detail": detail,
             }
         )
         factors.append(
@@ -310,7 +494,7 @@ def explain_skater(f: dict[str, float], ch: Choice, shots: Choice | None, ctx: d
         reference = prior * pos_b
     for name in ch.factors:
         v = float(fit.factor(c, stat, name, ch)[0])
-        factors.append(_context_factor(name, v, stat, ctx))
+        factors.append(_context_factor(name, v, stat, ctx, f, ch))
     inputs = {
         "games_in_history": int(f["games"]),
         "half_life_games": HALF_LIVES[ch.hl],
@@ -318,9 +502,14 @@ def explain_skater(f: dict[str, float], ch: Choice, shots: Choice | None, ctx: d
         "prior_strength_unit": "shots" if ch.kind == "finish" else ("PP hours" if basis_of(stat) == "pp" else "hours"),
         "distribution": "Poisson" if math.isinf(ch.size) else f"Negative binomial (size {ch.size:g})",
         "reference_mean": round(reference, 5),
-        "expected_toi_s": round(f[f"eb.toi.{i}"] * 3600),
-        "expected_pp_toi_s": round(f[f"eb.pp.{i}"] * 3600),
+        "expected_toi_s": round(float(fit.expected_basis(c, "shots", ch)[0]) * 3600)
+        if basis_of(stat) == "toi"
+        else round(f[f"eb.toi.{i}"] * 3600),
+        "expected_pp_toi_s": round(float(fit.expected_basis(c, "pp_points", ch)[0]) * 3600),
     }
+    for key in ("line", "pp_unit", "linemates", "back_to_back", "opp_back_to_back"):
+        if ctx.get(key) is not None:
+            inputs[key] = ctx[key]
     return Explained(factors, inputs)
 
 
@@ -329,8 +518,37 @@ def _pct(v: float) -> str:
     return "0%" if pct == 0 else f"{pct:+d}%"
 
 
-def _context_factor(name: str, v: float, stat: str, ctx: dict[str, Any]) -> dict[str, Any]:
+def _rest_text(ctx: dict[str, Any], what: str, v: float) -> str:
+    who = [x for x, b in ((ctx["team"], ctx.get("back_to_back")), (ctx["opp"], ctx.get("opp_back_to_back"))) if b]
+    if not who:
+        return f"Neither team played yesterday: no back-to-back effect on {what}."
+    played = " and ".join(who) + (" both" if len(who) == 2 else "")
+    return f"{played} played yesterday. League-wide, {what} run {_pct(v)} in that situation (shrunk)."
+
+
+def _context_factor(
+    name: str, v: float, stat: str, ctx: dict[str, Any], f: dict[str, float] | None = None, ch: Choice | None = None
+) -> dict[str, Any]:
     label = LABELS[stat].lower()
+    if name == "rest":
+        return {"name": "Back-to-back", "effect": v - 1, "detail": _rest_text(ctx, label, v)}
+    if name == "mates":
+        now = (f or {}).get("mates.now", 1.0)
+        ratio = (f or {}).get(f"mates.{ch.hl if ch else 1}", 1.0)
+        if ratio == 1.0:
+            return {
+                "name": "Linemates",
+                "effect": v - 1,
+                "detail": "No change from his usual linemates (or no line data).",
+            }
+        usual = now / ratio if ratio else now
+        mates = ", ".join(ctx.get("linemates") or []) or "his current linemates"
+        return {
+            "name": "Linemates",
+            "effect": v - 1,
+            "detail": f"{mates} score at {now:.0%} of the league rate for their position, vs {usual:.0%} for "
+            f"his usual linemates; weighted to {_pct(v)} on his {label}.",
+        }
     if name == "opp":
         return {
             "name": "Opponent",
@@ -374,7 +592,7 @@ def explain_goalie(f: dict[str, float], ch: Choice, ctx: dict[str, Any]) -> Expl
     mu = float(fit.goalie_sa_mean(c, ch)[0])
     factors: list[dict[str, Any]] = []
     for name in ch.factors:
-        v = f[name]
+        v = f["rest_sa" if name == "rest" else name]
         if name == "fd":
             factors.append(
                 {
@@ -391,6 +609,8 @@ def explain_goalie(f: dict[str, float], ch: Choice, ctx: dict[str, Any]) -> Expl
                     "detail": f"League-wide, teams take {_pct(v)} shots in playoff games vs the regular season.",
                 }
             )
+        elif name == "rest":
+            factors.append({"name": "Back-to-back", "effect": v - 1, "detail": _rest_text(ctx, "shots against", v)})
         else:
             factors.append(
                 {
@@ -465,6 +685,11 @@ def env_factors(gf: dict[str, float], ch: GameChoice, side: str, team: str, opp:
                 "detail": f"League-wide, scoring runs {_pct(v)} {'at home' if home else 'on the road'}.",
             }
         )
+    if "rest" in ch.factors:
+        v = gf[f"{side}.rest"]
+        other = "a" if side == "h" else "h"
+        rctx = {"team": team, "opp": opp, "back_to_back": gf[f"{side}.b2b"], "opp_back_to_back": gf[f"{other}.b2b"]}
+        f.append({"name": "Back-to-back", "effect": v - 1, "detail": _rest_text(rctx, "goals", v)})
     return Explained(f, {"reference_mean": round(reference, 5)})
 
 
@@ -546,6 +771,8 @@ def project_game(
         for pid, _ in mx.mix:
             names[pid] = conn.execute("SELECT full_name FROM players WHERE id = ?", (pid,)).fetchone()[0]
     arena = None if g["is_neutral_site"] else g["home_team_id"]
+    b2b = {t: played_day_before(conn, t, g["game_date"]) for t in teams}
+    lineups = {t: confirmed_lineup(conn, g["id"], t) for t in teams}
     projections: list[Projection] = []
     game_projs: list[GameProjection] = []
     env: game_sim.Outcomes | None = None
@@ -554,7 +781,7 @@ def project_game(
     if game_passed and "game" in report["choices"]:
         gch = GameChoice.from_json(report["choices"]["game"])
         gf = st.game_features(
-            g["home_team_id"], g["away_team_id"], {t: m.mix for t, m in mixes.items()}, g["season_id"]
+            g["home_team_id"], g["away_team_id"], {t: m.mix for t, m in mixes.items()}, g["season_id"], b2b
         ) | {"playoff": float(g["game_type"] == "O")}
         env = game_sim.outcomes(_one(gf), gch)
     for team, home in teams.items():
@@ -574,6 +801,8 @@ def project_game(
             "home": home,
             "arena": g["venue_name"],
             "goalie_text": goalie_text,
+            "back_to_back": b2b[team],
+            "opp_back_to_back": b2b[opp],
         }
         missing_common = ["lineup_unconfirmed", "odds_not_connected"]
         if not report_fresh:
@@ -589,8 +818,31 @@ def project_game(
                 continue  # ruled out, or no NHL history to project from
             pos = history.pos_group(position)
             player_missing = missing_common + (["injury_day_to_day"] if pid in day_to_day else [])
-            f = st.skater_features(pid, pos, team, opp, home, arena, opp_mix.mix, g["season_id"], g["game_type"] == "O")
+            dep = _deployment(st, pid, lineups[team])
+            f = st.skater_features(
+                pid,
+                pos,
+                team,
+                opp,
+                home,
+                arena,
+                opp_mix.mix,
+                g["season_id"],
+                g["game_type"] == "O",
+                b2b[team],
+                b2b[opp],
+                dep if dep is not None else (None, None, ()),
+            )
             ctx = ctx_base | {"pos": "defenceman" if pos == "D" else "forward"}
+            if dep is not None:
+                unit, pp_unit, mates = dep
+                ctx |= {
+                    "line": unit,
+                    "pp_unit": pp_unit,
+                    "linemates": [_name(conn, m) for m in mates],
+                    "unit_text": f"{abbrev[team]}'s {UNIT_TEXT[unit][4:]}" if unit in UNIT_TEXT else None,
+                    "pp_text": f"{abbrev[team]}'s PP{pp_unit}" if pp_unit else f"{abbrev[team]}'s non-PP skaters",
+                }
             if env is not None and gch is not None and "first_goal" in game_passed and goals_ch is not None:
                 side = "h" if home else "a"
                 lam_t = float((env.lam_h if home else env.lam_a)[0])
@@ -662,7 +914,7 @@ def project_game(
         if mine.mix:
             gid, prob = mine.mix[0]
             if gid not in out:
-                f = st.goalie_features(gid, team, opp, g["season_id"], g["game_type"] == "O")
+                f = st.goalie_features(gid, team, opp, g["season_id"], g["game_type"] == "O", b2b[team], b2b[opp])
                 for stat, ch in choices.items():
                     if ch.kind != "goalie":
                         continue
@@ -805,10 +1057,23 @@ def project_game(
     return projections, game_projs
 
 
-def save(conn: sqlite3.Connection, game_id: int, proj: Projection, as_of: str, reason: str, now: datetime) -> bool:
+def _name(conn: sqlite3.Connection, pid: int) -> str:
+    row = conn.execute("SELECT full_name FROM players WHERE id = ?", (pid,)).fetchone()
+    return str(row[0]) if row else str(pid)
+
+
+def save(
+    conn: sqlite3.Connection,
+    game_id: int,
+    proj: Projection,
+    as_of: str,
+    reason: str,
+    now: datetime,
+    version: str = MODEL_VERSION,
+) -> bool:
     """Insert if new or changed (superseding the current row). Returns True if a row was written."""
     market_id = conn.execute("SELECT id FROM markets WHERE code = ?", (proj.market,)).fetchone()[0]
-    mv = _model_version_id(conn, FAMILY[proj.stat])
+    mv = _model_version_id(conn, FAMILY[proj.stat], version)
     pmf_text = json.dumps({"min": 0, "p": proj.pmf}, separators=(",", ":"))
     cur = conn.execute(
         "SELECT id, pmf, inputs FROM player_projections WHERE game_id = ? AND player_id = ? AND market_id = ? "
@@ -850,7 +1115,13 @@ def save(conn: sqlite3.Connection, game_id: int, proj: Projection, as_of: str, r
 
 
 def save_game(
-    conn: sqlite3.Connection, game_id: int, gp: GameProjection, as_of: str, reason: str, now: datetime
+    conn: sqlite3.Connection,
+    game_id: int,
+    gp: GameProjection,
+    as_of: str,
+    reason: str,
+    now: datetime,
+    version: str = MODEL_VERSION,
 ) -> bool:
     market_id = conn.execute("SELECT id FROM markets WHERE code = ?", (gp.market,)).fetchone()[0]
     pmf_text = json.dumps({"min": 0, "p": gp.pmf}, separators=(",", ":"))
@@ -871,7 +1142,7 @@ def save_game(
             game_id,
             market_id,
             gp.side,
-            _model_version_id(conn, "game_sim"),
+            _model_version_id(conn, "game_sim", version),
             iso(now),
             as_of,
             round(gp.mean, 4),
@@ -893,19 +1164,73 @@ def _upcoming(conn: sqlite3.Connection, now: datetime, today: date) -> list[sqli
     ).fetchall()
 
 
+def save_challenger(
+    conn: sqlite3.Connection,
+    game_id: int,
+    market: str,
+    player: int | None,
+    side: str,
+    mean: float,
+    pmf: list[float],
+    family: str,
+    version: str,
+    now: datetime,
+) -> None:
+    market_id = conn.execute("SELECT id FROM markets WHERE code = ?", (market,)).fetchone()[0]
+    conn.execute(
+        "INSERT INTO challenger_projections (game_id, player_id, side, market_id, model_version_id, mean, pmf, "
+        "computed_at) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT (game_id, coalesce(player_id, 0), side, market_id, "
+        "model_version_id) DO UPDATE SET mean = excluded.mean, pmf = excluded.pmf, computed_at = excluded.computed_at",
+        (
+            game_id,
+            player,
+            side,
+            market_id,
+            _model_version_id(conn, family, version),
+            round(mean, 4),
+            json.dumps({"min": 0, "p": pmf}, separators=(",", ":")),
+            iso(now),
+        ),
+    )
+
+
 def project_upcoming(
     conn: sqlite3.Connection,
     st: State,
-    report: dict[str, Any],
+    reports: dict[str, dict[str, Any]],
     now: datetime,
     today: date,
     as_of: str,
     reasons: dict[int, str],
 ) -> tuple[int, int]:
-    """Returns (projections written, games projected)."""
+    """Project every tested version; publish each family's champion, keep each challenger's on the
+    side. Returns (published projections written, games projected)."""
     written = games = 0
-    for g in _upcoming(conn, now, today):
-        projs, game_projs = project_game(conn, st, report, g)
+    champs, chals = champions(conn), challengers(conn)
+    for v in reports:  # a family with no champion yet publishes the first version that has a report
+        for fam in set(FAMILY.values()):
+            champs.setdefault(fam, v)
+    upcoming = _upcoming(conn, now, today)
+    conn.execute(
+        "DELETE FROM challenger_projections WHERE game_id NOT IN (SELECT id FROM games WHERE status IN "
+        "('scheduled','pregame'))"
+    )
+    for g in upcoming:
+        projs: list[Projection] = []
+        game_projs: list[GameProjection] = []
+        conn.execute("DELETE FROM challenger_projections WHERE game_id = ?", (g["id"],))
+        for v, report in reports.items():
+            p_v, gp_v = project_game(conn, st, report, g)
+            projs += [p for p in p_v if champs.get(FAMILY[p.stat]) == v]
+            if champs.get("game_sim") == v:
+                game_projs += gp_v
+            for p in p_v:
+                fam = FAMILY[p.stat]
+                if chals.get(fam) == v:
+                    save_challenger(conn, g["id"], p.market, p.player, "", p.mean, p.pmf, fam, v, now)
+            if chals.get("game_sim") == v:
+                for gp in gp_v:
+                    save_challenger(conn, g["id"], gp.market, None, gp.side, gp.mean, gp.pmf, "game_sim", v, now)
         games += 1
         keep_game = {(gp.market, gp.side) for gp in game_projs}
         for mcode, side in conn.execute(
@@ -920,7 +1245,7 @@ def project_upcoming(
                     (g["id"], side, mcode),
                 )
         for gp in game_projs:
-            written += save_game(conn, g["id"], gp, as_of, reasons.get(g["id"], "scheduled"), now)
+            written += save_game(conn, g["id"], gp, as_of, reasons.get(g["id"], "scheduled"), now, champs["game_sim"])
         keep = {(p.player, p.market) for p in projs}
         # A player ruled out (or a market that stopped passing its test) loses its current projection.
         for pid, mcode in conn.execute(
@@ -935,7 +1260,7 @@ def project_upcoming(
                     (g["id"], pid, mcode),
                 )
         for p in projs:
-            written += save(conn, g["id"], p, as_of, reasons.get(g["id"], "scheduled"), now)
+            written += save(conn, g["id"], p, as_of, reasons.get(g["id"], "scheduled"), now, champs[FAMILY[p.stat]])
     return written, games
 
 
@@ -961,13 +1286,16 @@ EVAL_GROWTH = 1.10  # re-test early once completed games grow by 10% (e.g. durin
 
 
 def _needs_evaluation(conn: sqlite3.Connection, now: datetime, n_games: int) -> bool:
-    report, created = latest_report(conn)
-    if report is None or created is None or now - parse_iso(created) >= EVAL_MAX_AGE:
-        return True
-    tested = int(report.get("n_games") or 0)
-    if report.get("status") != "ok" and n_games > tested:
-        return True  # it couldn't test before; more history has arrived since
-    return n_games >= tested * EVAL_GROWTH
+    for version in VERSIONS:
+        report, created = latest_report(conn, version)
+        if report is None or created is None or now - parse_iso(created) >= EVAL_MAX_AGE:
+            return True
+        tested = int(report.get("n_games") or 0)
+        if report.get("status") != "ok" and n_games > tested:
+            return True  # it couldn't test before; more history has arrived since
+        if n_games >= tested * EVAL_GROWTH:
+            return True
+    return False
 
 
 def run_models(
@@ -987,23 +1315,26 @@ def run_models(
         with ingestion_run(conn, src, "models.evaluate") as run:
             tables = fit.collect(walk(games, st))
             learned = True
-            report = fit.evaluate(tables)
-            report["n_games"] = len(games)
-            record_evaluation(conn, report, now)
+            for version in VERSIONS:  # oldest first: a family with no champion takes the first that passes
+                report = fit.evaluate(tables, version)
+                report["n_games"] = len(games)
+                record_evaluation(conn, report, now)
+                run.meta[f"passed.{version}"] = sorted(s for s, e in report["stats"].items() if e.get("passed"))
+                run.meta["status"] = report["status"]
             run.rows_read = sum(len(t) for t in tables.values())
-            run.meta["passed"] = sorted(s for s, e in report["stats"].items() if e.get("passed"))
-            run.meta["status"] = report["status"]
     if not learned:  # no test this run, or it failed part-way: learn from all games now
         st = State()
         for _ in walk(games, st, emit=False):
             pass
-    stored, _ = latest_report(conn)
+    stored = {v: r for v in VERSIONS if (r := latest_report(conn, v)[0]) is not None and r.get("status") == "ok"}
     with ingestion_run(conn, src, "models.project") as run:
-        if stored is None or stored.get("status") != "ok":
+        if not stored:
             run.meta["skipped"] = "no tested model yet (not enough completed games)"
             return
         as_of = max((g.start for g in games), default=iso(now))
         written, n_games = project_upcoming(conn, st, stored, now, today, as_of, reasons or {})
+        run.meta["champions"] = champions(conn)
+        run.meta["challengers"] = challengers(conn)
         run.rows_upserted = written
         run.meta["games"] = n_games
         run.meta["pruned"] = prune(conn, today)

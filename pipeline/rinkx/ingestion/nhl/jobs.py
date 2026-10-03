@@ -2,7 +2,7 @@
 stops the others, and failures show up as failed/partial feeds on the site.
 
 Per-run budget (hourly): ~6 schedule/standings calls; up to BOXSCORE_LIMIT box scores and as
-many play-by-plays; stats-API reports for a few dates (4 reports x ~5 pages each); once a day
+many play-by-plays and shift charts; stats-API reports for a few dates (4 reports x ~5 pages each); once a day
 32 roster calls; once per season a ~30-call schedule walk. Work is ordered current season
 first, then the previous season (backfill), so recent data is never starved by history.
 """
@@ -16,7 +16,7 @@ from datetime import date, datetime, timedelta
 
 from rinkx.ingestion import context
 from rinkx.ingestion.http import Fetcher, FetchError
-from rinkx.ingestion.nhl import parse, store, urls
+from rinkx.ingestion.nhl import lines, parse, store, urls
 from rinkx.ingestion.runs import SourceSpec, ingestion_run, last_success, register_source, source_enabled
 from rinkx.timeutil import iso, parse_iso, slate_date, utcnow
 
@@ -140,6 +140,7 @@ def run_nhl(conn: sqlite3.Connection, fetcher: Fetcher, now: datetime, opts: Nhl
     if seasons:
         _sync_boxscores(conn, fetcher, stats_src, seasons, opts.boxscore_limit, today)
         _sync_play_by_play(conn, fetcher, stats_src, seasons, opts.boxscore_limit)
+        _sync_shift_charts(conn, fetcher, stats_api, seasons, opts.boxscore_limit)
         _sync_game_reports(conn, fetcher, stats_api, seasons, opts.report_date_limit)
         with ingestion_run(conn, sched, "nhl.context") as st:
             st.rows_upserted = sum(context.recompute_context(conn, s_id) for s_id in seasons)
@@ -245,12 +246,14 @@ def _ensure_players(
 def _sync_play_by_play(
     conn: sqlite3.Connection, fetcher: Fetcher, source_id: int, seasons: tuple[int, ...], limit: int
 ) -> None:
-    """Shot events and primary/secondary assists, for games whose box score is loaded."""
+    """Shot events, who assisted each goal, and primary/secondary assist totals, for games whose box
+    score is loaded. Games read before goal assists were stored (pbp_version 1) are read again."""
     pending = conn.execute(
         f"""SELECT g.id, g.nhl_game_id FROM games g
            WHERE g.season_id IN ({_seasons_sql(seasons)}) AND g.status = 'final'
              AND EXISTS (SELECT 1 FROM team_game_stats t WHERE t.game_id = g.id)
-             AND NOT EXISTS (SELECT 1 FROM game_enrichment e WHERE e.game_id = g.id AND e.pbp_at IS NOT NULL)
+             AND NOT EXISTS (SELECT 1 FROM game_enrichment e WHERE e.game_id = g.id AND e.pbp_at IS NOT NULL
+                             AND e.pbp_version >= 2)
            ORDER BY g.season_id = ? DESC, g.start_time_utc DESC LIMIT ?""",
         (seasons[0], limit),
     ).fetchall()
@@ -268,6 +271,37 @@ def _sync_play_by_play(
             except (FetchError, parse.ParseError, KeyError) as exc:
                 conn.rollback()
                 st.errors.append(f"game {nhl_game_id}: {exc}")
+        st.http_calls = fetcher.calls - calls0
+
+
+def _sync_shift_charts(
+    conn: sqlite3.Connection, fetcher: Fetcher, source_id: int, seasons: tuple[int, ...], limit: int
+) -> None:
+    """Line combinations and PP units, derived from each finished game's shift chart."""
+    pending = conn.execute(
+        f"""SELECT g.id, g.nhl_game_id FROM games g
+           WHERE g.season_id IN ({_seasons_sql(seasons)}) AND g.status = 'final'
+             AND EXISTS (SELECT 1 FROM team_game_stats t WHERE t.game_id = g.id)
+             AND NOT EXISTS (SELECT 1 FROM game_enrichment e WHERE e.game_id = g.id AND e.shifts_at IS NOT NULL)
+           ORDER BY g.season_id = ? DESC, g.start_time_utc DESC LIMIT ?""",
+        (seasons[0], limit),
+    ).fetchall()
+    calls0 = fetcher.calls
+    with ingestion_run(conn, source_id, "nhl.shift_charts") as st:
+        st.meta["pending"] = len(pending)
+        empty = 0
+        for game_id, nhl_game_id in pending:
+            url = urls.shift_chart(nhl_game_id)
+            try:
+                chart = lines.parse_shift_chart(fetcher.get_json(url), nhl_game_id)
+                empty += not chart.shifts  # the NHL has no chart for this game; recorded so it isn't re-asked
+                st.rows_upserted += lines.write_lines(conn, game_id, chart, source_id, iso(utcnow()), url)
+                st.rows_read += 1
+                conn.commit()
+            except (FetchError, parse.ParseError, KeyError) as exc:
+                conn.rollback()
+                st.errors.append(f"game {nhl_game_id}: {exc}")
+        st.meta["no_chart"] = empty
         st.http_calls = fetcher.calls - calls0
 
 

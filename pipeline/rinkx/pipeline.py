@@ -23,6 +23,7 @@ from rinkx.ingestion.odds.client import OddsClient, UrllibTransport
 from rinkx.ingestion.odds.jobs import run_odds
 from rinkx.ingestion.runs import SourceSpec, ingestion_run, register_source
 from rinkx.models.project import run_models
+from rinkx.models.promotion import run_promotion
 from rinkx.pricing.price import run_pricing
 from rinkx.publish.build import build_bundle, missing_setup
 from rinkx.publish.schemas import Manifest
@@ -182,6 +183,7 @@ def _run_stages(
     run_models(conn, now, today, qe.reasons if qe else None)
     run_pricing(conn, now)  # model vs market for every open line with a current projection
     run_grading(conn, now, today)  # settle predictions for finished games
+    run_promotion(conn, now)  # a challenger model that beat the champion on graded props takes over
     run_calibration(conn, now)  # live isotonic calibrators for the next pricing run
     run_correlations(conn, now)  # parlay correlations, re-estimated at most every 20 h
     if send is None and settings.ntfy_topic:

@@ -15,6 +15,7 @@ from __future__ import annotations
 from collections import defaultdict, deque
 from collections.abc import Iterator
 from dataclasses import dataclass, field
+from datetime import date as date_cls
 
 from rinkx.models.history import GOALIE_STATS, SKATER_STATS, GameRecord, GoalieLine, SkaterLine, by_date
 
@@ -35,6 +36,12 @@ FIN_C: tuple[float, ...] = (150.0, 500.0, 1500.0)  # team finishing %: prior str
 EVEN_PRIOR = 10.0  # OT/shootout splits: shrink toward 50/50 by this many games
 PLAYOFF_K_H = 200.0  # playoff factor: shrink toward "no effect" by this many skater-hours
 PLAYOFF_K_GAMES = 40.0  # ...and by this many team-games for team shot volume
+REST_K_H = 200.0  # back-to-back factors: shrink toward "no effect" by this many skater-hours
+REST_K_GAMES = 40.0  # ...and by this many team-games for team shots and goals
+TEAM_REST_STATS = ("shots", "goals")
+SLOT_C = 5.0  # a team's ice time for a line slot: shrink toward the league's by this many games
+MQ_M = 4.0  # linemate quality: a mate's points rate shrunk toward his position's by this many hours
+MATES_CLIP = (0.5, 2.0)
 
 
 def basis_of(stat: str) -> str:
@@ -63,6 +70,14 @@ class SkaterState:
     recent: dict[str, deque[float]] = field(default_factory=lambda: {s: deque(maxlen=10) for s in SKATER_STATS})
     last_date: str | None = None
     last_team: int | None = None
+    pos: str = "F"
+    # deployment in his most recent game with line data (shift charts)
+    unit: str | None = None
+    pp_unit: int | None = None
+    mates: tuple[int, ...] = ()
+    unit_date: str | None = None
+    mq: list[float] = field(default_factory=_zeros)  # decayed linemate quality, per game with linemates
+    mqn: list[float] = field(default_factory=_zeros)
 
 
 @dataclass
@@ -99,6 +114,10 @@ class TeamState:
     road_tot: dict[str, float] = field(default_factory=lambda: dict.fromkeys(VENUE_STATS, 0.0))
     record: dict[int, list[float]] = field(default_factory=dict)  # season -> [games, wins, goals]
     recent_goals: deque[float] = field(default_factory=lambda: deque(maxlen=10))
+    last_date: str | None = None  # last game played (for rest days)
+    # decayed ice time by line slot (F1..D3) and by PP unit (PP1, PP2, PP0 = neither): [hours, games]
+    slot: dict[str, list[float]] = field(default_factory=dict)
+    pp_slot: dict[str, list[float]] = field(default_factory=dict)
 
 
 @dataclass
@@ -111,6 +130,15 @@ class League:
     # playoff vs regular-season rates, all positions: [x_playoff, b_playoff, x_regular, b_regular]
     po: dict[str, list[float]] = field(default_factory=lambda: {s: [0.0] * 4 for s in SKATER_STATS})
     po_shots: list[float] = field(default_factory=lambda: [0.0] * 4)  # team shots: [po_sum, po_n, reg_sum, reg_n]
+    # back-to-back vs rested, all positions, by the player's own team and by the opponent:
+    # [x_b2b, b_b2b, x_rested, b_rested]
+    b2b: dict[str, list[float]] = field(default_factory=lambda: {s: [0.0] * 4 for s in SKATER_STATS})
+    opp_b2b: dict[str, list[float]] = field(default_factory=lambda: {s: [0.0] * 4 for s in SKATER_STATS})
+    # team shots and goals per game: [sum_b2b, n_b2b, sum_rested, n_rested], by own team / opponent on a B2B
+    team_b2b: dict[str, list[float]] = field(default_factory=lambda: {s: [0.0] * 4 for s in TEAM_REST_STATS})
+    team_opp_b2b: dict[str, list[float]] = field(default_factory=lambda: {s: [0.0] * 4 for s in TEAM_REST_STATS})
+    slot: dict[str, list[float]] = field(default_factory=dict)  # line slot -> [hours, games]
+    pp_slot: dict[str, list[float]] = field(default_factory=dict)
     saves: float = 0.0
     sa: float = 0.0
     starter_sa: float = 0.0
@@ -211,6 +239,59 @@ class State:
         reg = reg_sum / reg_n
         return ((po_sum + PLAYOFF_K_GAMES * reg) / (po_n + PLAYOFF_K_GAMES)) / reg
 
+    @staticmethod
+    def _ratio(acc: list[float], k: float, b2b: bool) -> float:
+        """Rate on a back-to-back (or rested) night relative to all nights, shrunk toward no effect.
+        Relative to all nights because a player's own rate already mixes both."""
+        x_b, n_b, x_r, n_r = acc
+        if not (n_b + n_r) or not (x_b + x_r):
+            return 1.0
+        overall = (x_b + x_r) / (n_b + n_r)
+        x, n = (x_b, n_b) if b2b else (x_r, n_r)
+        return ((x + k * overall) / (n + k)) / overall
+
+    def rest_factor(self, stat: str, own_b2b: bool, opp_b2b: bool) -> float:
+        """A skater stat's rate given whether his team, and the opponent, played the day before
+        (league-wide, shrunk)."""
+        lg = self.league
+        return self._ratio(lg.b2b[stat], REST_K_H, own_b2b) * self._ratio(lg.opp_b2b[stat], REST_K_H, opp_b2b)
+
+    def team_rest_factor(self, stat: str, own_b2b: bool, opp_b2b: bool) -> float:
+        """A team's shots or goals for given whether it, and its opponent, played the day before."""
+        lg = self.league
+        return self._ratio(lg.team_b2b[stat], REST_K_GAMES, own_b2b) * self._ratio(
+            lg.team_opp_b2b[stat], REST_K_GAMES, opp_b2b
+        )
+
+    def back_to_back(self, team: int, date: str) -> bool:
+        """Whether `team`'s last game (as learned so far) was the day before `date`."""
+        t = self.teams.get(team)
+        return t is not None and t.last_date is not None and _days(t.last_date, date) == 1
+
+    def slot_hours(self, team: int, key: str, pp: bool) -> float | None:
+        """Usual ice time (hours) of a line slot or PP unit on this team, shrunk to the league's."""
+        lg = (self.league.pp_slot if pp else self.league.slot).get(key)
+        if not lg or not lg[1]:
+            return None
+        avg = lg[0] / lg[1]
+        t = self.teams.get(team)
+        own = (t.pp_slot if pp else t.slot).get(key) if t else None
+        s, n = own if own else (0.0, 0.0)
+        return (s + SLOT_C * avg) / (n + SLOT_C)
+
+    def mate_quality(self, player: int) -> float:
+        """A player's points rate relative to his position's (shrunk): 1.0 = average."""
+        st = self.skaters.get(player)
+        if st is None:
+            return 1.0
+        prior = self.prior_rate(st.pos, "points")
+        if prior <= 0:
+            return 1.0
+        return ((st.x["points"][1] + MQ_M * prior) / (st.b["points"][1] + MQ_M)) / prior
+
+    def mates_quality(self, mates: tuple[int, ...]) -> float | None:
+        return sum(self.mate_quality(m) for m in mates) / len(mates) if mates else None
+
     def venue_factor(self, arena_team: int | None, stat: str) -> float:
         """Arena scorekeeping: totals in this team's home games vs. its road games, both shrunk."""
         if arena_team is None or stat not in VENUE_STATS:
@@ -258,7 +339,12 @@ class State:
         opp_goalies: list[tuple[int, float]],
         season: int,
         playoff: bool = False,
+        own_b2b: bool = False,
+        opp_b2b: bool = False,
+        lineup: tuple[str | None, int | None, tuple[int, ...]] | None = None,
     ) -> dict[str, float]:
+        """`lineup` (unit, PP unit, linemates) overrides his deployment from the last game, e.g. a
+        Quick Entry line change."""
         st = self.skaters.get(player) or SkaterState()
         f: dict[str, float] = {"games": float(st.games)}
         toi_avg = self.pos_basis_h(pos, "toi")
@@ -278,6 +364,7 @@ class State:
             f[f"home.{s}"] = self.home_factor(s, home)
             f[f"venue.{s}"] = self.venue_factor(arena_team, s)
             f[f"po.{s}"] = self.playoff_factor(s, playoff)
+            f[f"rest.{s}"] = self.rest_factor(s, own_b2b, opp_b2b)
             f[f"opp.{s}"] = self.team_factor(opp, s, "against")
             # Baselines (what a simple method would say): season average and last-10 average.
             fallback = prior * (pp_avg if basis_of(s) == "pp" else toi_avg)
@@ -289,9 +376,44 @@ class State:
         f["prior_finish"] = self.prior_finish(pos)
         for j, k in enumerate(K_SV):
             f[f"gf.{j}"] = self.goalie_factor(opp_goalies, k)
+        f |= self._lineup_features(st, team, lineup)
         return f
 
-    def goalie_features(self, goalie: int, team: int, opp: int, season: int, playoff: bool = False) -> dict[str, float]:
+    def _lineup_features(
+        self, st: SkaterState, team: int, lineup: tuple[str | None, int | None, tuple[int, ...]] | None
+    ) -> dict[str, float]:
+        f = {"slot.has": 0.0, "slot.toi": 0.0, "slot.pphas": 0.0, "slot.pp": 0.0}
+        if lineup is not None:
+            unit, pp_unit, mates = lineup
+        elif st.unit_date is not None and st.unit_date == st.last_date:
+            unit, pp_unit, mates = st.unit, st.pp_unit, st.mates
+        else:  # no line data for his latest game: nothing to go on
+            unit, pp_unit, mates = None, None, ()
+        if unit is not None:
+            h = self.slot_hours(team, unit, pp=False)
+            if h is not None:
+                f["slot.has"], f["slot.toi"] = 1.0, h
+            h = self.slot_hours(team, f"PP{pp_unit or 0}", pp=True)
+            if h is not None:
+                f["slot.pphas"], f["slot.pp"] = 1.0, h
+        q_now = self.mates_quality(mates)
+        lo, hi = MATES_CLIP
+        for i in range(H):
+            usual = st.mq[i] / st.mqn[i] if st.mqn[i] > 0 else None
+            f[f"mates.{i}"] = 1.0 if q_now is None or not usual else min(max(q_now / usual, lo), hi)
+        f["mates.now"] = q_now if q_now is not None else 1.0
+        return f
+
+    def goalie_features(
+        self,
+        goalie: int,
+        team: int,
+        opp: int,
+        season: int,
+        playoff: bool = False,
+        own_b2b: bool = False,
+        opp_b2b: bool = False,
+    ) -> dict[str, float]:
         g = self.goalies.get(goalie) or GoalieState()
         lg = self.league
         f: dict[str, float] = {"starts": float(g.starts), "sa_seen": g.sa}
@@ -300,6 +422,8 @@ class State:
         f["fd"] = self.team_factor(team, "shots", "against")  # own team's shots allowed
         f["fo"] = self.team_factor(opp, "shots", "for")  # opponent's shot volume
         f["po"] = self.playoff_shots_factor(playoff)
+        # shots against = the opponent's shots for: the opponent is "own" from its side
+        f["rest_sa"] = self.team_rest_factor("shots", opp_b2b, own_b2b)
         for j, k in enumerate(K_SV):
             f[f"sv.{j}"] = self.goalie_sv(goalie, k)
         sv_l = f["league_sv"]
@@ -319,7 +443,15 @@ class State:
         return lg.team_tot["goals"] / lg.team_tot["shots"] if lg.team_tot["shots"] else 0.0
 
     def team_features(
-        self, team: int, opp: int, home: bool, opp_goalies: list[tuple[int, float]], season: int, p: str
+        self,
+        team: int,
+        opp: int,
+        home: bool,
+        opp_goalies: list[tuple[int, float]],
+        season: int,
+        p: str,
+        own_b2b: bool = False,
+        opp_b2b: bool = False,
     ) -> dict[str, float]:
         """Expected-goal ingredients for `team` against `opp` (prefix p = 'h' or 'a')."""
         f: dict[str, float] = {}
@@ -336,6 +468,8 @@ class State:
         for j, k in enumerate(K_SV):
             f[f"{p}.gf.{j}"] = self.goalie_factor(opp_goalies, k)
         f[f"{p}.home"] = self.home_factor("goals", home)
+        f[f"{p}.rest"] = self.team_rest_factor("goals", own_b2b, opp_b2b)
+        f[f"{p}.b2b"] = float(own_b2b)
         rec = t.record.get(season) if t else None
         prev = t.record.get(season - 10001) if t else None
         league_goals = self.team_avg("goals")
@@ -363,10 +497,13 @@ class State:
         away: int,
         mixes: dict[int, list[tuple[int, float]]],
         season: int,
+        b2b: dict[int, bool] | None = None,
     ) -> dict[str, float]:
         lg = self.league
-        f = self.team_features(home, away, True, mixes.get(away, []), season, "h")
-        f |= self.team_features(away, home, False, mixes.get(home, []), season, "a")
+        b = b2b or {}
+        hb, ab = b.get(home, False), b.get(away, False)
+        f = self.team_features(home, away, True, mixes.get(away, []), season, "h", hb, ab)
+        f |= self.team_features(away, home, False, mixes.get(home, []), season, "a", ab, hb)
         f["gL"] = self.goals_per_shot()
         f["ot_q"] = (lg.ended_ot + EVEN_PRIOR * 0.5) / (lg.tied_reg + EVEN_PRIOR)
         so_games = lg.tied_reg - lg.ended_ot
@@ -381,16 +518,43 @@ class State:
 
     # ---- learning ------------------------------------------------------------------------
 
-    def _learn_skater(self, line: SkaterLine, season: int, date: str, playoff: bool = False) -> None:
+    def _learn_skater(
+        self,
+        line: SkaterLine,
+        season: int,
+        date: str,
+        playoff: bool = False,
+        b2b: dict[int, bool] | None = None,
+        has_lines: bool = False,
+        mq: float | None = None,
+    ) -> None:
         st = self.skaters[line.player]
         st.games += 1
         st.last_date = date
         st.last_team = line.team
+        st.pos = line.pos
         for vec in (st.n, st.toi, st.pn, st.ptoi, *st.x.values(), *st.b.values()):
             _decayed(vec)
         lg = self.league.pos[line.pos]
         toi_h = line.toi_s / 3600 if line.toi_s is not None else None
         pp_h = line.pp_toi_s / 3600 if line.pp_toi_s is not None else None
+        if has_lines:
+            st.unit, st.pp_unit, st.mates, st.unit_date = line.unit, line.pp_unit, line.mates, date
+            t = self.teams[line.team]
+            if line.unit is not None and toi_h is not None:
+                for d in (t.slot, self.league.slot):
+                    acc = d.setdefault(line.unit, [0.0, 0.0])
+                    acc[0] += toi_h
+                    acc[1] += 1
+            if line.unit is not None and pp_h is not None:
+                for d in (t.pp_slot, self.league.pp_slot):
+                    acc = d.setdefault(f"PP{line.pp_unit or 0}", [0.0, 0.0])
+                    acc[0] += pp_h
+                    acc[1] += 1
+            if mq is not None:
+                for i, dk in enumerate(DECAYS):
+                    st.mq[i] = st.mq[i] * dk + mq
+                    st.mqn[i] = st.mqn[i] * dk + 1
         if toi_h is not None:
             lg.games += 1
             lg.toi += toi_h
@@ -428,6 +592,11 @@ class State:
             off = 0 if playoff else 2
             po[off] += v
             po[off + 1] += basis
+            if b2b is not None:
+                for acc, flag in ((self.league.b2b[s], b2b[line.team]), (self.league.opp_b2b[s], b2b[line.opp])):
+                    off = 0 if flag else 2
+                    acc[off] += v
+                    acc[off + 1] += basis
 
     def _learn_goalie(self, line: GoalieLine, season: int) -> None:
         if line.sa is None or line.saves is None:
@@ -478,7 +647,7 @@ class State:
             rec[2] += goals
             t.recent_goals.append(goals)
 
-    def _learn_teams(self, game: GameRecord) -> None:
+    def _learn_teams(self, game: GameRecord, b2b: dict[int, bool]) -> None:
         totals: dict[int, dict[str, float | None]] = {}
         for team in (game.home_team, game.away_team):
             lines = [s for s in game.skaters if s.team == team]
@@ -499,6 +668,11 @@ class State:
                     t.for_n[s] += 1
                     lg.team_tot[s] += mine
                     lg.team_n[s] += 1
+                    if s in TEAM_REST_STATS:
+                        for acc, flag in ((lg.team_b2b[s], b2b[team]), (lg.team_opp_b2b[s], b2b[opp])):
+                            off = 0 if flag else 2
+                            acc[off] += mine
+                            acc[off + 1] += 1
                     if s == "shots":
                         off = 0 if game.playoff else 2
                         lg.po_shots[off] += mine
@@ -520,13 +694,30 @@ class State:
                 road.road_tot[s] += a + b
 
     def learn(self, game: GameRecord) -> None:
+        b2b = {t: self.back_to_back(t, game.date) for t in (game.home_team, game.away_team)}
+        mq: dict[int, float | None] = {}
+        if game.has_lines:
+            for t in (game.home_team, game.away_team):
+                ts = self.teams[t]
+                for d in (ts.slot, ts.pp_slot):
+                    for acc in d.values():
+                        acc[0] *= TEAM_DECAY
+                        acc[1] *= TEAM_DECAY
+            # linemate quality as it stood before this game (none of this game's stats)
+            mq = {ln.player: self.mates_quality(ln.mates) for ln in game.skaters}
         for line in game.skaters:
-            self._learn_skater(line, game.season, game.date, game.playoff)
+            self._learn_skater(line, game.season, game.date, game.playoff, b2b, game.has_lines, mq.get(line.player))
         for gl in game.goalies:
             self._learn_goalie(gl, game.season)
-        self._learn_teams(game)
+        self._learn_teams(game, b2b)
         self._learn_result(game)
+        for t in (game.home_team, game.away_team):
+            self.teams[t].last_date = game.date
         self.last_date = game.date
+
+
+def _days(a: str, b: str) -> int:
+    return (date_cls.fromisoformat(b) - date_cls.fromisoformat(a)).days
 
 
 def starters(game: GameRecord) -> dict[int, int]:
@@ -542,6 +733,7 @@ def walk(games: list[GameRecord], state: State | None = None, *, emit: bool = Tr
         for game in day if emit else ():
             start = starters(game)
             arena = None if game.neutral else game.home_team
+            b2b = {t: state.back_to_back(t, date) for t in (game.home_team, game.away_team)}
             for line in game.skaters:
                 opp_g = start.get(line.opp)
                 feats = state.skater_features(
@@ -554,6 +746,8 @@ def walk(games: list[GameRecord], state: State | None = None, *, emit: bool = Tr
                     [(opp_g, 1.0)] if opp_g is not None else [],
                     game.season,
                     game.playoff,
+                    b2b[line.team],
+                    b2b[line.opp],
                 )
                 feats |= {
                     "meta.game": float(game.game_id),
@@ -578,7 +772,9 @@ def walk(games: list[GameRecord], state: State | None = None, *, emit: bool = Tr
             for gl in game.goalies:
                 if not gl.started or gl.sa is None:
                     continue
-                feats = state.goalie_features(gl.player, gl.team, gl.opp, game.season, game.playoff)
+                feats = state.goalie_features(
+                    gl.player, gl.team, gl.opp, game.season, game.playoff, b2b[gl.team], b2b[gl.opp]
+                )
                 yield Row(
                     "goalie",
                     game.game_id,
@@ -594,7 +790,7 @@ def walk(games: list[GameRecord], state: State | None = None, *, emit: bool = Tr
                 )
             if game.home_goals is not None and game.away_goals is not None:
                 mixes = {t: [(g, 1.0)] for t, g in start.items()}
-                feats = state.game_features(game.home_team, game.away_team, mixes, game.season)
+                feats = state.game_features(game.home_team, game.away_team, mixes, game.season, b2b)
                 feats |= {
                     "meta.game": float(game.game_id),
                     "meta.home_team": float(game.home_team),

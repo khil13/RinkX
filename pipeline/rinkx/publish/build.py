@@ -16,6 +16,7 @@ from rinkx import __version__, crypto
 from rinkx.alerts import evaluate as alerts
 from rinkx.config import ConfigError, Settings
 from rinkx.correlation import estimate as correlations
+from rinkx.correlation import sim
 from rinkx.grading import performance
 from rinkx.ingestion.injuries import espn as injuries
 from rinkx.ingestion.nhl.jobs import current_season
@@ -174,6 +175,15 @@ def _league_files(
         out[f"slate/{d}.json"] = (views.slate(conn, d), oldest)
         for (gid,) in conn.execute("SELECT nhl_game_id FROM games WHERE game_date = ?", (d,)).fetchall():
             out[f"games/{gid}.json"] = (views.game_detail(conn, gid), oldest)
+    assist_model = sim.assist_model(conn)
+    for g in conn.execute(
+        "SELECT * FROM games WHERE status IN ('scheduled','pregame') AND game_date >= ? AND id IN "
+        "(SELECT game_id FROM player_projections WHERE is_current = 1)",
+        (today.isoformat(),),
+    ).fetchall():
+        inputs = sim.game_inputs(conn, g, assist_model)
+        if inputs is not None:
+            out[f"sim/{g['nhl_game_id']}.json"] = (inputs, None)
     out["models.json"] = (projections.models_report(conn), None)
     out["props/best.json"] = (best.best_props(conn, now), None)
     out["performance.json"] = (performance.performance(conn, now), None)

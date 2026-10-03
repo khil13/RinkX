@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQueries, useQuery } from "@tanstack/react-query";
 import { decryptJson, type EncryptedFile, type Keyfile } from "../crypto";
 import { useSession } from "../session";
 import type { Envelope, Manifest } from "./types";
@@ -54,4 +54,34 @@ export function useEncrypted<T>(path: string): EncryptedResult<T> {
   if (!entry) return { state: "unavailable" };
   if (q.isError) return { state: "error", error: q.error };
   return q.data ? { state: "ready", value: q.data } : { state: "loading" };
+}
+
+/** Several files at once (e.g. one per game); each result as useEncrypted would give it. */
+export function useEncryptedMany<T>(paths: string[]): Record<string, EncryptedResult<T>> {
+  const manifest = useManifest().data;
+  const { key } = useSession();
+  const qs = useQueries({
+    queries: paths.map((path) => {
+      const entry = manifest?.files[`${path}.enc`];
+      return {
+        queryKey: ["enc", path, entry?.sha256],
+        enabled: Boolean(entry && key),
+        queryFn: async () => {
+          const file = await fetchJson<EncryptedFile>(`${path}.enc`, entry!.sha256);
+          return decryptJson<Envelope<T>>(file, path, key!);
+        },
+        staleTime: Infinity,
+      };
+    }),
+  });
+  const out: Record<string, EncryptedResult<T>> = {};
+  paths.forEach((path, i) => {
+    const q = qs[i]!;
+    const entry = manifest?.files[`${path}.enc`];
+    if (!manifest || (entry && q.isPending)) out[path] = { state: "loading" };
+    else if (!entry) out[path] = { state: "unavailable" };
+    else if (q.isError) out[path] = { state: "error", error: q.error };
+    else out[path] = q.data ? { state: "ready", value: q.data } : { state: "loading" };
+  });
+  return out;
 }

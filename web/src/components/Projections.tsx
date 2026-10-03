@@ -42,7 +42,12 @@ function effect(e: number): string {
 }
 
 /** Link that opens a prefilled GitHub issue form; null when not on the published site. */
-const QE_TITLE = { goalie: "Quick Entry: goalie", "player-out": "Quick Entry: player out", news: "Quick Entry: news" };
+const QE_TITLE = {
+  goalie: "Quick Entry: goalie",
+  "player-out": "Quick Entry: player out",
+  news: "Quick Entry: news",
+  line: "Quick Entry: line",
+};
 type QuickEntryTemplate = keyof typeof QE_TITLE;
 
 export function quickEntryUrl(template: QuickEntryTemplate, fields: Record<string, string>): string | null {
@@ -182,6 +187,11 @@ const INPUT_LABELS: Record<string, string> = {
   expected_goals_for: "Team expected goals",
   expected_goals_against: "Opponent expected goals",
   tied_after_regulation: "Goes past regulation",
+  line: "Line (last game, or Quick Entry)",
+  pp_unit: "Power-play unit",
+  linemates: "Linemates",
+  back_to_back: "His team played yesterday",
+  opp_back_to_back: "Opponent played yesterday",
 };
 
 const UNIT: Record<string, string> = { hours: "h of ice time", "PP hours": "h of PP time", shots: "shots" };
@@ -215,6 +225,14 @@ function Explain({ m }: { m: MarketProjection }) {
                 <dd className="num text-right">
                   {k.endsWith("toi_s")
                     ? mmss(v as number)
+                    : typeof v === "boolean"
+                      ? v
+                        ? "yes"
+                        : "no"
+                      : Array.isArray(v)
+                        ? v.join(", ") || "—"
+                        : k === "pp_unit"
+                          ? `PP${String(v)}`
                     : ["start_probability", "team_scores_first", "share_of_team_goals", "tied_after_regulation", "p_win"].includes(k)
                       ? pct(v as number)
                       : k === "prior_strength"

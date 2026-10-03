@@ -243,6 +243,10 @@ test("model tests page shows what passed and what was held back", async ({ page 
   await expect(sw).toContainText("vs league rate of this outcome");
   await expect(sw).toContainText("vs saves and win treated as independent (shown, not required)");
   await expect(page.getByText(/not modeled/)).toHaveCount(0); // every market in the catalogue has a model
+  // Each family's published version, and a newer one waiting on live results.
+  const cc = page.getByRole("list", { name: "Champion and challenger" });
+  await expect(cc).toContainText("shots: v1.4 published, v1.5 challenging");
+  await expect(cc).toContainText(/0 of 250 graded props/);
 });
 
 test("sportsbook lines: comparison table, best price, no-vig, movement (synthetic)", async ({ page }) => {
@@ -429,6 +433,8 @@ test("parlay builder: legs from props, correlation-adjusted probability, varianc
   const pairs = page.getByRole("list", { name: "Leg pairs" });
   await expect(pairs).toContainText("teammates");
   await expect(pairs).toContainText(/ρ [+−]0\.\d\d \(95% .* n=[\d,]+\)/);
+  // Both legs are in one game: the same-game simulation decides how they move together.
+  await expect(page.getByRole("list", { name: "Same-game groups" })).toContainText(/simulated: together [\d.]+% of 20,000 games/);
   await page.getByRole("button", { name: /^Remove Syn P8000003/ }).click();
   await expect(page.getByRole("list", { name: "Parlay legs" }).getByRole("listitem")).toHaveCount(1);
   await page.reload(); // legs persist on this device

@@ -1,3 +1,4 @@
+import { type SimInputs, type SimLeg, simulate, supported } from "./sim";
 // Parlay combination: the same arithmetic as pipeline/rinkx/correlation/parlay.py, tested
 // against vectors that Python generates (fixtures/parlay_vectors.json). Keep the two in step.
 
@@ -203,8 +204,21 @@ export function toAmerican(dec: number): number {
   return dec >= 2 ? Math.round((dec - 1) * 100) : Math.round(-100 / (dec - 1));
 }
 
+export interface GroupUsed {
+  game_id: number;
+  legs: number[]; // indexes into the legs
+  method: "single" | "simulation" | "correlations";
+  p: number;
+  /** simulation: P_sim(all) / product of P_sim(each); 1 = the legs move independently */
+  lift?: number;
+  n?: number;
+  together?: number; // simulated games in which every leg won
+  why_not_sim?: "no_sim" | "unsupported_leg" | "too_rare";
+}
+
 export interface ParlayResult {
   pairs: PairUsed[];
+  groups: GroupUsed[];
   p_independent: number;
   p_adjusted: number;
   shrink: number;
@@ -213,7 +227,11 @@ export interface ParlayResult {
   ev: number;
 }
 
-export function evaluate(legs: Leg[], corr: Correlations | null): ParlayResult {
+export const MIN_TOGETHER = 30; // simulated joint wins needed to trust the simulated lift
+
+/** Same-game legs: the simulation's lift on the legs' own probabilities when it can settle every
+ * leg; otherwise the correlation copula. Legs in different games are independent. */
+export function evaluate(legs: Leg[], corr: Correlations | null, sims: Record<number, SimInputs | null> = {}): ParlayResult {
   const k = legs.length;
   const m: number[][] = legs.map((_, i) => legs.map((__, j) => (i === j ? 1 : 0)));
   const pairs: PairUsed[] = [];
@@ -227,10 +245,50 @@ export function evaluate(legs: Leg[], corr: Correlations | null): ParlayResult {
   }
   const probs = legs.map((l) => l.p_model);
   const indep = probs.reduce((a, b) => a * b, 1);
-  const { p, shrink } = combine(probs, m);
+  const byGame = new Map<number, number[]>();
+  legs.forEach((l, i) => byGame.set(l.game_id, [...(byGame.get(l.game_id) ?? []), i]));
+  const groups: GroupUsed[] = [];
+  let shrink = 1;
+  for (const [game_id, idx] of byGame) {
+    const ps = idx.map((i) => probs[i]!);
+    const prod = ps.reduce((a, b) => a * b, 1);
+    if (idx.length === 1) {
+      groups.push({ game_id, legs: idx, method: "single", p: prod });
+      continue;
+    }
+    const x = sims[game_id] ?? null;
+    let why: GroupUsed["why_not_sim"];
+    if (!x) why = "no_sim";
+    else {
+      const simLegs: SimLeg[] = idx.map((i) => ({
+        market: legs[i]!.market,
+        player: legs[i]!.player_id,
+        line: legs[i]!.line,
+        side: legs[i]!.side,
+      }));
+      if (!simLegs.every((l) => supported(x, l))) why = "unsupported_leg";
+      else {
+        const r = simulate(x, simLegs);
+        if (r.all < MIN_TOGETHER || r.each.some((e) => e === 0)) why = "too_rare";
+        else {
+          const lift = r.all / r.n / r.each.reduce((a, e) => a * (e / r.n), 1);
+          const lo = Math.max(0, ps.reduce((a, b) => a + b, 0) - (ps.length - 1));
+          const p = Math.min(Math.max(prod * lift, lo), Math.min(...ps));
+          groups.push({ game_id, legs: idx, method: "simulation", p, lift, n: r.n, together: r.all });
+          continue;
+        }
+      }
+    }
+    const sub = idx.map((i) => idx.map((j) => m[i]![j]!));
+    const c = combine(ps, sub);
+    shrink = Math.min(shrink, c.shrink);
+    groups.push({ game_id, legs: idx, method: "correlations", p: c.p, why_not_sim: why });
+  }
+  const p = groups.reduce((a, g) => a * g.p, 1);
   const offered = legs.reduce((a, l) => a * decimal(l.price), 1);
   return {
     pairs,
+    groups,
     p_independent: indep,
     p_adjusted: p,
     shrink,

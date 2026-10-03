@@ -1,9 +1,11 @@
+import { useMemo } from "react";
 import { Link } from "react-router";
 import { odds, SIDE_LABEL } from "../components/Lines";
 import { pct } from "../components/Projections";
 import { Notice, Panel, Spinner } from "../components/ui";
-import { useEncrypted } from "../lib/data/fetch";
-import { type Correlations, evaluate, type Leg, MAX_LEGS, type PairSource, toAmerican } from "../lib/parlay";
+import { useEncrypted, useEncryptedMany } from "../lib/data/fetch";
+import { type Correlations, evaluate, type GroupUsed, type Leg, MAX_LEGS, type PairSource, toAmerican } from "../lib/parlay";
+import type { SimInputs } from "../lib/sim";
 import { parlayStore, useParlayLegs } from "../lib/parlayStore";
 import { clock, longDate } from "../lib/format";
 
@@ -28,13 +30,56 @@ function legText(l: Leg) {
 
 const signedPct = (v: number) => `${v >= 0 ? "+" : "−"}${Math.abs(v * 100).toFixed(1)}%`;
 
+const N_TEXT = "20,000";
+const WHY_NOT: Record<NonNullable<GroupUsed["why_not_sim"]>, string> = {
+  no_sim: "no simulation published for this game",
+  unsupported_leg: "a leg the simulation can't settle (hits, blocks, power-play stats, a backup goalie)",
+  too_rare: "the legs win together too rarely to simulate reliably",
+};
+
+function GroupLine({ g, legs }: { g: GroupUsed; legs: Leg[] }) {
+  const first = legs[g.legs[0]!]!;
+  const which = g.legs.map((i) => i + 1).join(", ");
+  return (
+    <li className="flex flex-wrap justify-between gap-2">
+      <span>
+        <span className="num text-muted">Legs {which}</span> · {first.away} @ {first.home}
+      </span>
+      <span className="num text-xs text-muted">
+        {g.method === "simulation" ? (
+          <>
+            simulated: together {((g.together! / g.n!) * 100).toFixed(1)}% of {g.n!.toLocaleString()} games, ×
+            {g.lift!.toFixed(2)} vs independent
+          </>
+        ) : (
+          <>correlations ({WHY_NOT[g.why_not_sim ?? "no_sim"]})</>
+        )}
+      </span>
+    </li>
+  );
+}
+
 export function Parlay() {
   const legs = useParlayLegs();
   const res = useEncrypted<Correlations>("correlations.json");
-  if (res.state === "loading") return <Spinner label="Loading correlations…" />;
+  const games = [...new Set(legs.map((l) => l.game_id))];
+  const simRes = useEncryptedMany<SimInputs>(games.map((g) => `sim/${g}.json`));
+  const simsLoading = Object.values(simRes).some((x) => x.state === "loading");
   const corr = res.state === "ready" ? res.value.data : null;
+  const sims = useMemo(() => {
+    const out: Record<number, SimInputs | null> = {};
+    for (const g of games) {
+      const x = simRes[`sim/${g}.json`];
+      out[g] = x?.state === "ready" ? x.value.data : null;
+    }
+    return out;
+  }, [JSON.stringify(games), simsLoading]);
+  const r = useMemo(
+    () => (legs.length > 0 && !simsLoading ? evaluate(legs.slice(0, MAX_LEGS), corr, sims) : null),
+    [legs, corr, sims, simsLoading],
+  );
+  if (res.state === "loading" || simsLoading) return <Spinner label="Loading correlations…" />;
   const started = legs.filter((l) => Date.parse(l.start_time_utc) <= Date.now());
-  const r = legs.length > 0 ? evaluate(legs.slice(0, MAX_LEGS), corr) : null;
   const leanCount = r?.pairs.filter((p) => p.source !== "estimate" && p.source !== "different_games").length ?? 0;
 
   return (
@@ -141,6 +186,24 @@ export function Parlay() {
                   {((1 - r.shrink) * 100).toFixed(0)}%.
                 </p>
               )}
+            </Panel>
+          )}
+
+          {r && r.groups.some((g) => g.method !== "single") && (
+            <Panel title="Same-game legs">
+              <ul className="flex flex-col gap-1.5 text-sm" aria-label="Same-game groups">
+                {r.groups
+                  .filter((g) => g.method !== "single")
+                  .map((g) => (
+                    <GroupLine key={g.game_id} g={g} legs={legs} />
+                  ))}
+              </ul>
+              <p className="mt-2 text-[11px] text-muted">
+                The simulation plays the game out {N_TEXT} times from the same projections: goals, who scored and
+                assisted (linemates more often), shots and saves. It is used only for how the legs move together; each
+                leg keeps its own model probability. Without a simulation for every leg, the correlations below are
+                used.
+              </p>
             </Panel>
           )}
 

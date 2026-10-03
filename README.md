@@ -14,7 +14,7 @@ RinkX answers **"why does the model project this player at this number?"** It do
 - a lean only when the edge is at least 3 points, EV is positive and the data is good enough;
 - a 0–100 confidence score with a five-part breakdown and the full calculation.
 
-Each priced line is frozen for later grading. **Phase 6: Card of the Day and Props.** **Card of the Day** picks the best team props and player props for one date. Picks come only from that date's games, with one per player and per game, at the best price, in team colours. **Props** lists every priced line. Both can be filtered by date, game, market, book, side, minimum edge and confidence, and sorted by EV, edge, confidence or start time. Each card shows its source and when the line was seen, marks what is new or has moved since your last visit, and opens the full calculation. **Phase 7: grading.** After each game, every frozen prediction is graded by book rules: overtime counts, the shootout doesn't, and a player who doesn't play voids the bet. Each one is compared with the closing line. **Model Performance** shows:
+Each priced line is frozen for later grading. **Phase 6: Card of the Day and Props.** **Card of the Day** picks the best team props and player props for one date. Picks come only from that date's games, with one per player and per game, at the best price, in team colours. **Props** lists every priced line. Props can be filtered by date, game, market, book, side, minimum edge and confidence, and sorted by EV, edge, confidence or start time. Each card shows its source and when the line was seen, marks what is new or has moved since your last visit, and opens the full calculation. **Phase 7: grading.** After each game, every frozen prediction is graded by book rules: overtime counts, the shootout doesn't, and a player who doesn't play voids the bet. Each one is compared with the closing line. **Model Performance** shows:
 
 - record, profit, ROI with its 95% range and closing-line value;
 - a profit chart with drawdowns;
@@ -101,3 +101,10 @@ RinkX presents probabilities, not certainties. Sports betting carries financial 
 - **Line-movement markers:** player charts mark goalie confirmations, players ruled out, news and injury changes.
 - **Live calibration:** once a market has 400 graded props, the model's probabilities are recalibrated against how often they actually came true (isotonic regression). The new map is used only if it scored better on recent props it never saw.
 - **Saves + Win:** a joint model of a goalie's saves and his team winning, shown on goalie pages for 20+ to 30+ saves, with its own walk-forward test.
+
+**Model 1.5: back-to-backs, lines and champion/challenger.**
+
+* Lines, defence pairs and PP units are reconstructed from every game's NHL shift chart. A **Quick Entry: line change** form records a promotion or demotion for an upcoming game.
+* Version 1.5 can use back-to-back terms, its line slot's usual ice time, and linemate quality.
+* It runs beside the published 1.4 as the **challenger**. Every line is priced by both, and 1.5 replaces 1.4 for a model family only after it beats 1.4 on 250+ graded props. The Models page shows the race.
+* Same-game parlay legs are combined by a **seeded game simulation** that the browser runs from published inputs: linemates' points, shots vs the opposing goalie's saves, and the result move together. The correlation estimates are the fallback.

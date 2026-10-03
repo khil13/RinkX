@@ -10,8 +10,8 @@ import json
 import sqlite3
 from typing import Any
 
-from rinkx.models import project
-from rinkx.models.fit import GAME_MARKETS, LABELS, MARKETS, MODEL_VERSION
+from rinkx.models import project, promotion
+from rinkx.models.fit import FAMILY, GAME_MARKETS, LABELS, MARKETS, MODEL_VERSION, VERSIONS
 
 P_GE_MAX = 40  # P(X >= k) published for k up to this (saves need ~40)
 MARKET_ORDER = list(MARKETS)
@@ -131,7 +131,7 @@ def model_summary(conn: sqlite3.Connection, game_pk: int) -> dict[str, Any] | No
 
 
 def model_status(conn: sqlite3.Connection) -> dict[str, Any]:
-    report, created = project.latest_report(conn)
+    report, created = project.published_report(conn)
     if report is None:
         return {"status": "not_run", "tested_at": None, "passed": []}
     return {
@@ -267,9 +267,36 @@ def _player_reason(conn: sqlite3.Connection, player_pk: int, status: dict[str, A
     return "ruled_out" if out else "no_upcoming_projection"
 
 
+VERSION_ADDS = {"1.5": "back-to-back terms; line and PP-unit ice time; linemate quality"}
+
+
+def _challengers(conn: sqlite3.Connection) -> dict[str, Any]:
+    """family -> the challenger's walk-forward results, beside the champion's."""
+    out: dict[str, Any] = {}
+    reports: dict[str, dict[str, Any] | None] = {}
+    for family, v in project.challengers(conn).items():
+        if v not in reports:
+            reports[v] = project.latest_report(conn, v)[0]
+        rep = reports[v]
+        if rep is None:
+            continue
+        out[family] = {
+            "version": v,
+            "adds": VERSION_ADDS.get(v),
+            "stats": {
+                s: {k: e.get(k) for k in ("passed", "reason", "log_score", "n_test")}
+                | {"choice": rep["choices"].get(s)}
+                for s, e in rep["stats"].items()
+                if FAMILY.get(s) == family
+            },
+        }
+    return out
+
+
 def models_report(conn: sqlite3.Connection) -> dict[str, Any]:
-    """Everything the Models page shows: how each stat did in the walk-forward test."""
-    report, created = project.latest_report(conn)
+    """Everything the Models page shows: how each stat did in the walk-forward test, which version
+    is published for each model family, and how the challenger is doing on live results."""
+    report, created = project.published_report(conn)
     markets = {
         m: {"stat": s, "label": conn.execute("SELECT name FROM markets WHERE code = ?", (m,)).fetchone()[0]}
         for m, s in (MARKETS | GAME_MARKETS).items()
@@ -292,13 +319,17 @@ def models_report(conn: sqlite3.Connection) -> dict[str, Any]:
     for s, e in report["stats"].items():
         stats[s] = e | {"label": LABELS[s], "choice": report["choices"].get(s)}
     return {
-        "version": MODEL_VERSION,
+        "version": report.get("version", MODEL_VERSION),
+        "versions": report.get("versions", {}),
+        "all_versions": list(VERSIONS),
+        "challengers": _challengers(conn),
+        "promotion": promotion.published(conn),
         "status": report.get("status"),
         "tested_at": created,
         "history": report.get("history"),
         "tune": report.get("tune"),
         "test": report.get("test"),
-        "lineup_mode": "lineup_oracle",
+        "lineup_mode": "lineup_oracle",  # starting goalies; lines are each player's previous game's
         "stats": stats,
         "markets": markets,
         "not_modeled": not_modeled,

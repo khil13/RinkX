@@ -103,6 +103,65 @@ Any model satisfying the protocol can be swapped in through the registry without
 
 ---
 
+## Model version 1.5: back-to-backs, lines and power-play units (challenger)
+
+Version 1.5 adds three candidate inputs. As always, the tuner keeps each one only if it improves the
+tuning-window score, and the walk-forward test decides publication. On top of that, 1.5 is published for a
+family only after it beats 1.4 on live graded props (*Champion and challenger* below).
+
+* **Back-to-backs.** Whether each team played the day before, from the schedule. League-wide rates on
+  back-to-back nights and on other nights, each relative to *all* nights (a player's own rate already mixes
+  both), shrunk toward no effect (200 skater-hours; 40 team-games for team shots and goals). They are applied
+  to skater stats, to a goalie's shots against, and to each team's expected goals in the game model.
+* **Line slot and PP unit.** From each game's NHL shift chart: lines (F1–F4) and pairs (D1–D3) from
+  even-strength seconds shared, and PP1/PP2 from the seconds a team had more skaters (6-on-5 extra-attacker
+  time excluded). The expected ice time blends his own shrunk record with the usual ice time of the slot he
+  played in his *previous* game (the team's, shrunk to the league's over 5 games), with weight 25/50/75% chosen
+  by the tuner. A Quick Entry line change replaces "previous game" for an upcoming game. The backtest uses the
+  previous game's slot, never the game's own, so it can't see the lineup in advance.
+* **Linemate quality.** The average points rate (shrunk) of his current linemates relative to the linemates he
+  usually plays with (decayed average), raised to a power of 0.25, 0.5 or 1 picked by the tuner. Applied to
+  goals, assists and points.
+
+## Champion and challenger (`rinkx/models/promotion.py`)
+
+Every version the code can run is tested every day. Each model family has one **champion**: the version the
+site publishes. A family with no champion takes the first version (oldest first) that passes its test. A newer
+version that passes becomes the **challenger**. Its projections are stored, unpublished, in
+`challenger_projections`. Every line priced also freezes the challenger's probability for that same line
+(`shadow_predictions`), before live calibration, beside the champion's.
+
+After grading, the two are compared on exactly the same props: the per-prop log-score difference, with several
+books or re-pricings of one prop counted once. Once 250 props are compared:
+
+* if the 95% interval is above zero, the challenger is **promoted**. Its projections are published from the
+  next run, and the family's live calibrators are reset, because they were fit to the old champion;
+* if it is below zero, the challenger is **retired**;
+* otherwise it keeps waiting. There is no deadline.
+
+Every decision is stored in `model_promotions` and shown on the Models page.
+
+## Same-game simulation (`rinkx/correlation/sim.py`, `web/src/lib/sim.ts`)
+
+For legs in one game, the parlay builder plays the game out 20,000 times from the published projections:
+
+* **Goals.** Regulation goals per team come from the game model, with its overtime and shootout rules.
+* **Scorers and assists.** Each goal's scorer is drawn by projected goals. It gets 0, 1 or 2 assists: the
+  shares come from play-by-play, or from season totals when fewer than 300 goals are recorded. Assists are
+  drawn by projected assists, with the scorer's linemates `boost` times as likely. `boost` is the maximum
+  likelihood estimate from who actually assisted, and 1 until 300 assists with known lines are recorded.
+* **Shots and saves.** Each skater's shots are his goals plus non-goal shots around his projection, times a
+  team pace shared by the whole team that night. The pace comes from five equal-probability levels of the
+  goalie model's shots-against spread. The opposing goalie's saves are those shots minus goals.
+
+The simulation sets only how legs move together. The parlay probability is the product of each leg's own model
+probability times the simulated lift, P_sim(all) / product of P_sim(each). The result is kept within the
+Fréchet bounds. Legs the simulation can't settle (hits, blocks, power-play stats, a goalie other than the
+projected starter), or that win together in fewer than 30 simulated games, fall back to the correlation
+copula. The pipeline publishes the inputs (`sim/{game}.json`, pre-computed probability tables), and the
+browser runs the simulation with a seeded 32-bit generator. `fixtures/sim_vectors.json` checks that the
+browser and the Python reference give identical counts.
+
 ## 1. Expected ice time model (`toi`)
 
 TOI is the biggest driver of every skater prop, so it gets its own model.
@@ -292,7 +351,7 @@ The breakdown is always displayed. Confidence buckets (50–59, 60–69, …) ar
   - Pearson correlations of those residuals are pooled for the same player, teammates, opponents, and a skater vs the opposing starting goalie. Teammate and opponent pairs use closed-form sums per team-game, and a test checks them against brute force.
   - `n_obs` counts independent units: player-games, or team-games. The 95% CI is Fisher's z with that n.
   - Correlations are re-estimated at most every 20 h.
-  - Not built: tetrachoric correlations at specific lines, linemate (line-combination) pairs, and simulation-based same-game joints.
+  - Same-game legs: a seeded game simulation (below, *Same-game simulation*) captures linemates, shots vs the opposing goalie's saves, and the game result together; the correlations here are the fallback for legs it can't settle. Not built: tetrachoric correlations at specific lines.
 * **Empirical (design).** For pairs of prop outcomes (same player across markets, linemates, same team, opponent skater vs. goalie), estimate correlations from historical games:
   * Binary outcomes at specific lines: phi / tetrachoric correlation.
   * Continuous: Pearson correlation of residuals (actual − projected), which removes the shared-mean confound.

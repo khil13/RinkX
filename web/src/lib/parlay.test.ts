@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import vectors from "../../../fixtures/parlay_vectors.json";
+import simVectors from "../../../fixtures/sim_vectors.json";
+import type { SimInputs } from "./sim";
 import { combine, type Correlations, evaluate, type Leg, N_POINTS, pairFor, toAmerican } from "./parlay";
 
 // Vectors come from the Python reference (pipeline/rinkx/correlation/parlay.py), so passing here
@@ -82,5 +84,31 @@ describe("evaluate", () => {
   it("american odds round-trip", () => {
     expect(toAmerican(2.5)).toBe(150);
     expect(toAmerican(1.5)).toBe(-200);
+  });
+});
+
+describe("evaluate with the same-game simulation", () => {
+  const x = simVectors.inputs as unknown as SimInputs;
+  const mate = (id: number, o: Partial<Leg> = {}) =>
+    leg({ game_id: 1, player_id: id, subject: `P${id}`, market: "skater_points", line: 0.5, p_model: 0.5, ...o });
+  it("uses the simulation's lift when it can settle every leg in the game", () => {
+    const r = evaluate([mate(100), mate(101)], corr, { 1: x });
+    const g = r.groups[0]!;
+    expect(g.method).toBe("simulation");
+    expect(g.lift!).toBeGreaterThan(1); // linemates' points move together
+    expect(r.p_adjusted).toBeCloseTo(0.25 * g.lift!, 10);
+    expect(r.p_adjusted).toBeLessThanOrEqual(0.5);
+  });
+  it("falls back to correlations for a leg it can't settle, or without simulation inputs", () => {
+    expect(evaluate([mate(100), mate(101, { market: "skater_hits" })], corr, { 1: x }).groups[0]).toMatchObject({
+      method: "correlations",
+      why_not_sim: "unsupported_leg",
+    });
+    expect(evaluate([mate(100), mate(101)], corr, {}).groups[0]).toMatchObject({ why_not_sim: "no_sim" });
+  });
+  it("legs in different games multiply", () => {
+    const r = evaluate([mate(100), mate(101, { game_id: 2 })], corr, { 1: x });
+    expect(r.groups.map((g) => g.method)).toEqual(["single", "single"]);
+    expect(r.p_adjusted).toBeCloseTo(0.25, 12);
   });
 });
