@@ -10,6 +10,10 @@ markets:
   player_goals: skater_goals
   player_assists: skater_assists
   player_points: skater_points
+  # Ladders ("1+ / 2+ / 3+"): FanDuel posts NHL points and assists only this way. RinkX keeps the
+  # lowest rung (1+ = over 0.5), and only when the book has no main line for that player.
+  player_points_alternate: skater_points
+  player_assists_alternate: skater_assists
   player_power_play_points: skater_pp_points
   player_blocked_shots: skater_blocked_shots
   player_total_saves: goalie_saves

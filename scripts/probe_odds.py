@@ -47,6 +47,24 @@ def main() -> None:
     print(f"quota after events call: remaining={h.get('x-requests-remaining')} used={h.get('x-requests-used')}")
     if not events:
         return
+    # Which markets each book lists, game by game (the /markets endpoint: 1 credit per game,
+    # names only). A book can post points props for some games and not others, or later in the day.
+    n = int(os.environ.get("PROBE_GAMES", "6"))
+    listed: dict[str, dict[str, int]] = {}
+    for e in events[:n]:
+        mk, h = get(f"/sports/{sport}/events/{e['id']}/markets", bookmakers=",".join(books), dateFormat="iso")
+        assert isinstance(mk, dict)
+        per_book = {bm["key"]: sorted(m["key"] for m in bm.get("markets", [])) for bm in mk.get("bookmakers", [])}
+        counts = "; ".join(f"{b}: {len(v)} markets" for b, v in per_book.items())
+        print(f"game starting {e['commence_time']}: {counts}")
+        for b, keys in per_book.items():
+            for k in keys:
+                listed.setdefault(b, {}).setdefault(k, 0)
+                listed[b][k] += 1
+    print(f"markets listed across the first {min(n, len(events))} games (games listing each):")
+    for b, keys in sorted(listed.items()):
+        print(f"  {b}: " + ", ".join(f"{k} ({c})" for k, c in sorted(keys.items())))
+    print(f"quota after markets calls: remaining={h.get('x-requests-remaining')}")
     ev = events[0]
     props = [k for k in cfg["markets"] if k.startswith("player_")]
     data, h = get(

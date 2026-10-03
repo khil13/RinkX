@@ -1,9 +1,15 @@
 name: probe-odds
 
 # Manual check that The Odds API's real responses match RinkX's parser and market mapping.
-# Prints names and formats only (no prices or player names). Costs ~1 credit per prop market.
+# Prints names and formats only (no prices or player names). Costs ~1 credit per prop market
+# returned, plus 1 credit per game whose listed markets are checked.
 on:
   workflow_dispatch:
+    inputs:
+      games:
+        description: "Upcoming games whose listed markets to check (1 credit each)"
+        required: false
+        default: "6"
 
 permissions:
   contents: read
@@ -20,6 +26,7 @@ jobs:
       - name: Probe
         env:
           ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+          PROBE_GAMES: ${{ inputs.games || '6' }}
         run: |
           if [ -z "$ODDS_API_KEY" ]; then echo "Add the ODDS_API_KEY secret first."; exit 1; fi
           python scripts/probe_odds.py

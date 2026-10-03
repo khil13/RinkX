@@ -83,6 +83,12 @@ def parse_quotes(event: dict[str, Any]) -> tuple[OddsEvent, list[Quote]]:
                     quotes.append(
                         Quote(book, market, desc, low, price, float(point) if point is not None else None, updated)
                     )
+                elif low in ("yes", "no") and market.endswith("_alternate") and point is not None:
+                    # A ladder rung ("2+ points") labelled Yes: the same as Over at that point.
+                    if not desc:
+                        raise OddsParseError(f"{where}: ladder outcome without a player")
+                    side = "over" if low == "yes" else "under"
+                    quotes.append(Quote(book, market, str(desc), side, price, float(point), updated))
                 elif low in ("yes", "no"):
                     if not desc:
                         raise OddsParseError(f"{where}: yes/no outcome without a player")

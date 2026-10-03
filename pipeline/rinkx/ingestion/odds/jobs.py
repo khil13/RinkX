@@ -156,8 +156,15 @@ def _store_payload(
     at = iso(now)
     seen: set[int] = set()
     written = 0
-    for ln in assemble(quotes):
+    lines = assemble(quotes)
+    # A book's main market wins over its ladder for the same stat (both map to one RinkX market).
+    mains = {
+        (ln.book, ln.subject, cfg.market_map.get(ln.market)) for ln in lines if not ln.market.endswith("_alternate")
+    }
+    for ln in lines:
         code = cfg.market_map.get(ln.market)
+        if ln.market.endswith("_alternate") and (ln.book, ln.subject, code) in mains:
+            continue
         if code is None:
             unmapped.add(ln.market)
             continue

@@ -422,3 +422,68 @@ def test_budget_holds_credits_for_todays_closing_fetches():
     unit = bud.credits_for(["x"], books)
     held = min(3 * cfg.closing_markets * unit, p.allowance // 2)
     assert p.cost(cfg, books) <= p.allowance - held
+
+
+def _ladder_event(with_main: bool = False, label: str = "Over") -> dict:
+    rungs = [
+        {"name": label, "description": "Auston Matthews", "point": p, "price": price}
+        for p, price in ((0.5, -250), (1.5, 160), (2.5, 600))
+    ]
+    markets = [{"key": "player_points_alternate", "outcomes": rungs}]
+    if with_main:
+        markets.append(
+            {
+                "key": "player_points",
+                "outcomes": [
+                    {"name": "Over", "description": "Auston Matthews", "point": 1.5, "price": 140},
+                    {"name": "Under", "description": "Auston Matthews", "point": 1.5, "price": -170},
+                ],
+            }
+        )
+    return {
+        "id": "e1",
+        "commence_time": "2026-10-03T23:00:00Z",
+        "home_team": "Toronto Maple Leafs",
+        "away_team": "Boston Bruins",
+        "bookmakers": [{"key": "fanduel", "markets": markets}],
+    }
+
+
+def test_points_ladder_keeps_the_one_plus_rung():
+    """FanDuel posts NHL points only as a ladder (player_points_alternate): 1+, 2+, 3+ points."""
+    from rinkx.ingestion.odds.store import assemble
+
+    for label in ("Over", "Yes"):  # both labels seen for ladders across books
+        _, quotes = parse_quotes(_ladder_event(label=label))
+        (line,) = assemble(quotes)
+        assert (line.market, line.line, line.over, line.under) == ("player_points_alternate", 0.5, -250, None)
+    cfg = OddsConfig.load()
+    assert cfg.market_map["player_points_alternate"] == "skater_points"
+    assert cfg.market_map["player_assists_alternate"] == "skater_assists"
+    assert "player_points_alternate" in cfg.budget.prop_markets[: cfg.budget.first_look_markets]
+
+
+def test_main_points_line_wins_over_the_ladder(conn, monkeypatch):
+    """When a book has both, only its main line is stored (both map to skater_points)."""
+    from rinkx.ingestion.odds import jobs
+
+    stored: list[tuple] = []
+    monkeypatch.setattr(
+        jobs, "upsert_line", lambda conn, **kw: (stored.append((kw["line"], kw["over"], kw["under"])) or 1, "new")
+    )
+    monkeypatch.setattr(jobs, "mark_removed", lambda *a, **k: 0)
+
+    class _R:
+        def resolve(self, *_a):
+            return 1
+
+    gid = conn.execute("SELECT id FROM games LIMIT 1").fetchone()
+    if gid is None:
+        pytest.skip("fixture league has no games")
+    cfg = OddsConfig.load()
+    books = {r[0]: r[1] for r in conn.execute("SELECT code, id FROM sportsbooks")} or {"fanduel": 1}
+    jobs._store_payload(
+        conn, cfg, _ladder_event(with_main=True), gid[0], books, _R(), 1, datetime(2026, 10, 3, tzinfo=UTC), set(),
+        ["player_points", "player_points_alternate"],
+    )  # fmt: skip
+    assert stored == [(1.5, 140, -170)]
