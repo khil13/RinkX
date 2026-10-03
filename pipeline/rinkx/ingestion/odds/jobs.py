@@ -79,6 +79,21 @@ def sync_books(conn: sqlite3.Connection, cfg: OddsConfig) -> dict[str, int]:
     return {r[0]: r[1] for r in conn.execute("SELECT code, id FROM sportsbooks WHERE is_enabled = 1")}
 
 
+def _leans(conn: sqlite3.Connection, game_id: int, vendor_key: dict[str, str]) -> tuple[float, tuple[str, ...]]:
+    """The model's biggest edge on this game's open lines, and the vendor keys of markets with a lean
+    (latest pricing of each line). (0, ()) before any line is priced."""
+    rows = conn.execute(
+        "SELECT m.code, max(max(ifnull(p.edge_over, 0), ifnull(p.edge_under, 0))) FROM predictions p "
+        "JOIN prop_lines l ON l.id = p.prop_line_id JOIN markets m ON m.id = p.market_id "
+        "WHERE p.game_id = ? AND l.status = 'open' AND p.side <> 'none' "
+        "AND p.id = (SELECT max(p2.id) FROM predictions p2 WHERE p2.prop_line_id = p.prop_line_id) "
+        "GROUP BY m.code ORDER BY 2 DESC",
+        (game_id,),
+    ).fetchall()
+    keys = tuple(vendor_key[code] for code, _ in rows if code in vendor_key)
+    return (float(rows[0][1]) if rows else 0.0), keys
+
+
 def _record_usage(
     conn: sqlite3.Connection,
     now: datetime,
@@ -226,14 +241,21 @@ def run_odds(conn: sqlite3.Connection, client: OddsClient, now: datetime, cfg: O
         "SELECT at FROM odds_usage WHERE endpoint = 'game_odds' AND at >= ? ORDER BY at DESC", (iso(today),)
     ).fetchall()
     last_gl = conn.execute("SELECT max(at) FROM odds_usage WHERE endpoint = 'game_odds'").fetchone()[0]
-    cands = [
-        bud.Candidate(r[0], r[1], parse_iso(r[2]), parse_iso(r[3]) if r[3] else None)
-        for r in conn.execute(
-            "SELECT e.game_id, e.event_id, g.start_time_utc, e.props_fetched_at FROM odds_events e "
-            "JOIN games g ON g.id = e.game_id WHERE e.source_id = ? AND g.status IN ('scheduled','pregame')",
-            (src,),
+    vendor_key = {code: key for key, code in cfg.market_map.items()}
+    cands = []
+    for r in conn.execute(
+        "SELECT e.game_id, e.event_id, g.start_time_utc, e.props_fetched_at, (SELECT json_array_length(u.markets) "
+        "FROM odds_usage u WHERE u.game_id = e.game_id AND u.endpoint = 'event_odds' ORDER BY u.id DESC LIMIT 1) "
+        "FROM odds_events e JOIN games g ON g.id = e.game_id WHERE e.source_id = ? "
+        "AND g.status IN ('scheduled','pregame')",
+        (src,),
+    ):
+        edge, lean_markets = _leans(conn, r[0], vendor_key)
+        cands.append(
+            bud.Candidate(
+                r[0], r[1], parse_iso(r[2]), parse_iso(r[3]) if r[3] else None, edge, lean_markets, int(r[4] or 0)
+            )
         )
-    ]
     remaining = remaining_credits(conn, cfg.budget, now)
     plan = bud.plan(
         cfg.budget,

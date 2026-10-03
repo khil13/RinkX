@@ -342,3 +342,83 @@ def test_pipeline_publishes_lines_without_leaking_the_key(tmp_path, keys):
     assert admin["odds"]["credits"]["remaining"] is not None
     blob = "".join(p.read_text() for p in out.rglob("*") if p.is_file())
     assert KEY not in blob and KEY not in json.dumps(admin)
+
+
+def test_budget_first_looks_then_biggest_edges_then_closing_fetch():
+    cfg = bud.BudgetConfig.load()
+    books = ["fanduel", "betmgm"]
+    now = datetime(2026, 11, 10, 15, 0, tzinfo=UTC)
+    s = now + timedelta(hours=8)
+    looked = now - timedelta(hours=1)
+    cands = [
+        bud.Candidate(1, "new", s, None),  # never fetched: a cheap first look
+        bud.Candidate(2, "edge", s, looked, 0.09, ("player_points",), cfg.first_look_markets),
+        bud.Candidate(3, "small", s, looked, 0.03, ("player_shots_on_goal",), cfg.first_look_markets),
+        bud.Candidate(4, "none", s, looked, 0.0, (), cfg.first_look_markets),
+    ]
+    p = bud.plan(
+        cfg, now, remaining=400, spent_today=0, game_lines_today=1, last_game_lines=now, candidates=cands, books=books
+    )
+    got = {c.event_id: m for c, m in p.props}
+    assert got["new"] == cfg.prop_markets[: cfg.first_look_markets]
+    assert "none" not in got  # no lean on its first look and not due: no credits
+    order = [c.event_id for c, _ in p.props]
+    assert "edge" in order and ("small" not in order or order.index("edge") < order.index("small"))
+    assert got["edge"][0] == "player_points"  # markets with leans first
+    assert p.cost(cfg, books) <= p.allowance
+
+    # 1 h before puck drop: a closing fetch for the games with leans, lean markets first
+    close = s - timedelta(hours=1)
+    cands = [
+        bud.Candidate(2, "edge", s, s - timedelta(hours=5), 0.09, ("player_points",), 9),
+        bud.Candidate(4, "none", s, s - timedelta(hours=5), 0.0, (), 9),
+    ]
+    p = bud.plan(
+        cfg,
+        close,
+        remaining=400,
+        spent_today=0,
+        game_lines_today=1,
+        last_game_lines=close,
+        candidates=cands,
+        books=books,
+    )
+    got = {c.event_id: m for c, m in p.props}
+    assert got["edge"][: cfg.closing_markets][0] == "player_points" and len(got["edge"]) == cfg.closing_markets
+    assert "none" not in got
+    # ...and only once
+    cands[0] = bud.Candidate(2, "edge", s, close, 0.09, ("player_points",), cfg.closing_markets)
+    p = bud.plan(
+        cfg,
+        close + timedelta(minutes=30),
+        remaining=400,
+        spent_today=10,
+        game_lines_today=1,
+        last_game_lines=close,
+        candidates=cands,
+        books=books,
+    )
+    assert not p.props
+
+
+def test_budget_holds_credits_for_todays_closing_fetches():
+    cfg = bud.BudgetConfig.load()
+    books = ["fanduel", "betmgm"]
+    now = datetime(2026, 11, 10, 15, 0, tzinfo=UTC)
+    later = [
+        bud.Candidate(i, f"g{i}", now + timedelta(hours=7), now - timedelta(hours=1), 0.05, (), 9) for i in range(3)
+    ]
+    fresh = [bud.Candidate(10 + i, f"n{i}", now + timedelta(hours=20), None) for i in range(20)]
+    p = bud.plan(
+        cfg,
+        now,
+        remaining=200,
+        spent_today=0,
+        game_lines_today=1,
+        last_game_lines=now,
+        candidates=later + fresh,
+        books=books,
+    )
+    unit = bud.credits_for(["x"], books)
+    held = min(3 * cfg.closing_markets * unit, p.allowance // 2)
+    assert p.cost(cfg, books) <= p.allowance - held
