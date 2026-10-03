@@ -10,7 +10,7 @@ export const NAV: NavItem[] = [
   { to: "/", label: "Dashboard", phase: 0 },
   { to: "/games", label: "Games", phase: 1 },
   { to: "/props", label: "Props", phase: 5 },
-  { to: "/props/best", label: "Best Props", phase: 6 },
+  { to: "/props/best", label: "Card of the Day", phase: 6 },
   { to: "/players", label: "Players", phase: 1 },
   { to: "/models", label: "Model Tests", phase: 3 },
   { to: "/goalies", label: "Goalies", phase: 10 },

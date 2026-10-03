@@ -20,6 +20,7 @@ const Player = named(() => import("./routes/Players"), "Player");
 const Placeholder = named(() => import("./routes/Placeholder"), "Placeholder");
 const CoolOffGate = named(() => import("./routes/Settings"), "CoolOffGate");
 const BestProps = named(() => import("./routes/BestProps"), "BestProps");
+const CardOfDay = named(() => import("./routes/CardOfDay"), "CardOfDay");
 const News = named(() => import("./routes/News"), "News");
 const Parlay = named(() => import("./routes/Parlay"), "Parlay");
 const Performance = named(() => import("./routes/Performance"), "Performance");
@@ -38,7 +39,7 @@ const BUILT: Record<string, () => React.ReactElement> = {
   "/games": () => page(<Games />),
   "/players": () => page(<Players />),
   "/props": () => priced(<BestProps all />),
-  "/props/best": () => priced(<BestProps />),
+  "/props/best": () => priced(<CardOfDay />),
   "/models": () => page(<Models />),
   "/performance": () => page(<Performance />),
   "/news": () => page(<News />),
