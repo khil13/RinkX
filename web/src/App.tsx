@@ -1,7 +1,7 @@
 import { lazy, Suspense } from "react";
 import { HashRouter, Navigate, Route, Routes } from "react-router";
 import { Notice, Spinner } from "./components/ui";
-import { NAV } from "./nav";
+import { REDIRECTS } from "./nav";
 import { useManifest } from "./lib/data/fetch";
 import { SessionProvider, useSession } from "./lib/session";
 import { Setup } from "./routes/Setup";
@@ -12,12 +12,10 @@ import { useSettings } from "./lib/settings";
 const named = <K extends string>(load: () => Promise<Record<K, React.ComponentType<any>>>, key: K) =>
   lazy(() => load().then((m) => ({ default: m[key] })));
 const Layout = named(() => import("./components/Layout"), "Layout");
-const Dashboard = named(() => import("./routes/Dashboard"), "Dashboard");
 const Games = named(() => import("./routes/Games"), "Games");
 const Game = named(() => import("./routes/Game"), "Game");
 const Players = named(() => import("./routes/Players"), "Players");
 const Player = named(() => import("./routes/Players"), "Player");
-const Placeholder = named(() => import("./routes/Placeholder"), "Placeholder");
 const CoolOffGate = named(() => import("./routes/Settings"), "CoolOffGate");
 const BestProps = named(() => import("./routes/BestProps"), "BestProps");
 const CardOfDay = named(() => import("./routes/CardOfDay"), "CardOfDay");
@@ -37,14 +35,13 @@ const SettingsPage = named(() => import("./routes/Settings"), "Settings");
 const page = (el: React.ReactElement) => <Suspense fallback={<Spinner label="Loading…" />}>{el}</Suspense>;
 const priced = (el: React.ReactElement) => page(<CoolOffGate>{el}</CoolOffGate>);
 
-// Keep in sync with BUILT_ROUTES in nav.ts (the nav's "coming in phase N" tags).
-const BUILT: Record<string, () => React.ReactElement> = {
-  "/": () => page(<Dashboard />),
+// Every page, by path (the menu and its tabs are in nav.ts).
+const PAGES: Record<string, () => React.ReactElement> = {
+  "/": () => priced(<Today />),
   "/games": () => page(<Games />),
   "/players": () => page(<Players />),
   "/props": () => priced(<BestProps all />),
   "/props/best": () => priced(<CardOfDay />),
-  "/today": () => priced(<Today />),
   "/backtest": () => priced(<Backtest />),
   "/my": () => priced(<MyPerformance />),
   "/deployment": () => <DeploymentPage />,
@@ -88,12 +85,11 @@ function Gate() {
         <Route path="*" element={<Unlock />} />
       ) : (
         <Route element={page(<Layout />)}>
-          {NAV.map((n) => (
-            <Route
-              key={n.to}
-              path={n.to}
-              element={BUILT[n.to]?.() ?? page(<Placeholder title={n.label} phase={n.phase} />)}
-            />
+          {Object.entries(PAGES).map(([path, el]) => (
+            <Route key={path} path={path} element={el()} />
+          ))}
+          {Object.entries(REDIRECTS).map(([from, to]) => (
+            <Route key={from} path={from} element={<Navigate to={to} replace />} />
           ))}
           <Route path="/games/:id" element={page(<Game />)} />
           <Route path="/players/:id" element={page(<Player />)} />

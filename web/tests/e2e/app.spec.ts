@@ -13,7 +13,7 @@ async function unlock(page: Page, remember = true, site = CONFIGURED) {
   await page.getByLabel("Passphrase").fill(passphrase);
   if (!remember) await page.getByLabel("Remember on this device").uncheck();
   await page.getByRole("button", { name: "Unlock" }).click();
-  await expect(page.getByRole("heading", { name: "Dashboard" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /Today's slate/ })).toBeVisible();
 }
 
 test("wrong passphrase is rejected and nothing is shown", async ({ page }) => {
@@ -21,7 +21,7 @@ test("wrong passphrase is rejected and nothing is shown", async ({ page }) => {
   await page.getByLabel("Passphrase").fill("not the passphrase at all");
   await page.getByRole("button", { name: "Unlock" }).click();
   await expect(page.getByText("That passphrase doesn't unlock this site.")).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Dashboard" })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: /Today's slate/ })).toHaveCount(0);
 });
 
 test("unlocks pipeline-encrypted data and reports honest empty state", async ({ page }) => {
@@ -44,7 +44,7 @@ test("unlocks pipeline-encrypted data and reports honest empty state", async ({ 
 test("remembered key survives reload; Lock forgets it", async ({ page }) => {
   await unlock(page, true);
   await page.reload();
-  await expect(page.getByRole("heading", { name: "Dashboard" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /Today's slate/ })).toBeVisible();
   await page.getByRole("button", { name: "Lock" }).click();
   await expect(page.getByLabel("Passphrase")).toBeVisible();
   await page.reload();
@@ -57,13 +57,22 @@ test("not-remembered key is gone after reload", async ({ page }) => {
   await expect(page.getByLabel("Passphrase")).toBeVisible();
 });
 
-test("every page in the menu is built: none shows a placeholder", async ({ page }) => {
+test("every menu page opens with a heading; grouped pages share section tabs", async ({ page, isMobile }) => {
+  test.skip(isMobile, "sidebar layout");
   await unlock(page);
-  for (const route of ["/", "/games", "/props", "/props/best", "/players", "/models", "/goalies", "/lines", "/parlay",
-    "/performance", "/news", "/settings", "/admin"]) {
-    await page.goto(`${CONFIGURED}#${route}`);
+  const menu = page.getByRole("navigation", { name: "Main" });
+  const sections = await menu.getByRole("link").allTextContents();
+  expect(sections).toEqual(["Today", "Card of the Day", "Props", "Games", "Players", "Lineups", "Parlay", "Results", "Settings"]);
+  for (const name of sections) {
+    await menu.getByRole("link", { name, exact: true }).click();
     await expect(page.locator("main h1").first()).toBeVisible();
-    await expect(page.getByText(/Not built yet/)).toHaveCount(0);
+  }
+  await menu.getByRole("link", { name: "Results", exact: true }).click();
+  const tabs = page.getByRole("navigation", { name: "Results pages" });
+  for (const t of ["Performance", "Backtest", "My bets", "Model tests"]) {
+    await tabs.getByRole("link", { name: t, exact: true }).click();
+    await expect(page.locator("main h1").first()).toBeVisible();
+    await expect(tabs.getByRole("link", { name: t, exact: true })).toHaveAttribute("aria-current", "page");
   }
 });
 
@@ -125,7 +134,7 @@ test("pages fit the screen with no horizontal page scroll", async ({ page }) => 
 
 test("daily slate shows real games with records, rest and honest gaps", async ({ page }) => {
   await unlock(page);
-  await expect(page.getByText(/Today · /)).toBeVisible();
+  await expect(page.getByRole("list", { name: "Starting goalies" }).getByRole("listitem")).toHaveCount(13);
   await page.goto(`${CONFIGURED}#/games`);
   await expect(page.getByText(/13 games/)).toBeVisible();
   const card = page.locator("a", { hasText: "Bruins" }).filter({ hasText: "Kings" });
@@ -405,6 +414,8 @@ test("model performance: graded results, calibration vs market, splits and recen
   await expect(page.getByRole("table", { name: "By confidence" })).toBeVisible();
   await expect(page.getByRole("table", { name: "By model version" })).toContainText("synthetic");
   const recent = page.getByRole("list", { name: "Recent graded bets" }).getByRole("listitem");
+  await expect(recent).toHaveCount(15);
+  await page.getByRole("button", { name: "Show all 50" }).click();
   await expect(recent).toHaveCount(50);
   await expect(recent.first()).toContainText(/actual \d+/);
   await expect(recent.first()).toContainText(/WIN|LOSS|win|loss/);
@@ -480,7 +491,7 @@ test("phone: tab bar, More bottom sheet, and the prop card as a bottom sheet", a
   test.skip(!isMobile, "phone layout only");
   await unlock(page, true, MODELS);
   const tabs = page.getByRole("navigation", { name: "Tabs" });
-  for (const t of ["Slate", "Card", "Search", "Parlay", "More"]) await expect(tabs.getByText(t, { exact: true })).toBeVisible();
+  for (const t of ["Today", "Card", "Props", "Parlay", "More"]) await expect(tabs.getByText(t, { exact: true })).toBeVisible();
   await tabs.getByRole("button", { name: "More" }).click();
   const sheet = page.getByRole("dialog", { name: "More" });
   await expect(sheet).toBeVisible();
@@ -627,7 +638,7 @@ test("saves + win: the confirmed starter's joint projection by save line (synthe
 
 test("today: top props, by market, moves, goalies and a daily report from published data (synthetic)", async ({ page }) => {
   await unlock(page, true, MODELS);
-  await page.goto(`${MODELS}#/today`);
+  await page.goto(`${MODELS}#/today`); // old address: redirects to the home page
   await expect(page.getByRole("heading", { name: /Today's slate/ })).toBeVisible();
   await expect(page.getByLabel("Data freshness")).toContainText(/Updated/);
   await expect(page.getByRole("list", { name: "Top 10 props" }).getByRole("listitem").first()).toContainText("Syn P8000002");
@@ -660,7 +671,7 @@ test("game prop center and advanced filters (synthetic)", async ({ page }) => {
   await page.getByRole("link", { name: /T01.*T00/ }).first().click();
   const center = page.getByLabel("Game prop center");
   await expect(center.getByLabel("Best SOG props")).toContainText("Syn P8000002");
-  await expect(center.getByLabel("Best hit props")).toContainText("No priced lines in this market.");
+  await expect(center.getByLabel("Markets without priced lines")).toContainText("hit");
 });
 
 test("player prop profile and shot map from recorded play-by-play", async ({ page }) => {

@@ -1,30 +1,56 @@
-// The site map: one entry per page, with the roadmap phase that delivers it (docs/08-roadmap.md).
+// The site map: a few top-level sections, each with its pages as tabs (docs/06-ui.md).
 
-export interface NavItem {
-  to: string;
+export interface Section {
   label: string;
-  phase: number; // roadmap phase that delivers the page (docs/08-roadmap.md)
+  /** the section's pages; the first is where the section link goes */
+  tabs: { to: string; label: string }[];
 }
 
-export const NAV: NavItem[] = [
-  { to: "/", label: "Dashboard", phase: 0 },
-  { to: "/today", label: "Today", phase: 6 },
-  { to: "/games", label: "Games", phase: 1 },
-  { to: "/props", label: "Props", phase: 5 },
-  { to: "/props/best", label: "Card of the Day", phase: 6 },
-  { to: "/players", label: "Players", phase: 1 },
-  { to: "/models", label: "Model Tests", phase: 3 },
-  { to: "/goalies", label: "Goalies", phase: 10 },
-  { to: "/deployment", label: "Lines & PP", phase: 10 },
-  { to: "/lines", label: "Line Movement", phase: 10 },
-  { to: "/parlay", label: "Parlay Builder", phase: 8 },
-  { to: "/performance", label: "Model Performance", phase: 7 },
-  { to: "/backtest", label: "Backtest", phase: 7 },
-  { to: "/my", label: "My Performance", phase: 7 },
-  { to: "/news", label: "News", phase: 8 },
-  { to: "/settings", label: "Settings", phase: 9 },
-  { to: "/admin", label: "Admin", phase: 0 },
+export const SECTIONS: Section[] = [
+  { label: "Today", tabs: [{ to: "/", label: "Today" }] },
+  { label: "Card of the Day", tabs: [{ to: "/props/best", label: "Card of the Day" }] },
+  {
+    label: "Props",
+    tabs: [
+      { to: "/props", label: "All props" },
+      { to: "/lines", label: "Line movement" },
+    ],
+  },
+  { label: "Games", tabs: [{ to: "/games", label: "Games" }] },
+  { label: "Players", tabs: [{ to: "/players", label: "Players" }] },
+  {
+    label: "Lineups",
+    tabs: [
+      { to: "/goalies", label: "Goalies" },
+      { to: "/deployment", label: "Lines & PP" },
+      { to: "/news", label: "News & alerts" },
+    ],
+  },
+  { label: "Parlay", tabs: [{ to: "/parlay", label: "Parlay" }] },
+  {
+    label: "Results",
+    tabs: [
+      { to: "/performance", label: "Performance" },
+      { to: "/backtest", label: "Backtest" },
+      { to: "/my", label: "My bets" },
+      { to: "/models", label: "Model tests" },
+    ],
+  },
+  {
+    label: "Settings",
+    tabs: [
+      { to: "/settings", label: "Settings" },
+      { to: "/admin", label: "Data & admin" },
+    ],
+  },
 ];
 
-// Pages that exist; the rest show their roadmap phase in the nav.
-export const BUILT_ROUTES = new Set(["/", "/today", "/games", "/props", "/props/best", "/players", "/models", "/performance", "/backtest", "/my", "/news", "/parlay", "/settings", "/goalies", "/deployment", "/lines", "/admin"]);
+/** The section a path belongs to (deeper paths like /games/123 belong to their parent). */
+export function sectionOf(path: string): Section | undefined {
+  const exact = SECTIONS.find((s) => s.tabs.some((t) => t.to === path));
+  if (exact) return exact;
+  return SECTIONS.find((s) => s.tabs.some((t) => t.to !== "/" && path.startsWith(`${t.to}/`)));
+}
+
+/** Old addresses that moved, so bookmarks keep working. */
+export const REDIRECTS: Record<string, string> = { "/today": "/" };

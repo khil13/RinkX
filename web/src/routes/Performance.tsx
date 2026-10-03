@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { odds } from "../components/Lines";
 import { DataChip, Notice, Panel, Spinner } from "../components/ui";
 import { useEncrypted } from "../lib/data/fetch";
@@ -143,11 +144,23 @@ const OUTCOME_STYLE: Record<GradedBet["outcome"], string> = {
   void: "border-line text-muted",
 };
 
+const RECENT_SHOWN = 15;
+
 function Recent({ rows }: { rows: GradedBet[] }) {
+  const [all, setAll] = useState(false);
   return (
-    <Panel title="Recent graded bets">
+    <Panel
+      title="Recent graded bets"
+      right={
+        rows.length > RECENT_SHOWN && (
+          <button type="button" className="min-h-9 text-xs text-accent underline" onClick={() => setAll(!all)}>
+            {all ? "Show fewer" : `Show all ${rows.length}`}
+          </button>
+        )
+      }
+    >
       <ul className="flex flex-col divide-y divide-line" aria-label="Recent graded bets">
-        {rows.map((r) => (
+        {(all ? rows : rows.slice(0, RECENT_SHOWN)).map((r) => (
           <li key={r.prediction_id} className="flex flex-wrap items-baseline justify-between gap-2 py-1.5 text-sm">
             <span>
               <span className="font-semibold">{r.subject}</span>{" "}
