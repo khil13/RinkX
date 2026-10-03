@@ -39,6 +39,12 @@ PLAYOFF_K_GAMES = 40.0  # ...and by this many team-games for team shot volume
 REST_K_H = 200.0  # back-to-back factors: shrink toward "no effect" by this many skater-hours
 REST_K_GAMES = 40.0  # ...and by this many team-games for team shots and goals
 TEAM_REST_STATS = ("shots", "goals")
+AUX_STATS = ("attempts",)  # tracked like a stat (rate per hour) but not projected
+TRACKED = (*SKATER_STATS, *AUX_STATS)
+FORM_GAMES = 5  # recent form: his last 5 games' shot rate...
+FORM_K_H = 3.0  # ...shrunk toward his long-run rate by this many hours
+POS_AGAINST_C = 10.0  # opponent's shots allowed to forwards/defence: shrink by this many games
+PP_CHANGE_C = 0.02  # hours added to both sides of the PP-time ratio (keeps tiny PP times from exploding)
 SLOT_C = 5.0  # a team's ice time for a line slot: shrink toward the league's by this many games
 MQ_M = 4.0  # linemate quality: a mate's points rate shrunk toward his position's by this many hours
 MATES_CLIP = (0.5, 2.0)
@@ -63,9 +69,10 @@ class SkaterState:
     toi: list[float] = field(default_factory=_zeros)  # decayed TOI hours
     pn: list[float] = field(default_factory=_zeros)  # decayed games with known PP TOI
     ptoi: list[float] = field(default_factory=_zeros)
-    x: dict[str, list[float]] = field(default_factory=lambda: {s: _zeros() for s in SKATER_STATS})
-    b: dict[str, list[float]] = field(default_factory=lambda: {s: _zeros() for s in SKATER_STATS})
+    x: dict[str, list[float]] = field(default_factory=lambda: {s: _zeros() for s in TRACKED})
+    b: dict[str, list[float]] = field(default_factory=lambda: {s: _zeros() for s in TRACKED})
     games: int = 0
+    recent_h: deque[float | None] = field(default_factory=lambda: deque(maxlen=10))  # TOI hours, last 10
     season: dict[int, dict[str, list[float]]] = field(default_factory=dict)  # season -> stat -> [sum, n]
     recent: dict[str, deque[float]] = field(default_factory=lambda: {s: deque(maxlen=10) for s in SKATER_STATS})
     last_date: str | None = None
@@ -96,8 +103,8 @@ class PosLeague:
     toi: float = 0.0
     pgames: float = 0.0
     ptoi: float = 0.0
-    x: dict[str, float] = field(default_factory=lambda: dict.fromkeys(SKATER_STATS, 0.0))
-    b: dict[str, float] = field(default_factory=lambda: dict.fromkeys(SKATER_STATS, 0.0))
+    x: dict[str, float] = field(default_factory=lambda: dict.fromkeys(TRACKED, 0.0))
+    b: dict[str, float] = field(default_factory=lambda: dict.fromkeys(TRACKED, 0.0))
 
 
 @dataclass
@@ -118,6 +125,8 @@ class TeamState:
     # decayed ice time by line slot (F1..D3) and by PP unit (PP1, PP2, PP0 = neither): [hours, games]
     slot: dict[str, list[float]] = field(default_factory=dict)
     pp_slot: dict[str, list[float]] = field(default_factory=dict)
+    # decayed shots allowed to opposing forwards / defence per game: pos -> [shots, games]
+    against_pos: dict[str, list[float]] = field(default_factory=lambda: {"F": [0.0, 0.0], "D": [0.0, 0.0]})
 
 
 @dataclass
@@ -137,6 +146,7 @@ class League:
     # team shots and goals per game: [sum_b2b, n_b2b, sum_rested, n_rested], by own team / opponent on a B2B
     team_b2b: dict[str, list[float]] = field(default_factory=lambda: {s: [0.0] * 4 for s in TEAM_REST_STATS})
     team_opp_b2b: dict[str, list[float]] = field(default_factory=lambda: {s: [0.0] * 4 for s in TEAM_REST_STATS})
+    against_pos: dict[str, list[float]] = field(default_factory=lambda: {"F": [0.0, 0.0], "D": [0.0, 0.0]})
     slot: dict[str, list[float]] = field(default_factory=dict)  # line slot -> [hours, games]
     pp_slot: dict[str, list[float]] = field(default_factory=dict)
     saves: float = 0.0
@@ -373,10 +383,50 @@ class State:
             rec = st.recent[s]
             f[f"base_l10.{s}"] = sum(rec) / len(rec) if rec else fallback
             f[f"fallback.{s}"] = fallback
+        for i in range(H):
+            f[f"x.attempts.{i}"] = st.x["attempts"][i]
+            f[f"b.attempts.{i}"] = st.b["attempts"][i]
+        f["prior.attempts"] = self.prior_rate(pos, "attempts")
+        f |= self._shot_inputs(st, pos, team, opp)
         f["prior_finish"] = self.prior_finish(pos)
         for j, k in enumerate(K_SV):
             f[f"gf.{j}"] = self.goalie_factor(opp_goalies, k)
+        # Context shown with projections (not model inputs): league team averages and shot pace.
+        f["lg_team.shots"] = self.team_avg("shots")
+        f["pace.for"] = self.team_factor(team, "shots", "for")
+        f["pace.opp_against"] = self.team_factor(opp, "shots", "against")
         f |= self._lineup_features(st, team, lineup)
+        return f
+
+    def _shot_inputs(self, st: SkaterState, pos: str, team: int, opp: int) -> dict[str, float]:
+        """Model 1.6 candidates for shots: recent form, the opponent's allowance to his position, and
+        a change in his power-play time (each 1.0 when there's nothing to go on)."""
+        f: dict[str, float] = {}
+        prior = self.prior_rate(pos, "shots")
+        long_rate = (st.x["shots"][H - 1] + 4.0 * prior) / (st.b["shots"][H - 1] + 4.0) if prior else 0.0
+        recent = [
+            (v, h)
+            for v, h in zip(list(st.recent["shots"])[-FORM_GAMES:], list(st.recent_h)[-FORM_GAMES:], strict=False)
+            if h
+        ]
+        if long_rate > 0 and recent:
+            s5 = sum(v for v, _ in recent)
+            h5 = sum(h for _, h in recent if h is not None)
+            f["form.shots"] = ((s5 + FORM_K_H * long_rate) / (h5 + FORM_K_H)) / long_rate
+        else:
+            f["form.shots"] = 1.0
+        lg_s, lg_n = self.league.against_pos[pos]
+        t = self.teams.get(opp)
+        if lg_n and lg_s and t is not None:
+            avg = lg_s / lg_n
+            s, n = t.against_pos[pos]
+            f["opp_pos.shots"] = ((s + POS_AGAINST_C * avg) / (n + POS_AGAINST_C)) / avg
+        else:
+            f["opp_pos.shots"] = 1.0
+        f["team_pace"] = self.team_factor(team, "shots", "for")
+        pp_hist = (st.ptoi[H - 1] + TOI_K * self.pos_basis_h(pos, "pp")) / (st.pn[H - 1] + TOI_K)
+        pp_now = (st.ptoi[0] + TOI_K * self.pos_basis_h(pos, "pp")) / (st.pn[0] + TOI_K)
+        f["pp_change"] = (pp_now + PP_CHANGE_C) / (pp_hist + PP_CHANGE_C)
         return f
 
     def _lineup_features(
@@ -567,6 +617,14 @@ class State:
             for i in range(H):
                 st.pn[i] += 1
                 st.ptoi[i] += pp_h
+        st.recent_h.append(toi_h if line.stats.get("shots") is not None else None)
+        att = line.stats.get("attempts")
+        if att is not None and toi_h is not None:
+            for i in range(H):
+                st.x["attempts"][i] += att
+                st.b["attempts"][i] += toi_h
+            lg.x["attempts"] += att
+            lg.b["attempts"] += toi_h
         seas = st.season.setdefault(season, {})
         for s in SKATER_STATS:
             v = line.stats[s]
@@ -659,6 +717,18 @@ class State:
         lg = self.league
         for team, opp in ((game.home_team, game.away_team), (game.away_team, game.home_team)):
             t = self.teams[team]
+            # shots this team allowed to the opponent's forwards and defence
+            for pos in ("F", "D"):
+                vals = [ln.stats["shots"] for ln in game.skaters if ln.team == opp and ln.pos == pos]
+                acc = t.against_pos[pos]
+                acc[0] *= TEAM_DECAY
+                acc[1] *= TEAM_DECAY
+                if vals and all(v is not None for v in vals):
+                    total = float(sum(v for v in vals if v is not None))
+                    acc[0] += total
+                    acc[1] += 1
+                    lg.against_pos[pos][0] += total
+                    lg.against_pos[pos][1] += 1
             for s in SKATER_STATS:
                 for d in (t.for_, t.for_n, t.against, t.against_n):
                     d[s] *= TEAM_DECAY

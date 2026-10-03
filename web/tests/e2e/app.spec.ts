@@ -245,7 +245,7 @@ test("model tests page shows what passed and what was held back", async ({ page 
   await expect(page.getByText(/not modeled/)).toHaveCount(0); // every market in the catalogue has a model
   // Each family's published version, and a newer one waiting on live results.
   const cc = page.getByRole("list", { name: "Champion and challenger" });
-  await expect(cc).toContainText("shots: v1.4 published, v1.5 challenging");
+  await expect(cc).toContainText(/shots: v1\.4 published, v1\.[56] challenging/);
   await expect(cc).toContainText(/0 of 250 graded props/);
 });
 
@@ -319,6 +319,16 @@ test("card of the day: the date's best team and player props, one per player, in
   await expect(dialog.getByText(/^Implied\(/).first()).toBeVisible();
   await expect(dialog.getByText(/^Calibrated from live results: P\(over\) 0\.\d{4} → 0\.\d{4}/)).toBeVisible();
   await expect(dialog).toContainText(/Prediction #\d+ is frozen/);
+  // Scores and explanations, built only from the frozen inputs.
+  const why = dialog.getByRole("region", { name: "Why this prop" }).or(dialog.getByLabel("Why this prop"));
+  await expect(why).toContainText("Projected Shots on Goal");
+  await expect(why).toContainText("Last 10 at this line");
+  await expect(why).toContainText("These are estimates");
+  await expect(dialog.getByLabel("Prop scores")).toContainText(/Prop Intelligence \d+\/100/);
+  await expect(dialog.getByLabel("Prop scores")).toContainText(/Shot Environment: \d+\/100/);
+  await dialog.getByRole("button", { name: "Why?" }).click();
+  await expect(dialog.getByRole("table", { name: "Prop Intelligence parts" })).toContainText("Model edge");
+  await expect(dialog.getByLabel("Confidence vs value")).toContainText("Prop value");
   await dialog.getByRole("button", { name: "Close" }).click();
   await expect(dialog).toBeHidden();
 });
@@ -613,4 +623,116 @@ test("saves + win: the confirmed starter's joint projection by save line (synthe
   const lines = card.getByLabel("Win with saves");
   await expect(lines).toContainText("20+ saves");
   await expect(lines).toContainText("30+ saves");
+});
+
+test("today: top props, by market, moves, goalies and a daily report from published data (synthetic)", async ({ page }) => {
+  await unlock(page, true, MODELS);
+  await page.goto(`${MODELS}#/today`);
+  await expect(page.getByRole("heading", { name: /Today's slate/ })).toBeVisible();
+  await expect(page.getByLabel("Data freshness")).toContainText(/Updated/);
+  await expect(page.getByRole("list", { name: "Top 10 props" }).getByRole("listitem").first()).toContainText("Syn P8000002");
+  await expect(page.getByLabel("Today by market").getByLabel("Best SOG props")).toContainText("Syn P8000002");
+  await expect(page.getByRole("list", { name: "Starting goalies" })).toContainText("T00");
+  const report = page.getByLabel("Daily report");
+  await expect(report).toContainText("BEST PROPS TODAY".toLowerCase(), { ignoreCase: true });
+  await expect(report).toContainText(/model \d+\.\d% · market \d+\.\d% · edge \+\d+\.\d pts/);
+  await expect(report).toContainText("No goal lean today.");
+  await expect(page.getByLabel("Public betting data")).toContainText("DATA UNAVAILABLE");
+});
+
+test("game prop center and advanced filters (synthetic)", async ({ page }) => {
+  await unlock(page, true, MODELS);
+  await page.goto(`${MODELS}#/props`);
+  await page.getByText("More filters").click();
+  const more = page.getByRole("group", { name: "More filters" });
+  await more.getByLabel("Player").fill("P8000002");
+  await expect(page.getByRole("list", { name: "Props" }).getByRole("listitem")).toHaveCount(2); // two books
+  await more.getByLabel("Min last-10 hit rate").selectOption("80");
+  const n = await page.getByRole("list", { name: "Props" }).getByRole("listitem").count();
+  expect(n).toBeLessThanOrEqual(2);
+  await page.getByRole("button", { name: "Reset filters" }).click();
+  await expect(page.getByRole("list", { name: "Props" }).getByRole("listitem")).toHaveCount(6);
+
+  const card = page.getByRole("list", { name: "Props" }).getByRole("listitem").first();
+  const gameText = await card.textContent();
+  expect(gameText).toContain("T01 @ T00");
+  await page.goto(`${MODELS}#/games`);
+  await page.getByRole("link", { name: /T01.*T00/ }).first().click();
+  const center = page.getByLabel("Game prop center");
+  await expect(center.getByLabel("Best SOG props")).toContainText("Syn P8000002");
+  await expect(center.getByLabel("Best hit props")).toContainText("No priced lines in this market.");
+});
+
+test("player prop profile and shot map from recorded play-by-play", async ({ page }) => {
+  await unlock(page, false, CONFIGURED);
+  await page.goto(`${CONFIGURED}#/players/8477960`); // Adrian Kempe: 2 SOG, 6 attempts
+  const prof = page.getByLabel("Prop profile");
+  await expect(prof.getByLabel("Shooting")).toContainText("SOG / game");
+  await expect(prof.getByLabel("Usage")).toContainText(/Recent deployment \(from shift charts\): \S+ F\d\/PP1/);
+  const map = prof.getByRole("img", { name: /Shot map: \d+ attempts, 2 on goal, 0 goals/ });
+  await expect(map).toBeVisible();
+  await prof.getByRole("button", { name: "Last 5" }).click();
+  await prof.getByLabel("Density").check();
+  await expect(prof.getByText(/High danger: within 25 ft/)).toBeVisible();
+});
+
+test("lines & PP tracker, goalie numbers and the synthetic player profile (synthetic)", async ({ page }) => {
+  await unlock(page, true, MODELS);
+  await page.goto(`${MODELS}#/deployment`);
+  await expect(page.getByRole("heading", { name: "Lines & power play" })).toBeVisible();
+  await page.getByLabel("Changes only").uncheck();
+  await expect(page.getByRole("list", { name: "Deployment T01 @ T00" })).toContainText("last game (shift chart)");
+  await page.goto(`${MODELS}#/goalies`);
+  await expect(page.getByLabel("Goalie numbers").first()).toContainText(/\d+ starts · SV% \.\d{3}/);
+  await expect(page.getByLabel("Goalie numbers").first()).toContainText("advanced metrics: unavailable");
+  await page.goto(`${MODELS}#/players/8000002`);
+  const prof = page.getByLabel("Prop profile");
+  await expect(prof.getByLabel("Props")).toContainText("Shots on Goal");
+  await expect(prof.getByLabel("Shot map")).toContainText("DATA UNAVAILABLE");
+});
+
+test("parlay builder from the slate: risk levels and BUILD MY 8-LEG (synthetic)", async ({ page }) => {
+  await unlock(page, true, MODELS);
+  await page.goto(`${MODELS}#/parlay`);
+  const opts = page.getByRole("group", { name: "Parlay builder options" });
+  await opts.getByLabel("Legs").selectOption("2");
+  await opts.getByLabel("Risk").selectOption("aggressive");
+  await opts.getByRole("button", { name: "Build", exact: true }).click();
+  const built = page.getByLabel("Built parlay");
+  await expect(built).toBeVisible();
+  const text = (await built.textContent()) ?? "";
+  if (text.includes("INSUFFICIENT DATA")) {
+    await expect(built).toContainText("Nothing is forced in");
+  } else {
+    await expect(built.getByRole("table")).toContainText("Syn P");
+    await expect(built).toContainText(/Estimated combined probability \d+(\.\d)?%/);
+    await built.getByRole("button", { name: "Use these legs" }).click();
+    await expect(page.getByRole("list", { name: "Parlay legs" }).getByRole("listitem").first()).toBeVisible();
+  }
+  await opts.getByRole("button", { name: "🔥 BUILD MY 8-LEG" }).click();
+  await expect(built).toContainText(/Only \d legs meet the rules|INSUFFICIENT DATA|Estimated combined probability/);
+});
+
+test("backtest with filters, CLV by group, and tracking my own bets (synthetic)", async ({ page }) => {
+  await unlock(page, true, MODELS);
+  await page.goto(`${MODELS}#/backtest`);
+  await expect(page.getByText("SYNTHETIC test data")).toBeVisible();
+  const res = page.getByLabel("Backtest results");
+  await expect(res).toContainText(/W–L–P\d+–\d+–\d+/);
+  const before = await page.getByRole("heading", { name: /Results \(\d+ bets\)/ }).textContent();
+  await page.getByRole("group", { name: "Backtest filters" }).getByLabel("Min model probability").selectOption("70");
+  await expect(page.getByRole("heading", { name: /Results \(\d+ bets\)/ })).not.toHaveText(before!);
+  await page.getByLabel("Group CLV by").selectOption("book");
+  await expect(page.getByRole("table", { name: "CLV breakdown" })).toContainText(/FanDuel|BetMGM/);
+
+  await page.goto(`${MODELS}#/props`);
+  await page.getByRole("list", { name: "Props" }).getByRole("listitem").first().getByRole("button").click();
+  const dialog = page.getByRole("dialog", { name: "Prop card" });
+  await dialog.getByRole("button", { name: "Track this bet" }).click();
+  await expect(dialog.getByRole("button", { name: "Tracked" })).toBeDisabled();
+  await dialog.getByRole("button", { name: "Close" }).click();
+  await page.goto(`${MODELS}#/my`);
+  await expect(page.getByRole("heading", { name: "My performance" })).toBeVisible();
+  await expect(page.getByRole("list", { name: "Tracked bets" })).toContainText("pending");
+  await expect(page.getByRole("table", { name: "My results by market" })).toContainText("SOG");
 });

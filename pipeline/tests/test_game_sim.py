@@ -98,7 +98,7 @@ def league():
 @pytest.fixture(scope="module")
 def report(league) -> dict:
     conn, _ = league
-    return fit.evaluate(fit.collect(walk(history.load(conn))))
+    return fit.evaluate(fit.collect(walk(history.load(conn))), fit.BASE_VERSION)  # the published version
 
 
 def test_game_gate(report):

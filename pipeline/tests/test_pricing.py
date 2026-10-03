@@ -232,6 +232,33 @@ def test_pricing_real_projections_against_lines(tmp_path):
     assert fd["edge_over"] == pytest.approx(fd["p_model_over"] - fd["p_novig_over"], abs=1e-6)
     assert next(r for r in rows if r["code"] == "game_total")["game_projection_id"] is not None
 
+    # Scores are frozen with each prediction; parts add up to the score; the SOG prop has a Shot Environment.
+    sc = {r["prediction_id"]: r for r in conn.execute("SELECT * FROM prediction_scores").fetchall()}
+    assert set(sc) == {r["id"] for r in rows}
+    for r in rows:
+        s_ = sc[r["id"]]
+        parts = json.loads(s_["intelligence_parts"])
+        assert {p["part"] for p in parts} >= {"model_edge", "projection_vs_line", "recent_volume", "market_movement"}
+        if s_["intelligence"] is not None:
+            assert sum(p["points"] or 0 for p in parts) == pytest.approx(s_["intelligence"], abs=1.0)
+        facts = json.loads(s_["facts"])
+        assert facts["side"] in ("over", "under") and "projection" in facts
+        if r["code"] == "skater_shots_on_goal":
+            assert 0 <= s_["shot_environment"] <= 100 and s_["intelligence"] is not None
+            assert len(facts["l10_hit"]) == 2 and facts["l10_hit"][1] == 10
+            env = json.loads(s_["shot_env_parts"])
+            assert sum(p["points"] or 0 for p in env) == pytest.approx(s_["shot_environment"], abs=1.0)
+        else:
+            assert s_["shot_environment"] is None
+    from rinkx.publish.best import best_props
+
+    pub = best_props(conn, now)["rows"]
+    sog_row = next(x for x in pub if x["market"] == "skater_shots_on_goal")
+    labels = [b["label"] for b in sog_row["scores"]["why"]]
+    assert labels[:3] == ["Projected Shots on Goal", "Market line", "Projection vs line"]
+    assert "Shot Environment" in labels and "Last 10 at this line" in labels
+    assert "These are estimates" in sog_row["scores"]["summary"]
+
     # Nothing changed: nothing new. A price move: a new frozen prediction for that line only.
     assert run_pricing(conn, now + timedelta(hours=1), CFG) == 0
     upsert_line(

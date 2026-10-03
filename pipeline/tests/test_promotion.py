@@ -57,6 +57,22 @@ def test_version_15_adds_inputs_and_wins_the_walk_forward_test_here(deployed):
         assert new["stats"][s]["log_score"] > base["stats"][s]["log_score"]
 
 
+def test_version_16_shot_inputs_are_its_own(deployed):
+    conn, _ = deployed
+    tables = fit.collect(walk(history.load(conn)))
+    r16 = fit.evaluate(tables, "1.6")
+    new = {"form", "opp_pos", "team_pace", "pp_change"}
+    for v in ("1.4", "1.5"):
+        rv = fit.evaluate(tables, v)
+        assert not new & set(rv["choices"]["shots"]["factors"]) and rv["choices"]["shots"].get("att_w", 0) == 0
+    assert set(r16["choices"]["shots"]["factors"]) <= set(fit.SKATER_FACTORS["shots"])
+    assert r16["stats"]["shots"]["passed"]
+    # the candidates are point-in-time features with sane values
+    c = tables["skater"].cols
+    for k in ("form.shots", "opp_pos.shots", "team_pace", "pp_change"):
+        assert (c[k] > 0).all() and 0.3 < float(c[k].mean()) < 3
+
+
 def test_champion_publishes_and_challenger_is_priced_in_the_shadow(deployed, tmp_path):
     conn, _ = deployed
     today = date(2025, 10, 7) + timedelta(days=200)
@@ -68,7 +84,12 @@ def test_champion_publishes_and_challenger_is_priced_in_the_shadow(deployed, tmp
         (f, v): s for f, v, s in conn.execute("SELECT model_family, version, status FROM model_versions").fetchall()
     }
     assert status[("skater_shots", "1.4")] == "champion"  # the first version to pass takes an empty family
-    assert status[("skater_shots", "1.5")] == "challenger"
+    # One challenger per family: the passing newer version with the better walk-forward score.
+    chal_v = [v for (f, v), st in status.items() if f == "skater_shots" and st == "challenger"]
+    assert len(chal_v) == 1
+    newest = chal_v[0]
+    rep_by = {v: project.latest_report(conn, v)[0]["stats"]["shots"]["log_score"] for v in ("1.5", "1.6")}
+    assert newest == max(rep_by, key=lambda v: rep_by[v])
     assert project.champions(conn)["skater_shots"] == "1.4"
     # Published projections are the champion's; the challenger's sit beside them, unpublished.
     versions = {
@@ -91,7 +112,7 @@ def test_champion_publishes_and_challenger_is_priced_in_the_shadow(deployed, tmp
         "WHERE c.game_id = ? AND c.player_id = ? AND c.market_id = ?",
         (gid, pid, sog),
     ).fetchone()
-    assert chal is not None and chal[1] == "1.5" and chal[0] != pytest.approx(champ_mean, abs=1e-6)
+    assert chal is not None and chal[1] == newest and chal[0] != pytest.approx(champ_mean, abs=1e-6)
     # Explain carries his line and whether either team is on a back-to-back.
     inputs = json.loads(
         conn.execute(
@@ -120,9 +141,9 @@ def test_champion_publishes_and_challenger_is_priced_in_the_shadow(deployed, tmp
 
     rep = models_report(conn)
     assert rep["versions"]["skater_shots"] == "1.4"
-    assert rep["challengers"]["skater_shots"]["version"] == "1.5"
+    assert rep["challengers"]["skater_shots"]["version"] == newest
     fam = next(f for f in rep["promotion"]["families"] if f["family"] == "skater_shots")
-    assert fam == {"family": "skater_shots", "champion": "1.4", "challenger": "1.5", "live": None}
+    assert fam == {"family": "skater_shots", "champion": "1.4", "challenger": newest, "live": None}
 
 
 class Tracker:
@@ -190,6 +211,50 @@ def test_quick_entry_line_change_moves_a_player_up(deployed):
         conn, Tracker([Issue(32, "Quick Entry: line", bad, "owner", "2026-04-25T15:40:00Z")]), "owner", now
     )
     assert not qe.outcomes[0].applied and "Give a new line" in qe.outcomes[0].message
+
+
+def test_deployment_tracker_and_alerts_after_a_line_change(deployed, tmp_path):
+    """After the Quick Entry above (F4 -> F1 and PP1): the tracker shows the change against his last
+    game, a deployment alert fires once for the game, and profiles are filled from stored data."""
+    from rinkx.alerts.evaluate import evaluate as eval_alerts
+    from rinkx.alerts.evaluate import load_specs, sync
+    from rinkx.models import deployment
+    from rinkx.publish import profile
+
+    conn, _ = deployed
+    today = date(2025, 10, 7) + timedelta(days=200)
+    now = datetime(today.year, today.month, today.day, 17, tzinfo=UTC)
+    g = conn.execute("SELECT * FROM games WHERE nhl_game_id = ?", (synth.UPCOMING_NHL_ID,)).fetchone()
+    rows = deployment.game_deployment(conn, g)
+    moved = [r for r in rows if r["status"] == "quick_entry"]
+    assert len(moved) == 1
+    m = moved[0]
+    assert (m["line"], m["pp_unit"]) == ("F1", 1) and m["previous"]["line"] == "F4"
+    assert {"pp1_promotion", "top_line_promotion"} <= set(m["changes"]) and m["source"] == "https://x.test/lines"
+    # Players without a Quick Entry: their last game, compared with the one before.
+    assert all(r["status"] == "last_game" and r["line"] for r in rows if r is not m)
+    pub = deployment.published(conn, now, today.isoformat())
+    assert pub["games"][0]["players"] and "player_pk" not in pub["games"][0]["players"][0]
+
+    cfg = tmp_path / "alerts.yml"
+    cfg.write_text("alerts:\n  - key: dep\n    type: deployment\n    changes: [pp1_promotion]\n")
+    specs, errors = load_specs(cfg)
+    assert errors == [] and sync(conn, specs) == []
+    assert eval_alerts(conn, now, None) == 1
+    payload = json.loads(conn.execute("SELECT payload FROM alert_events ORDER BY id DESC LIMIT 1").fetchone()[0])
+    assert payload["message"].startswith("🔥 MOVED TO PP1: ") and "(Quick Entry)" in payload["message"]
+    assert eval_alerts(conn, now, None) == 0  # once per game
+    bad = tmp_path / "bad.yml"
+    bad.write_text("alerts:\n  - key: x\n    type: deployment\n    changes: [moon]\n")
+    assert "changes must be a list" in load_specs(bad)[1][0]
+
+    prof = profile.skater_profile(conn, m["player_pk"], 20252026, today.isoformat())
+    assert prof["shooting"]["games"] > 50 and prof["shooting"]["sog_per_60"] > 0
+    assert 0 < prof["shooting"]["shot_share"] < 0.3 and len(prof["usage"]["recent"]) == 5
+    assert prof["matchup"]["opp_sog_allowed"] > 0 and prof["matchup"]["position_group"] == "forwards"
+    gk = conn.execute("SELECT player_id FROM goalie_game_stats WHERE started = 1 LIMIT 1").fetchone()[0]
+    imp = profile.goalie_impact(conn, gk, today.isoformat(), 20252026)
+    assert imp["starts"] > 10 and 0.85 < imp["save_pct"] < 0.95 and imp["advanced"] is None
 
 
 def _graded_league(better: str):

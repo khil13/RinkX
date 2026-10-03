@@ -18,6 +18,12 @@
 #              categories (list: injury, lineup, goalie, scratch, suspension, coach, rest, transaction,
 #              general), player, team
 #   line       a specific player's line: market and player required, plus max_line and/or min_price
+#   deployment a verified deployment change (last game's shift chart, or a Quick Entry line change):
+#              changes (list: pp1_promotion, top_line_promotion, pp1_demotion, top_line_demotion,
+#              toi_down, toi_up; default all), player, team
+#   projection a projection changed by at least min_change_pct (default 15) since the one it replaced:
+#              direction (up, down or both), market, player, team
+#   scratch    a player entered as a healthy scratch (Quick Entry: player out), player, team
 #
 # market: a market code (skater_shots_on_goal, skater_goals, skater_assists, skater_points,
 #         skater_pp_points, skater_blocked_shots, skater_anytime_goal, skater_first_goal,
@@ -38,4 +44,16 @@ alerts:
   - key: injury-news
     type: news
     categories: [injury, scratch, suspension]
+    enabled: false
+
+  - key: deployment-changes
+    type: deployment
+    changes: [pp1_promotion, top_line_promotion, pp1_demotion, toi_down]
+
+  - key: projection-moves
+    type: projection
+    min_change_pct: 15
+
+  - key: scratches
+    type: scratch
     enabled: false

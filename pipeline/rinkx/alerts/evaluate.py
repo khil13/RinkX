@@ -22,6 +22,7 @@ import yaml
 
 from rinkx.config import REPO_ROOT
 from rinkx.ingestion.runs import SourceSpec, ingestion_run, register_source
+from rinkx.models import deployment
 from rinkx.pricing.odds import implied
 from rinkx.publish.best import best_props
 from rinkx.timeutil import iso
@@ -36,6 +37,9 @@ TYPES = {
     "goalie": "goalie_confirmed",
     "news": "injury_news",
     "line": "line_threshold",
+    "deployment": "deployment",
+    "projection": "projection_change",
+    "scratch": "scratch",
 }
 OPTIONS = {
     "edge": {"min_edge", "min_confidence", "min_ev", "market", "player", "team"},
@@ -43,7 +47,11 @@ OPTIONS = {
     "goalie": {"team"},
     "news": {"categories", "player", "team"},
     "line": {"market", "player", "max_line", "min_price"},
+    "deployment": {"changes", "player", "team"},
+    "projection": {"min_change_pct", "direction", "market", "player", "team"},
+    "scratch": {"player", "team"},
 }
+DEPLOYMENT_CHANGES = set(deployment.CHANGE_TEXT)
 NEWS_CATEGORIES = {"injury", "lineup", "goalie", "scratch", "suspension", "coach", "rest", "transaction", "general"}
 WINDOW = timedelta(hours=48)  # games starting within this window are watched
 NEWS_RECENT = timedelta(hours=36)
@@ -96,6 +104,12 @@ def load_specs(path: Path = ALERTS_FILE) -> tuple[list[AlertSpec], list[str]]:
                 not opts.get("market") or not opts.get("player") or ("max_line" not in opts and "min_price" not in opts)
             ):
                 raise AlertConfigError("line needs market, player, and max_line or min_price")
+            if kind == "deployment":
+                ch = opts.get("changes") or []
+                if not isinstance(ch, list) or set(ch) - DEPLOYMENT_CHANGES:
+                    raise AlertConfigError(f"changes must be a list of: {', '.join(sorted(DEPLOYMENT_CHANGES))}")
+            if kind == "projection" and opts.get("direction", "both") not in ("up", "down", "both"):
+                raise AlertConfigError("direction must be up, down or both")
             if kind == "news":
                 cats = opts.get("categories") or []
                 if not isinstance(cats, list) or set(cats) - NEWS_CATEGORIES:
@@ -292,7 +306,64 @@ def _news(conn: sqlite3.Connection, a: sqlite3.Row, c: dict[str, Any], now: date
                 break
 
 
-MATCHERS = {"edge": _edge, "line_move": _line_move, "goalie": _goalie, "news": _news, "line": _line}
+def _games_rows(conn: sqlite3.Connection, games: Games) -> list[sqlite3.Row]:
+    if not games:
+        return []
+    marks = ",".join("?" * len(games))
+    return conn.execute(f"SELECT * FROM games WHERE id IN ({marks})", tuple(games)).fetchall()
+
+
+def _deployment(conn: sqlite3.Connection, a: sqlite3.Row, c: dict[str, Any], now: datetime, games: Games) -> Hits:
+    kinds = set(c.get("changes") or [])
+    for g in _games_rows(conn, games):
+        for text in deployment.alert_lines(conn, g, kinds, a["player_id"], a["team_id"]):
+            yield games[g["id"]], text
+
+
+def _projection(conn: sqlite3.Connection, a: sqlite3.Row, c: dict[str, Any], now: datetime, games: Games) -> Hits:
+    min_pct = float(c.get("min_change_pct", 15))
+    for gid, g in games.items():
+        for r in deployment.projection_changes(conn, gid, min_pct, str(c.get("direction", "both"))):
+            if c.get("market") and r["code"] != c["market"]:
+                continue
+            if a["player_id"] is not None and r["player_id"] != a["player_id"]:
+                continue
+            if c.get("team") and r["abbrev"] != str(c["team"]).upper():
+                continue
+            mark = "🔥" if r["pct"] > 0 else "⚠️"
+            yield (
+                g,
+                f"{mark} {r['full_name']} {r['name']} projection {r['prev']:.2f} → {r['mean']:.2f} ({r['pct']:+.0f}%), "
+                f"after: {str(r['trigger_reason']).replace('_', ' ')}",
+            )
+
+
+def _scratch(conn: sqlite3.Connection, a: sqlite3.Row, c: dict[str, Any], now: datetime, games: Games) -> Hits:
+    """A player ruled out for an upcoming game as a healthy scratch (Quick Entry, with its source)."""
+    for gid, g in games.items():
+        for r in conn.execute(
+            "SELECT av.player_id, av.source_ref, p.full_name, t.abbrev, t.id AS team_id FROM game_availability av "
+            "JOIN players p ON p.id = av.player_id LEFT JOIN teams t ON t.id = p.current_team_id "
+            "WHERE av.game_id = ? AND av.status = 'out' AND av.reason = 'healthy scratch'",
+            (gid,),
+        ):
+            if a["player_id"] is not None and r["player_id"] != a["player_id"]:
+                continue
+            if a["team_id"] is not None and r["team_id"] != a["team_id"]:
+                continue
+            yield g, f"Scratch: {r['full_name']} ({r['abbrev']}) out ({r['source_ref']})"
+
+
+MATCHERS = {
+    "edge": _edge,
+    "line_move": _line_move,
+    "goalie": _goalie,
+    "news": _news,
+    "line": _line,
+    "deployment": _deployment,
+    "projection": _projection,
+    "scratch": _scratch,
+}
 
 
 def evaluate(conn: sqlite3.Connection, now: datetime, site_url: str | None) -> int:

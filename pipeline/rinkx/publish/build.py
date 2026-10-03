@@ -20,7 +20,8 @@ from rinkx.correlation import sim
 from rinkx.grading import performance
 from rinkx.ingestion.injuries import espn as injuries
 from rinkx.ingestion.nhl.jobs import current_season
-from rinkx.publish import best, guards, lines, news, projections, views
+from rinkx.models import deployment
+from rinkx.publish import backtest, best, guards, lines, news, projections, views
 from rinkx.publish.schemas import BuildInfo, Envelope, FeedStatus, FileEntry, Manifest, Meta
 from rinkx.store import remote
 from rinkx.store.db import schema_version
@@ -64,7 +65,7 @@ def feed_statuses(conn: sqlite3.Connection, now: datetime) -> list[FeedStatus]:
         last_any = conn.execute(
             "SELECT r.status FROM ingestion_runs r JOIN data_sources s ON s.id = r.source_id "
             "WHERE s.category = ? AND s.is_enabled = 1 AND r.finished_at IS NOT NULL "
-            "ORDER BY r.finished_at DESC LIMIT 1",
+            "ORDER BY r.finished_at DESC, r.id DESC LIMIT 1",  # runs often finish within the same second
             (category,),
         ).fetchone()
         if last_ok is None and last_any is not None and last_any[0] == "failed":
@@ -184,6 +185,8 @@ def _league_files(
         inputs = sim.game_inputs(conn, g, assist_model)
         if inputs is not None:
             out[f"sim/{g['nhl_game_id']}.json"] = (inputs, None)
+    out["backtest.json"] = (backtest.published(conn, now), None)
+    out["deployment.json"] = (deployment.published(conn, now, today.isoformat()), None)
     out["models.json"] = (projections.models_report(conn), None)
     out["props/best.json"] = (best.best_props(conn, now), None)
     out["performance.json"] = (performance.performance(conn, now), None)

@@ -126,7 +126,7 @@ def load(conn: sqlite3.Connection, before: str | None = None) -> list[GameRecord
     skaters: dict[int, list[SkaterLine]] = defaultdict(list)
     for r in conn.execute(
         "SELECT s.game_id, s.player_id, s.team_id, s.opponent_team_id, s.is_home, p.position, s.toi_s, s.pp_toi_s, "
-        "s.shots, s.goals, s.assists, s.pp_goals, s.pp_assists, s.blocked_shots, s.hits "
+        "s.shots, s.goals, s.assists, s.pp_goals, s.pp_assists, s.blocked_shots, s.hits, s.shot_attempts "
         f"FROM player_game_stats s JOIN players p ON p.id = s.player_id JOIN games g ON g.id = s.game_id WHERE {cond} "
         "ORDER BY s.game_id, s.player_id",
         args,
@@ -142,6 +142,7 @@ def load(conn: sqlite3.Connection, before: str | None = None) -> list[GameRecord
             "pp_assists": ppa,
             "blocks": _f(r[13]),
             "hits": _f(r[14]),
+            "attempts": _f(r[15]),  # individual shot attempts (stats API); not a projected stat
         }
         u = units.get(r[0], {}).get(r[1])
         skaters[r[0]].append(
