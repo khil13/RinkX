@@ -5,7 +5,7 @@ import { pct } from "../components/Projections";
 import { ScoreBadge } from "../components/Scores";
 import { TeamChip, TeamStripe } from "../components/Team";
 import { Notice, Panel, Spinner } from "../components/ui";
-import { buildCard } from "../lib/card";
+import { buildCard, type CardGroup } from "../lib/card";
 import { useEncrypted, useManifest } from "../lib/data/fetch";
 import type { BestProps as BestPropsData, GameSummary, PropRow, Slate } from "../lib/data/types";
 import { clock, localTime, longDate } from "../lib/format";
@@ -87,6 +87,44 @@ function Section({
           ))}
         </ol>
       )}
+    </Panel>
+  );
+}
+
+const ALWAYS = new Set(["sog", "points", "goals"]); // shown even when empty, with the reason
+
+function PlayerGroups({ groups, onOpen }: { groups: CardGroup[]; onOpen: (r: PropRow) => void }) {
+  const shown = groups.filter((g) => g.shown.length > 0 || ALWAYS.has(g.key) || g.priced > 0);
+  let rank = 0;
+  return (
+    <Panel title="Player props">
+      <div className="flex flex-col gap-4" aria-label="Player props">
+        {shown.map((g) => (
+          <section key={g.key} aria-label={`Card: ${g.title}`}>
+            <h3 className="mb-1 flex items-baseline justify-between text-xs font-semibold uppercase tracking-wider text-muted">
+              {g.title}
+              {g.total > g.shown.length && (
+                <span className="text-[11px] font-normal normal-case tracking-normal">
+                  top {g.shown.length} of {g.total}
+                </span>
+              )}
+            </h3>
+            {g.shown.length === 0 ? (
+              <p className="text-xs text-muted">
+                {g.priced === 0
+                  ? "No lines posted by your books for this date yet."
+                  : `${g.priced} line${g.priced === 1 ? "" : "s"} priced; none clears the bar (edge ≥ 3 pts, positive EV, good data).`}
+              </p>
+            ) : (
+              <ol className="flex flex-col gap-2">
+                {g.shown.map((r) => (
+                  <Pick key={r.prediction_id} r={r} rank={++rank} onOpen={() => onOpen(r)} />
+                ))}
+              </ol>
+            )}
+          </section>
+        ))}
+      </div>
     </Panel>
   );
 }
@@ -185,7 +223,8 @@ export function CardOfDay() {
         <p className="text-xs text-muted">
           The strongest props for {date ? longDate(date) : "the day"}: only lines where the model beats the no-vig market
           by 3+ points with positive expected value and good data; the best price across your books; one pick per
-          player and per game; ranked by expected value. Statistical estimates, not guarantees. Tap a pick for the full
+          player and per game. Player picks are grouped by market (shots on goal, points, goals, ...), up to 3 each, by
+          expected value. Statistical estimates, not guarantees. Tap a pick for the full
           calculation. Every priced line is on{" "}
           <Link to="/props" className="text-accent underline">
             Props
@@ -207,13 +246,7 @@ export function CardOfDay() {
             empty="No moneyline or total clears the bar on this date. That's normal: game lines are the most efficient."
             onOpen={setOpen}
           />
-          <Section
-            title="Player props"
-            picks={card.player.shown}
-            total={card.player.total}
-            empty="No player prop clears the bar on this date. Most lines are efficient; nothing is forced onto the card."
-            onOpen={setOpen}
-          />
+          <PlayerGroups groups={card.player.groups} onOpen={setOpen} />
         </>
       )}
       {open && <Drawer r={open} onClose={() => setOpen(null)} />}

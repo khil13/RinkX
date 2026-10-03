@@ -409,3 +409,20 @@ def test_run_log_diagnostics_count_lines_and_leans_per_market(league):
     assert d["markets"] == {"skater_shots_on_goal": {"open_lines": 2, "priced": 2, "leans": 2}}
     # counts and names only: no odds or probabilities go to the public log
     assert set(d) == {"markets", "models_passed", "models_not_passed"}
+
+
+def test_pregame_card_groups_like_the_site():
+    """Same rule as web/src/lib/card.ts: longshot goal props don't crowd out shots on goal."""
+    from rinkx.alerts import pregame
+
+    def row(pid, market, ev):
+        return {"subject": {"type": "player", "id": pid, "name": f"P{pid}"}, "game": {"id": 9, "date": "D"},
+                "market": market, "lean": "over", "line": 0.5, "ev": ev}  # fmt: skip
+
+    rows = [row(100 + i, "skater_anytime_goal", 0.5 + i / 100) for i in range(10)]
+    rows += [row(1, "skater_shots_on_goal", 0.04), row(2, "skater_shots_on_goal", 0.06), row(3, "skater_points", 0.05)]
+    rows += [row(1, "skater_anytime_goal", 0.9)]  # P1 already has an SOG pick: one pick per player
+    names = [(r["market"], r["subject"]["id"]) for r in pregame.card(rows, "D")]
+    assert names[:3] == [("skater_shots_on_goal", 2), ("skater_shots_on_goal", 1), ("skater_points", 3)]
+    goals = [n for n in names if n[0] == "skater_anytime_goal"]
+    assert len(goals) == pregame.PER_GROUP and (("skater_anytime_goal", 1) not in goals)

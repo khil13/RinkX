@@ -22,8 +22,18 @@ from rinkx.pricing.odds import implied
 from rinkx.publish.best import best_props
 from rinkx.timeutil import iso, parse_iso
 
-MAX_TEAM = 4  # same limits as the site's card
-MAX_PLAYER = 8
+MAX_TEAM = 4  # same limits as the site's card (web/src/lib/card.ts)
+PER_GROUP = 3
+# web/src/lib/marketGroups.ts, in the same order: player picks fill these groups in turn
+GROUPS: tuple[tuple[str, ...], ...] = (
+    ("skater_shots_on_goal",),
+    ("skater_points", "skater_pp_points"),
+    ("skater_goals", "skater_anytime_goal", "skater_first_goal", "skater_pp_goal"),
+    ("skater_assists", "skater_pp_assist"),
+    ("skater_blocked_shots",),
+    ("skater_hits",),
+    ("goalie_saves", "goalie_goals_against", "goalie_win", "goalie_shutout", "goalie_saves_and_win"),
+)
 LATEST_BEFORE = timedelta(minutes=10)  # too close to puck drop to act on: skip
 
 
@@ -32,8 +42,9 @@ def _key(r: dict[str, Any]) -> str:
 
 
 def card(rows: list[dict[str, Any]], date: str) -> list[dict[str, Any]]:
-    """The Card of the Day for `date`: leans on that date, the best-EV book per prop, one pick per
-    player (up to 8) and one per game for game props (up to 4), by expected value."""
+    """The Card of the Day for `date`, as the site builds it: leans on that date, the best-EV book
+    per prop; game props one per game (up to 4) by EV; player props by market group in order, up
+    to 3 per group by EV, one pick per player across the card."""
     best: dict[str, dict[str, Any]] = {}
     for r in rows:
         if not r["lean"] or r["game"]["date"] != date:
@@ -43,16 +54,20 @@ def card(rows: list[dict[str, Any]], date: str) -> list[dict[str, Any]]:
             best[k] = r
     by_ev = sorted(best.values(), key=lambda r: -(r["ev"] or -9))
     out: list[dict[str, Any]] = []
-    for kind, cap in (("game", MAX_TEAM), ("player", MAX_PLAYER)):
-        seen: set[str] = set()
+    games: set[int] = set()
+    for r in by_ev:
+        if r["subject"]["type"] == "game" and r["game"]["id"] not in games and len(games) < MAX_TEAM:
+            games.add(r["game"]["id"])
+            out.append(r)
+    used: set[int] = set()
+    for markets in GROUPS:
         n = 0
         for r in by_ev:
-            if r["subject"]["type"] != kind or n >= cap:
+            if n >= PER_GROUP:
+                break
+            if r["subject"]["type"] != "player" or r["market"] not in markets or r["subject"]["id"] in used:
                 continue
-            who = str(r["game"]["id"] if kind == "game" else r["subject"]["id"])  # game props have no player id
-            if who in seen:
-                continue
-            seen.add(who)
+            used.add(r["subject"]["id"])
             out.append(r)
             n += 1
     return out

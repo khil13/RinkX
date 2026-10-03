@@ -317,9 +317,12 @@ test("card of the day: the date's best team and player props, one per player, in
   await expect(withPick.locator("[data-team]")).toHaveText(["T01", "T00"]);
   // No game line clears the bar here: the section says so rather than filling the card.
   await expect(page.getByText(/No moneyline or total clears the bar on this date/)).toBeVisible();
-  const picks = page.getByRole("list", { name: "Player props" }).getByRole("listitem");
+  const picks = page.getByLabel("Player props").getByRole("listitem");
   // Two leans, both on the same player at two books: one pick, at the better price.
   await expect(picks).toHaveCount(1);
+  // Player picks are grouped by market; an empty group says why.
+  await expect(page.getByLabel("Card: Shots on goal")).toContainText("Syn P8000002");
+  await expect(page.getByLabel("Card: Points")).toContainText("No lines posted by your books for this date yet.");
   await expect(picks.first()).toContainText("Syn P8000002");
   await expect(picks.first()).toContainText(/Over 2\.5 Shots on Goal −140 at BetMGM/);
   await expect(picks.first()).toContainText(/via The Odds API · line seen /);
@@ -546,7 +549,7 @@ test("phone: tab bar, More bottom sheet, and the prop card as a bottom sheet", a
 test("settings: decimal odds and time zone apply everywhere and persist", async ({ page }) => {
   await unlock(page, true, MODELS);
   await page.goto(`${MODELS}#/props/best`);
-  const first = page.getByRole("list", { name: "Player props" }).getByRole("listitem").first();
+  const first = page.getByLabel("Player props").getByRole("listitem").first();
   await expect(first).toContainText("−140");
   await page.goto(`${MODELS}#/settings`);
   await page.getByLabel(/^Decimal/).check();

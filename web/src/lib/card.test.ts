@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildCard, MAX_PLAYER } from "./card";
+import { buildCard, PER_GROUP } from "./card";
 import type { PropRow } from "./data/types";
 
 let nextId = 1;
@@ -81,11 +81,34 @@ describe("buildCard", () => {
     expect(card.team.total).toBe(1);
   });
 
-  it("caps the player list but reports the total", () => {
-    const rows = Array.from({ length: MAX_PLAYER + 3 }, (_, i) => row({ player: i + 1, ev: i / 100 }));
+  it("caps each market group but reports the total", () => {
+    const rows = Array.from({ length: PER_GROUP + 3 }, (_, i) => row({ player: i + 1, ev: i / 100 }));
     const card = buildCard(rows, "2026-10-03", null);
-    expect(card.player.shown).toHaveLength(MAX_PLAYER);
-    expect(card.player.total).toBe(MAX_PLAYER + 3);
-    expect(card.player.shown[0]!.subject.name).toBe(`P${MAX_PLAYER + 3}`);
+    const sog = card.player.groups.find((g) => g.key === "sog")!;
+    expect(sog.shown).toHaveLength(PER_GROUP);
+    expect(sog.total).toBe(PER_GROUP + 3);
+    expect(sog.priced).toBe(PER_GROUP + 3);
+    expect(sog.shown[0]!.subject.name).toBe(`P${PER_GROUP + 3}`);
+  });
+
+  it("keeps longshot goal props from crowding out shots on goal", () => {
+    const rows = [
+      ...Array.from({ length: 10 }, (_, i) => row({ player: 100 + i, market: "skater_anytime_goal", ev: 0.5 + i / 100 })),
+      row({ player: 1, ev: 0.04 }),
+      row({ player: 2, ev: 0.06 }),
+      row({ player: 3, market: "skater_points", ev: 0.05 }),
+    ];
+    const card = buildCard(rows, "2026-10-03", null);
+    const by = Object.fromEntries(card.player.groups.map((g) => [g.key, g.shown.map((r) => r.subject.name)]));
+    expect(by.sog).toEqual(["P2", "P1"]);
+    expect(by.points).toEqual(["P3"]);
+    expect(by.goals).toHaveLength(PER_GROUP);
+    expect(card.player.shown.slice(0, 2).map((r) => r.market)).toEqual(["skater_shots_on_goal", "skater_shots_on_goal"]);
+  });
+
+  it("one pick per player across groups, SOG first", () => {
+    const rows = [row({ player: 1, ev: 0.02 }), row({ player: 1, market: "skater_anytime_goal", ev: 0.9 })];
+    const card = buildCard(rows, "2026-10-03", null);
+    expect(card.player.shown.map((r) => r.market)).toEqual(["skater_shots_on_goal"]);
   });
 });
