@@ -208,6 +208,7 @@ def run_correlations(conn: sqlite3.Connection, now: datetime, *, force: bool = F
     if not force and last is not None and now - parse_iso(last) < MAX_AGE:
         return 0
     src = register_source(conn, MODELS_SOURCE)
+    ests: list[Estimate] = []  # stays empty if the stage fails (recorded; the run goes on)
     with ingestion_run(conn, src, "correlations") as run:
         games = [g for g in history.load(conn) if g.home_goals is not None]
         ests = estimate(games)

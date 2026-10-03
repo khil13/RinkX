@@ -47,8 +47,10 @@ def card(rows: list[dict[str, Any]], date: str) -> list[dict[str, Any]]:
         seen: set[str] = set()
         n = 0
         for r in by_ev:
-            who = str(r["game"]["id"] if kind == "game" else r["subject"]["id"])
-            if r["subject"]["type"] != kind or who in seen or n >= cap:
+            if r["subject"]["type"] != kind or n >= cap:
+                continue
+            who = str(r["game"]["id"] if kind == "game" else r["subject"]["id"])  # game props have no player id
+            if who in seen:
                 continue
             seen.add(who)
             out.append(r)
