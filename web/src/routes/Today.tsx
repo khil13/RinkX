@@ -100,7 +100,7 @@ export function Today() {
         )}
       </Panel>
 
-      <Panel title="By market">
+      <Panel title="By market" collapsible="phone">
         <PropGroups rows={marketRows.filter((r) => r.lean)} label="Today by market" />
       </Panel>
 
@@ -188,6 +188,7 @@ export function Today() {
 
       <Panel
         title="Daily report"
+        collapsible="phone"
         right={
           <button
             type="button"
@@ -216,7 +217,7 @@ export function Today() {
           <PublicBetting />
         </div>
       </Panel>
-      <FeedsPanel feeds={manifest.feeds} generatedAt={manifest.generated_at} only={(f) => f.state === "failed" || f.state === "stale"} />
+      <FeedsPanel feeds={manifest.feeds} generatedAt={manifest.generated_at} only={(f) => f.state === "failed" || f.state === "stale"} collapsible="phone" />
       {open && <Drawer r={open} onClose={() => setOpen(null)} />}
     </div>
   );

@@ -7,7 +7,7 @@ import { TeamChip, TeamStripe } from "../components/Team";
 import { Notice, Panel, Spinner } from "../components/ui";
 import { useEncrypted } from "../lib/data/fetch";
 import { legFromRow, parlayStore, useParlayLegs } from "../lib/parlayStore";
-import { betFromRow, myBets, useMyBets } from "../lib/myBets";
+import { PlaceBet } from "../components/PlaceBet";
 import type { BestProps as BestPropsData, PropRow } from "../lib/data/types";
 import { clock, localTime, longDate } from "../lib/format";
 import { ADVANCED, type Advanced, matches, SORT_LABELS, SORTS, type SortKey } from "../lib/propFilters";
@@ -134,29 +134,12 @@ function PropCard({ r, change, onOpen }: { r: PropRow; change: "new" | "moved" |
           </span>
         </div>
       </button>
+      {r.price !== null && (
+        <div className="mt-1 flex justify-end">
+          <PlaceBet r={r} compact />
+        </div>
+      )}
     </li>
-  );
-}
-
-function TrackButton({ r }: { r: PropRow }) {
-  const bets = useMyBets();
-  const tracked = bets.some((b) => b.prediction_id === r.prediction_id);
-  const bet = betFromRow(r);
-  if (!bet) return null;
-  return (
-    <div className="flex items-center gap-3">
-      <button
-        type="button"
-        disabled={tracked}
-        onClick={() => myBets.add(bet)}
-        className="min-h-9 rounded-md border border-line px-3 text-sm hover:border-accent/50 disabled:opacity-60"
-      >
-        {tracked ? "Tracked" : "Track this bet"}
-      </button>
-      <Link to="/my" className="text-xs text-accent underline">
-        My performance
-      </Link>
-    </div>
   );
 }
 
@@ -266,7 +249,7 @@ export function Drawer({ r, onClose }: { r: PropRow; onClose: () => void }) {
           and will be graded after the game. Statistical estimates, not guarantees.
         </p>
         <ParlayButton r={r} />
-        <TrackButton r={r} />
+        <PlaceBet r={r} />
         {r.subject.type === "player" && (
           <Link to={`/players/${r.subject.id}`} className="text-sm text-accent underline">
             Player page: projection, Explain, hit rates
@@ -358,7 +341,14 @@ export function BestProps({ all = false }: { all?: boolean }) {
     return { ...v, adv: { ...ADVANCED, ...(v.adv ?? {}) }, sort: v.sort in SORTS ? v.sort : "ev" };
   });
   const [open, setOpen] = useState<PropRow | null>(null);
+  const [sheet, setSheet] = useState(false);
   const data = res.state === "ready" ? res.value.data : null;
+  useEffect(() => {
+    if (!sheet) return;
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setSheet(false);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [sheet]);
 
   // Change-aware: compare with the prediction ids this device saw last time, then remember these.
   const [seen] = useState<Record<string, number> | null>(() => {
@@ -405,6 +395,9 @@ export function BestProps({ all = false }: { all?: boolean }) {
   if (res.state === "unavailable" || !data) return <Notice tone="warn">Live data unavailable: no props file published yet.</Notice>;
 
   const uniq = <T,>(xs: T[]) => Array.from(new Set(xs));
+  const nOn =
+    (["date", "game", "market", "book", "side", "minEdge", "minConf"] as const).filter((k) => f[k] !== DEFAULTS[k]).length +
+    (JSON.stringify(f.adv) !== JSON.stringify(DEFAULTS.adv) ? 1 : 0);
   const dates = uniq(data.rows.map((r) => r.game.date)).sort();
   const games = uniq(data.rows.map((r) => `${r.game.id}|${r.game.away} @ ${r.game.home}`));
   const markets = uniq(data.rows.map((r) => `${r.market}|${r.market_label}`));
@@ -438,6 +431,30 @@ export function BestProps({ all = false }: { all?: boolean }) {
         Statistical estimates, not guarantees. Tap a prop for the full calculation.
       </p>
 
+      {/* Phone: the filters live in a bottom sheet behind one button, so the props come first. */}
+      <div className="flex items-center justify-between gap-2 sm:hidden">
+        <button
+          type="button"
+          onClick={() => setSheet(true)}
+          aria-expanded={sheet}
+          className="min-h-11 rounded-md border border-line bg-panel px-4 text-sm"
+        >
+          Filters{nOn ? ` · ${nOn} on` : ""}
+        </button>
+        <span className="num text-xs text-muted">
+          {rows.length} shown · {SORT_LABELS[f.sort]}
+        </span>
+      </div>
+      {sheet && (
+        <button type="button" aria-label="Close filters" className="fixed inset-0 z-40 bg-black/50 sm:hidden" onClick={() => setSheet(false)} />
+      )}
+      <div
+        className={
+          sheet
+            ? "max-sm:sheet-in max-sm:fixed max-sm:inset-x-0 max-sm:bottom-0 max-sm:z-50 max-sm:max-h-[85vh] max-sm:overflow-y-auto max-sm:rounded-t-2xl max-sm:pb-[env(safe-area-inset-bottom)]"
+            : "max-sm:hidden"
+        }
+      >
       <Panel>
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4" role="group" aria-label="Filters">
           <Select label="Date" value={f.date} onChange={(v) => update({ date: v })}
@@ -464,7 +481,15 @@ export function BestProps({ all = false }: { all?: boolean }) {
             Reset filters
           </button>
         )}
+        <button
+          type="button"
+          onClick={() => setSheet(false)}
+          className="mt-3 min-h-11 w-full rounded-md bg-accent text-sm font-semibold text-bg sm:hidden"
+        >
+          Show {rows.length} prop{rows.length === 1 ? "" : "s"}
+        </button>
       </Panel>
+      </div>
 
       {empty ? (
         <Notice>{empty}</Notice>

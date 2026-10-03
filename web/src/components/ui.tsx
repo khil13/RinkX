@@ -1,16 +1,45 @@
-import type { ReactNode } from "react";
+import { type ReactNode, useState } from "react";
 import type { FeedState } from "../lib/data/types";
 
-export function Panel({ title, right, children }: { title?: string; right?: ReactNode; children: ReactNode }) {
+const isPhone = () => typeof window !== "undefined" && !!window.matchMedia?.("(max-width: 639px)").matches;
+
+/** A titled box. `collapsible="phone"` starts it folded on a phone (tap the title to open). */
+export function Panel({
+  title,
+  right,
+  children,
+  collapsible,
+}: {
+  title?: string;
+  right?: ReactNode;
+  children: ReactNode;
+  collapsible?: "phone";
+}) {
+  const [open, setOpen] = useState(() => !(collapsible === "phone" && isPhone()));
+  const foldable = collapsible !== undefined && title;
   return (
     <section className="rounded-lg border border-line bg-panel">
       {title && (
-        <header className="flex items-center justify-between gap-2 border-b border-line px-4 py-2.5">
-          <h2 className="text-xs font-semibold uppercase tracking-wider text-muted">{title}</h2>
+        <header className={`flex items-center justify-between gap-2 px-4 py-2.5 ${open ? "border-b border-line" : ""}`}>
+          {foldable ? (
+            <button
+              type="button"
+              aria-expanded={open}
+              onClick={() => setOpen(!open)}
+              className="flex min-h-9 flex-1 items-center gap-2 text-left text-xs font-semibold uppercase tracking-wider text-muted"
+            >
+              <span aria-hidden className="text-[10px]">{open ? "▾" : "▸"}</span>
+              <h2>{title}</h2>
+            </button>
+          ) : (
+            <h2 className="text-xs font-semibold uppercase tracking-wider text-muted">{title}</h2>
+          )}
           {right}
         </header>
       )}
-      <div className="p-4">{children}</div>
+      <div className="p-4" hidden={!open}>
+        {children}
+      </div>
     </section>
   );
 }
