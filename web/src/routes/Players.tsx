@@ -7,7 +7,8 @@ import { InjuryLine } from "../components/Injuries";
 import { NewsList } from "./News";
 import { PlayerLinesPanel } from "../components/Lines";
 import { MODEL_REASON_TEXT, ProjectionCard, TestedNote } from "../components/Projections";
-import type { DnpGame, GoalieGame, PlayerIndexEntry, PlayerPage, SkaterGame } from "../lib/data/types";
+import type { BestProps, DnpGame, GoalieGame, GoalieImpact, PlayerIndexEntry, PlayerPage, SkaterGame, SkaterProfile } from "../lib/data/types";
+import { GoalieProfile, PropProfile } from "../components/Profile";
 import { longDate, mmss, num, seasonLabel, signed } from "../lib/format";
 
 const MAX_RESULTS = 50;
@@ -189,6 +190,12 @@ const GOALIE_TOTALS: [string, string][] = [
   ["so", "SO"],
 ];
 
+function PlayerPropProfile({ id, profile }: { id: number; profile: SkaterProfile }) {
+  const best = useEncrypted<BestProps>("props/best.json");
+  const rows = best.state === "ready" ? best.value.data.rows.filter((r) => r.subject.type === "player" && r.subject.id === id) : [];
+  return <PropProfile p={profile} props={rows} />;
+}
+
 export function Player() {
   const { id } = useParams();
   const res = useEncrypted<PlayerPage>(`players/${id}.json`);
@@ -211,6 +218,7 @@ export function Player() {
     lines,
     news,
     injury,
+    profile,
   } = res.value.data;
   const goalie = p.position === "G";
   const cells = goalie ? GOALIE_TOTALS : SKATER_TOTALS;
@@ -281,6 +289,12 @@ export function Player() {
           <p className="text-sm text-muted">{MODEL_REASON_TEXT[projection.reason ?? "no_upcoming_projection"]}</p>
         )}
       </Panel>
+
+      {goalie ? (
+        <GoalieProfile i={(profile as GoalieImpact | null | undefined) ?? null} />
+      ) : (
+        profile && <PlayerPropProfile id={p.id} profile={profile as SkaterProfile} />
+      )}
 
       {lines && lines.markets.length > 0 && (
         <Panel title={`Sportsbook lines · ${longDate(lines.game.date)}`}>

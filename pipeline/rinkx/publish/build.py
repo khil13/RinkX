@@ -20,6 +20,7 @@ from rinkx.correlation import sim
 from rinkx.grading import performance
 from rinkx.ingestion.injuries import espn as injuries
 from rinkx.ingestion.nhl.jobs import current_season
+from rinkx.models import deployment
 from rinkx.publish import best, guards, lines, news, projections, views
 from rinkx.publish.schemas import BuildInfo, Envelope, FeedStatus, FileEntry, Manifest, Meta
 from rinkx.store import remote
@@ -184,6 +185,7 @@ def _league_files(
         inputs = sim.game_inputs(conn, g, assist_model)
         if inputs is not None:
             out[f"sim/{g['nhl_game_id']}.json"] = (inputs, None)
+    out["deployment.json"] = (deployment.published(conn, now, today.isoformat()), None)
     out["models.json"] = (projections.models_report(conn), None)
     out["props/best.json"] = (best.best_props(conn, now), None)
     out["performance.json"] = (performance.performance(conn, now), None)

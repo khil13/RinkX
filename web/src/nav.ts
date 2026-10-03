@@ -15,6 +15,7 @@ export const NAV: NavItem[] = [
   { to: "/players", label: "Players", phase: 1 },
   { to: "/models", label: "Model Tests", phase: 3 },
   { to: "/goalies", label: "Goalies", phase: 10 },
+  { to: "/deployment", label: "Lines & PP", phase: 10 },
   { to: "/lines", label: "Line Movement", phase: 10 },
   { to: "/parlay", label: "Parlay Builder", phase: 8 },
   { to: "/performance", label: "Model Performance", phase: 7 },
@@ -24,4 +25,4 @@ export const NAV: NavItem[] = [
 ];
 
 // Pages that exist; the rest show their roadmap phase in the nav.
-export const BUILT_ROUTES = new Set(["/", "/today", "/games", "/props", "/props/best", "/players", "/models", "/performance", "/news", "/parlay", "/settings", "/goalies", "/lines", "/admin"]);
+export const BUILT_ROUTES = new Set(["/", "/today", "/games", "/props", "/props/best", "/players", "/models", "/performance", "/news", "/parlay", "/settings", "/goalies", "/deployment", "/lines", "/admin"]);

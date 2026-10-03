@@ -1,5 +1,6 @@
 import { Link } from "react-router";
 import type {
+  GoalieImpact,
   Factor,
   GameEnvironment,
   GoalieStart,
@@ -111,7 +112,20 @@ export function GoalieLine({ g, gameId, team }: { g: GoalieStart | null; gameId?
           Confirm goalie
         </QuickEntryLink>
       )}
+      {g.impact !== undefined && <GoalieImpactLine i={g.impact ?? null} />}
     </div>
+  );
+}
+
+export function GoalieImpactLine({ i }: { i: GoalieImpact | null }) {
+  if (!i) return <span className="w-full text-[11px] text-muted">Season numbers: INSUFFICIENT DATA (no starts yet)</span>;
+  const sv = (x: number | null) => (x === null ? "—" : x.toFixed(3).replace(/^0/, ""));
+  return (
+    <span className="num w-full text-[11px] text-muted" aria-label="Goalie numbers">
+      {i.starts} starts · SV% {sv(i.save_pct)} (league {sv(i.league_save_pct)}) · last 5 {sv(i.last5_save_pct)} ·{" "}
+      {i.sa_per_start} SA and {i.ga_per_start} GA per start · {i.starts_last_7_days} start
+      {i.starts_last_7_days === 1 ? "" : "s"} in 7 days · advanced metrics: unavailable (no xG source)
+    </span>
   );
 }
 

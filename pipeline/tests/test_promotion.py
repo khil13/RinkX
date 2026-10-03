@@ -192,6 +192,50 @@ def test_quick_entry_line_change_moves_a_player_up(deployed):
     assert not qe.outcomes[0].applied and "Give a new line" in qe.outcomes[0].message
 
 
+def test_deployment_tracker_and_alerts_after_a_line_change(deployed, tmp_path):
+    """After the Quick Entry above (F4 -> F1 and PP1): the tracker shows the change against his last
+    game, a deployment alert fires once for the game, and profiles are filled from stored data."""
+    from rinkx.alerts.evaluate import evaluate as eval_alerts
+    from rinkx.alerts.evaluate import load_specs, sync
+    from rinkx.models import deployment
+    from rinkx.publish import profile
+
+    conn, _ = deployed
+    today = date(2025, 10, 7) + timedelta(days=200)
+    now = datetime(today.year, today.month, today.day, 17, tzinfo=UTC)
+    g = conn.execute("SELECT * FROM games WHERE nhl_game_id = ?", (synth.UPCOMING_NHL_ID,)).fetchone()
+    rows = deployment.game_deployment(conn, g)
+    moved = [r for r in rows if r["status"] == "quick_entry"]
+    assert len(moved) == 1
+    m = moved[0]
+    assert (m["line"], m["pp_unit"]) == ("F1", 1) and m["previous"]["line"] == "F4"
+    assert {"pp1_promotion", "top_line_promotion"} <= set(m["changes"]) and m["source"] == "https://x.test/lines"
+    # Players without a Quick Entry: their last game, compared with the one before.
+    assert all(r["status"] == "last_game" and r["line"] for r in rows if r is not m)
+    pub = deployment.published(conn, now, today.isoformat())
+    assert pub["games"][0]["players"] and "player_pk" not in pub["games"][0]["players"][0]
+
+    cfg = tmp_path / "alerts.yml"
+    cfg.write_text("alerts:\n  - key: dep\n    type: deployment\n    changes: [pp1_promotion]\n")
+    specs, errors = load_specs(cfg)
+    assert errors == [] and sync(conn, specs) == []
+    assert eval_alerts(conn, now, None) == 1
+    payload = json.loads(conn.execute("SELECT payload FROM alert_events ORDER BY id DESC LIMIT 1").fetchone()[0])
+    assert payload["message"].startswith("🔥 MOVED TO PP1: ") and "(Quick Entry)" in payload["message"]
+    assert eval_alerts(conn, now, None) == 0  # once per game
+    bad = tmp_path / "bad.yml"
+    bad.write_text("alerts:\n  - key: x\n    type: deployment\n    changes: [moon]\n")
+    assert "changes must be a list" in load_specs(bad)[1][0]
+
+    prof = profile.skater_profile(conn, m["player_pk"], 20252026, today.isoformat())
+    assert prof["shooting"]["games"] > 50 and prof["shooting"]["sog_per_60"] > 0
+    assert 0 < prof["shooting"]["shot_share"] < 0.3 and len(prof["usage"]["recent"]) == 5
+    assert prof["matchup"]["opp_sog_allowed"] > 0 and prof["matchup"]["position_group"] == "forwards"
+    gk = conn.execute("SELECT player_id FROM goalie_game_stats WHERE started = 1 LIMIT 1").fetchone()[0]
+    imp = profile.goalie_impact(conn, gk, today.isoformat(), 20252026)
+    assert imp["starts"] > 10 and 0.85 < imp["save_pct"] < 0.95 and imp["advanced"] is None
+
+
 def _graded_league(better: str):
     """Graded shots props with a shadow row each. One version is the season-average model; the other
     is deliberately sharper (moved 30% of the way toward the outcome: test data only, to make

@@ -368,6 +368,7 @@ export interface PlayerPage {
   lines: { game: { id: number; date: string }; markets: LineMarket[]; events?: LineEvent[] } | null;
   news?: NewsItem[];
   injury?: InjuryEntry | null;
+  profile?: SkaterProfile | GoalieImpact | null;
 }
 
 // ---- Phase 3: projections (pipeline/rinkx/publish/projections.py) ----
@@ -380,6 +381,82 @@ export interface GoalieStart {
   probability: number;
   source: string | null;
   reported_at: string | null;
+  impact?: GoalieImpact | null;
+}
+
+/** A starter's numbers this season before the game (pipeline/rinkx/publish/profile.py). */
+export interface GoalieImpact {
+  starts: number;
+  save_pct: number | null;
+  league_save_pct: number | null;
+  sa_per_start: number;
+  ga_per_start: number;
+  last5_save_pct: number | null;
+  starts_last_7_days: number;
+  last_start: string;
+  advanced: null;
+}
+
+export interface SkaterProfile {
+  shooting: {
+    games: number;
+    sog_per_game: number | null;
+    sog_per_60: number | null;
+    attempts_per_game: number | null;
+    shot_share: number | null;
+    recent_sog: number[];
+    l5_avg: number | null;
+    l10_avg: number | null;
+    home_avg: number | null;
+    away_avg: number | null;
+  };
+  usage: {
+    toi_avg_s: number | null;
+    toi_l5_s: number | null;
+    pp_toi_avg_s: number | null;
+    recent: { date: string; line: string | null; pp: string | null }[];
+  };
+  matchup: {
+    opponent: string;
+    home: boolean;
+    date: string;
+    opp_sog_allowed: number | null;
+    league_sog: number | null;
+    opp_vs_position: number | null;
+    position_group: string;
+  } | null;
+  shot_map: ShotMap;
+}
+
+export interface ShotMap {
+  games: string[];
+  events: { g: number; t: "shot" | "miss" | "block" | "goal"; x: number; y: number; hd: boolean; opp: string }[];
+  with_coordinates: number;
+  without_coordinates: number;
+  definition: string;
+}
+
+export interface DeploymentPlayer {
+  id: number;
+  name: string;
+  position: string;
+  team: string;
+  line: string | null;
+  pp_unit: number | null;
+  previous: { line: string | null; pp_unit: number | null; date: string } | null;
+  status: "quick_entry" | "last_game";
+  source: string | null;
+  expected_toi_s: number | null;
+  expected_pp_toi_s: number | null;
+  recent_toi_s: number | null;
+  changes: string[];
+}
+
+export interface Deployment {
+  generated_at: string;
+  lines_updated_at: string | null;
+  change_text: Record<string, string>;
+  games: { game: { id: number; home: string; away: string; start_time_utc: string; date: string }; players: DeploymentPlayer[] }[];
 }
 
 export interface Factor {

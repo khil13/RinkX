@@ -662,3 +662,31 @@ test("game prop center and advanced filters (synthetic)", async ({ page }) => {
   await expect(center.getByLabel("Best SOG props")).toContainText("Syn P8000002");
   await expect(center.getByLabel("Best hit props")).toContainText("No priced lines in this market.");
 });
+
+test("player prop profile and shot map from recorded play-by-play", async ({ page }) => {
+  await unlock(page, false, CONFIGURED);
+  await page.goto(`${CONFIGURED}#/players/8477960`); // Adrian Kempe: 2 SOG, 6 attempts
+  const prof = page.getByLabel("Prop profile");
+  await expect(prof.getByLabel("Shooting")).toContainText("SOG / game");
+  await expect(prof.getByLabel("Usage")).toContainText(/Recent deployment \(from shift charts\): \S+ F\d\/PP1/);
+  const map = prof.getByRole("img", { name: /Shot map: \d+ attempts, 2 on goal, 0 goals/ });
+  await expect(map).toBeVisible();
+  await prof.getByRole("button", { name: "Last 5" }).click();
+  await prof.getByLabel("Density").check();
+  await expect(prof.getByText(/High danger: within 25 ft/)).toBeVisible();
+});
+
+test("lines & PP tracker, goalie numbers and the synthetic player profile (synthetic)", async ({ page }) => {
+  await unlock(page, true, MODELS);
+  await page.goto(`${MODELS}#/deployment`);
+  await expect(page.getByRole("heading", { name: "Lines & power play" })).toBeVisible();
+  await page.getByLabel("Changes only").uncheck();
+  await expect(page.getByRole("list", { name: "Deployment T01 @ T00" })).toContainText("last game (shift chart)");
+  await page.goto(`${MODELS}#/goalies`);
+  await expect(page.getByLabel("Goalie numbers").first()).toContainText(/\d+ starts · SV% \.\d{3}/);
+  await expect(page.getByLabel("Goalie numbers").first()).toContainText("advanced metrics: unavailable");
+  await page.goto(`${MODELS}#/players/8000002`);
+  const prof = page.getByLabel("Prop profile");
+  await expect(prof.getByLabel("Props")).toContainText("Shots on Goal");
+  await expect(prof.getByLabel("Shot map")).toContainText("DATA UNAVAILABLE");
+});

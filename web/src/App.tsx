@@ -22,6 +22,7 @@ const CoolOffGate = named(() => import("./routes/Settings"), "CoolOffGate");
 const BestProps = named(() => import("./routes/BestProps"), "BestProps");
 const CardOfDay = named(() => import("./routes/CardOfDay"), "CardOfDay");
 const Today = named(() => import("./routes/Today"), "Today");
+const DeploymentPage = named(() => import("./routes/DeploymentPage"), "DeploymentPage");
 const News = named(() => import("./routes/News"), "News");
 const Parlay = named(() => import("./routes/Parlay"), "Parlay");
 const Performance = named(() => import("./routes/Performance"), "Performance");
@@ -42,6 +43,7 @@ const BUILT: Record<string, () => React.ReactElement> = {
   "/props": () => priced(<BestProps all />),
   "/props/best": () => priced(<CardOfDay />),
   "/today": () => priced(<Today />),
+  "/deployment": () => <DeploymentPage />,
   "/models": () => page(<Models />),
   "/performance": () => page(<Performance />),
   "/news": () => page(<News />),

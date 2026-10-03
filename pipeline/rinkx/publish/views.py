@@ -7,13 +7,13 @@ Rules: values come straight from the store; anything RinkX can't know yet is nul
 from __future__ import annotations
 
 import sqlite3
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from rinkx.analytics import hitrates
 from rinkx.ingestion.injuries import espn as injuries
 from rinkx.models import project
-from rinkx.publish import lines, news, projections
+from rinkx.publish import lines, news, profile, projections
 
 NOT_CONNECTED = "not_connected"  # the feed that would provide this isn't built yet
 INSUFFICIENT = "insufficient_sample"
@@ -467,4 +467,9 @@ def player(
         "lines": lines.player_lines(conn, p["id"]),
         "news": news.for_player(conn, p["id"], now) if now is not None else [],
         "injury": next((_injury(r) for r in injuries.active(conn, player_id=p["id"])), None),
+        "profile": (
+            profile.goalie_impact(conn, p["id"], (now or datetime.now(UTC)).date().isoformat(), season_id)
+            if goalie
+            else profile.skater_profile(conn, p["id"], season_id, (now or datetime.now(UTC)).date().isoformat())
+        ),
     }

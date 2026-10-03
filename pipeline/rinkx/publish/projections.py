@@ -12,6 +12,7 @@ from typing import Any
 
 from rinkx.models import project, promotion
 from rinkx.models.fit import FAMILY, GAME_MARKETS, LABELS, MARKETS, MODEL_VERSION, VERSIONS
+from rinkx.publish import profile
 
 P_GE_MAX = 40  # P(X >= k) published for k up to this (saves need ~40)
 MARKET_ORDER = list(MARKETS)
@@ -167,7 +168,7 @@ def game_projections(conn: sqlite3.Connection, g: sqlite3.Row) -> dict[str, Any]
             pl["markets"][r["market"]] = _market(r, full=False)
         ordered = sorted(players.values(), key=lambda p: (p["position"] == "G", -(p["toi_s"] or 0)))
         sides[side] = {
-            "goalie": _goalie_block(conn, mix),
+            "goalie": _goalie_block(conn, mix, g),
             "players": ordered,
             "out": _out_list(conn, out_players, team),
         }
@@ -198,7 +199,7 @@ def _out_list(conn: sqlite3.Connection, out_players: dict[int, dict[str, Any]], 
 def goalie_start(conn: sqlite3.Connection, g: sqlite3.Row, team: int) -> dict[str, Any] | None:
     """Expected starter for an upcoming game; once played, the starter from the box score."""
     if g["status"] in ("scheduled", "pregame"):
-        return _goalie_block(conn, project.goalie_mix(conn, g["id"], team))
+        return _goalie_block(conn, project.goalie_mix(conn, g["id"], team), g)
     r = conn.execute(
         "SELECT p.nhl_player_id, p.full_name FROM goalie_game_stats s JOIN players p ON p.id = s.player_id "
         "WHERE s.game_id = ? AND s.team_id = ? AND s.started = 1",
@@ -209,7 +210,9 @@ def goalie_start(conn: sqlite3.Connection, g: sqlite3.Row, team: int) -> dict[st
     return {"id": r[0], "name": r[1], "status": "actual", "probability": 1.0, "source": None, "reported_at": None}
 
 
-def _goalie_block(conn: sqlite3.Connection, mix: project.GoalieMix | None) -> dict[str, Any] | None:
+def _goalie_block(
+    conn: sqlite3.Connection, mix: project.GoalieMix | None, g: sqlite3.Row | None = None
+) -> dict[str, Any] | None:
     if mix is None or not mix.mix:
         return None
     first, prob = mix.mix[0]
@@ -221,6 +224,7 @@ def _goalie_block(conn: sqlite3.Connection, mix: project.GoalieMix | None) -> di
         "probability": round(prob, 3),
         "source": mix.source_ref,
         "reported_at": mix.reported_at,
+        "impact": profile.goalie_impact(conn, first, g["game_date"], g["season_id"]) if g is not None else None,
     }
 
 
