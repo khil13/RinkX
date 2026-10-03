@@ -10,6 +10,7 @@ confidence score with its breakdown, and the step-by-step calculation. Rows are 
 from __future__ import annotations
 
 import json
+import math
 import sqlite3
 import statistics
 from dataclasses import dataclass
@@ -357,7 +358,13 @@ def run_pricing(conn: sqlite3.Connection, now: datetime, cfg: PricingConfig | No
                 kind = r["kind"]
                 if kind == "over_under" and r["line"] is None:
                     continue
-                at = at_line(pmf, r["line"]) if kind == "over_under" else yes_no(pmf)
+                if r["market"] == "goalie_saves_and_win":
+                    if r["line"] is None:
+                        continue
+                    p_yes = sum(pmf[math.floor(r["line"]) + 1 :])  # pmf: P(k saves AND a win)
+                    at = AtLine(p_yes, 1 - p_yes, 0.0)
+                else:
+                    at = at_line(pmf, r["line"]) if kind == "over_under" else yes_no(pmf)
                 at, cal_note = calibrate(at, cals.get(r["market_id"]))
                 pr = price_line(
                     kind,

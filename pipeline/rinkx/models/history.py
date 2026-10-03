@@ -39,6 +39,7 @@ class GoalieLine:
     saves: float | None
     ga: float | None
     shutout: bool | None = None
+    decision: str | None = None  # 'W', 'L' or 'O' (OT/SO loss), as reported
 
 
 @dataclass
@@ -142,7 +143,7 @@ def load(conn: sqlite3.Connection, before: str | None = None) -> list[GameRecord
     goalies: dict[int, list[GoalieLine]] = defaultdict(list)
     for r in conn.execute(
         "SELECT s.game_id, s.player_id, s.team_id, s.opponent_team_id, s.is_home, s.started, s.toi_s, "
-        "s.shots_against, s.saves, s.goals_against, s.shutout "
+        "s.shots_against, s.saves, s.goals_against, s.shutout, s.decision "
         "FROM goalie_game_stats s JOIN games g ON g.id = s.game_id "
         f"WHERE {cond} ORDER BY s.game_id, s.started DESC, s.player_id",
         args,
@@ -159,6 +160,7 @@ def load(conn: sqlite3.Connection, before: str | None = None) -> list[GameRecord
                 _f(r[8]),
                 _f(r[9]),
                 None if r[10] is None else bool(r[10]),
+                r[11],
             )
         )
 

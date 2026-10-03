@@ -408,7 +408,7 @@ export interface MarketProjection {
   pmf?: number[];
   factors_for?: Factor[];
   factors_against?: Factor[];
-  inputs?: Record<string, string | number | null>;
+  inputs?: Record<string, string | number | null | Record<string, number>>;
   as_of?: string;
 }
 
@@ -480,6 +480,8 @@ export interface PlayerProjection {
 export interface Baseline {
   log_score: number;
   model_minus_baseline: { mean: number; se: number; lo: number };
+  /** false: shown for comparison, not part of the publication test */
+  required?: boolean;
 }
 
 export interface StatTest {

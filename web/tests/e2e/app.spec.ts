@@ -239,7 +239,10 @@ test("model tests page shows what passed and what was held back", async ({ page 
   await expect(win).toContainText("Did not clearly beat the simple baselines");
   await expect(win).toContainText("vs standings records (log5)");
   await expect(page.getByRole("article", { name: "First goal scorer test" })).toContainText("PASSED · PUBLISHED");
-  await expect(page.getByText(/Saves \+ Win: needs a joint saves-and-win model/)).toBeVisible();
+  const sw = page.getByRole("article", { name: "Saves + Win (goalie) test" });
+  await expect(sw).toContainText("vs league rate of this outcome");
+  await expect(sw).toContainText("vs saves and win treated as independent (shown, not required)");
+  await expect(page.getByText(/not modeled/)).toHaveCount(0); // every market in the catalogue has a model
 });
 
 test("sportsbook lines: comparison table, best price, no-vig, movement (synthetic)", async ({ page }) => {
@@ -576,4 +579,14 @@ test("injury report (recorded ESPN response): player status with source, game no
   const panel = page.locator("section", { has: page.getByRole("heading", { name: "Injury report (ESPN)" }) });
   await expect(panel).toContainText("109 listed, 4 matched and active, 105 unmatched");
   await expect(panel).toContainText("partial");
+});
+
+test("saves + win: the confirmed starter's joint projection by save line (synthetic)", async ({ page }) => {
+  await unlock(page, true, MODELS);
+  await page.goto(`${MODELS}#/players/8000040`); // T01's backup, confirmed through Quick Entry
+  const card = page.getByRole("article", { name: "Saves + Win projection" });
+  await expect(card).toContainText(/Probability he gets the win with 25\+ saves · win \d+%/);
+  const lines = card.getByLabel("Win with saves");
+  await expect(lines).toContainText("20+ saves");
+  await expect(lines).toContainText("30+ saves");
 });

@@ -225,6 +225,14 @@ def test_goalie_and_first_goal_settlement(league):
         conn, row | {"market": "goalie_saves", "kind": "over_under", "line": 24.5, "player_id": backup}, now
     )
     assert benched.void_reason == "goalie_did_not_start"
+    # Saves + Win: the win AND more saves than the line (synthetic starters have decisions).
+    won = starter["decision"] == "W"
+    sw = grade.actual(conn, row | {"market": "goalie_saves_and_win", "kind": "yes_no", "line": starter["saves"] - 0.5,
+                                   "player_id": starter["player_id"]}, now)  # fmt: skip
+    assert sw.result == ("yes" if won else "no")
+    hi = {"market": "goalie_saves_and_win", "kind": "yes_no", "line": starter["saves"] + 0.5}
+    sw_hi = grade.actual(conn, row | hi | {"player_id": starter["player_id"]}, now)
+    assert sw_hi.result == "no"
 
     first = conn.execute(
         "SELECT shooter_id FROM pbp_shot_events WHERE game_id = ? AND event_type = 'goal' "

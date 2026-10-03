@@ -7,6 +7,7 @@ import copy
 import json
 import math
 from datetime import UTC, date, datetime, timedelta
+from itertools import pairwise
 
 import numpy as np
 import pytest
@@ -152,6 +153,17 @@ def test_live_game_projections(tmp_path):
     assert len(wins) == 2 and sum(w.mean for w in wins) == pytest.approx(1, abs=1e-6)
     assert len([p for p in players if p.market == "goalie_shutout"]) == 2
 
+    # Saves + Win: the joint distribution sums to that goalie's win probability, and higher
+    # save lines are less likely.
+    sw = {p.player: p for p in players if p.market == "goalie_saves_and_win"}
+    assert set(sw) == {w.player for w in wins}
+    for w in wins:
+        s = sw[w.player]
+        assert sum(s.pmf) == pytest.approx(w.mean, abs=1e-3) == pytest.approx(s.inputs["p_win"], abs=1e-3)
+        probs = [s.inputs["p_by_line"][k] for k in ("19.5", "22.5", "24.5", "27.5", "29.5")]
+        assert all(a >= b for a, b in pairwise(probs)) and probs[0] <= w.mean
+        assert s.mean == pytest.approx(s.inputs["p_by_line"]["24.5"], abs=1e-4)
+
     # First goal: each player gets P(team scores first) x his share of team goals.
     fg = [p for p in players if p.market == "skater_first_goal"]
     assert fg
@@ -195,3 +207,34 @@ def test_stored_report_keeps_game_settings_and_projects(tmp_path):
     if stored["stats"]["win"]["passed"]:
         expected.add("game_moneyline")
     assert markets == expected and expected
+
+
+@pytest.mark.parametrize("playoff", [False, True])
+def test_saves_win_joint_matches_simulation(playoff):
+    ch = GameChoice(factors=(), size=math.inf)
+    one = lambda v: np.array([v], dtype=float)  # noqa: E731
+    c = {"gL": one(0.1), "ot_q": one(0.6), "so_home": one(0.52), "playoff": one(float(playoff)),
+         "h.S": one(30.0), "a.S": one(32.0)}  # fmt: skip
+    joint = game_sim.saves_win_joint(c, ch, "h", math.inf)[0]
+    rng = np.random.default_rng(3)
+    n = 400_000
+    sa = rng.poisson(32.0, n)
+    ga = rng.binomial(sa, 0.1)
+    own = rng.poisson(3.0, n)
+    tie = own == ga
+    ot = tie & ((rng.random(n) < 0.6) | playoff)
+    ot_home = rng.random(n) < 3.0 / (3.0 + 3.2)
+    so_home = rng.random(n) < 0.52
+    win = (own > ga) | (ot & ot_home) | (tie & ~ot & so_home)
+    saves = sa - ga
+    for line in (19.5, 24.5, 29.5):
+        k = math.floor(line) + 1
+        assert joint[k:].sum() == pytest.approx((win & (saves > line)).mean(), abs=0.003)
+    assert joint.sum() == pytest.approx(win.mean(), abs=0.003)
+    # With Poisson shots, goals against are Poisson(lambda): the joint agrees with the game model's win %.
+    p_home = game_sim.outcomes(c, ch).p_home_win[0]
+    assert joint.sum() == pytest.approx(p_home, abs=1e-4)
+    # Dependence: a win with many saves is rarer than independence would say.
+    k = math.floor(24.5) + 1
+    indep = joint.sum() * game_sim.saves_over(c, "h", math.inf, 24.5, ch)[0]
+    assert joint[k:].sum() < indep

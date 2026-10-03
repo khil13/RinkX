@@ -722,6 +722,38 @@ def project_game(
                                 miss,
                             )
                         )
+                    saves_choice = report["choices"].get("saves")
+                    if "saves_win" in game_passed and saves_choice is not None:
+                        sa_size = math.inf if saves_choice.get("sa_size") is None else float(saves_choice["sa_size"])
+                        joint = game_sim.saves_win_joint(_one(gf), gch, side, sa_size, np.array([win]))[0]
+                        by_line = {
+                            f"{ln:g}": round(float(joint[math.floor(ln) + 1 :].sum()), 4)
+                            for ln in game_sim.SAVES_WIN_LINES
+                        }
+                        main = by_line[f"{game_sim.SAVES_WIN_LINE:g}"]
+                        _, sm = _yes_no(main)
+                        keep = int(np.searchsorted(np.cumsum(joint), joint.sum() - 1e-6)) + 1
+                        projections.append(
+                            Projection(
+                                gid,
+                                "goalie_saves_and_win",
+                                "saves_win",
+                                _pmf_json(joint[:keep]),  # P(k saves AND a win); sums to P(win)
+                                sm["mean"],
+                                sm["median"],
+                                sm["sd"],
+                                own,
+                                base_inputs
+                                | {
+                                    "p_win": round(float(joint.sum()), 4),
+                                    "p_by_line": by_line,
+                                    "main_line": game_sim.SAVES_WIN_LINE,
+                                    "expected_shots_against": round(float(gf["a.S" if home else "h.S"]), 2),
+                                },
+                                _quality(f["starts"], miss),
+                                miss,
+                            )
+                        )
     if env is not None and gch is not None:
         abbr_h, abbr_a = abbrev[g["home_team_id"]], abbrev[g["away_team_id"]]
         ex_h = env_factors(gf, gch, "h", abbr_h, abbr_a, True)

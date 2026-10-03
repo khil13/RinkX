@@ -33,12 +33,15 @@ EPS = 1e-6
 MIN_GAMES = 300  # games in each of the tuning and test windows
 MIN_FIRST_GOAL_ROWS = 3000
 
-GAME_STATS = ("team_goals", "win", "shutout", "first_goal")
+GAME_STATS = ("team_goals", "win", "shutout", "first_goal", "saves_win")
+SAVES_WIN_LINE = 24.5  # the line the walk-forward test scores (a common book line)
+SAVES_WIN_LINES = (19.5, 22.5, 24.5, 27.5, 29.5)  # probabilities shown on goalie pages
 LABELS = {
     "team_goals": "Team goals (team & game totals)",
     "win": "Win probability (moneyline, goalie win)",
     "shutout": "Goalie shutout",
     "first_goal": "First goal scorer",
+    "saves_win": "Saves + Win (goalie)",
 }
 
 
@@ -206,7 +209,8 @@ def _paired(diff: F) -> dict[str, float]:
     return {"mean": round(mean, 5), "se": round(se, 5), "lo": round(mean - 1.96 * se, 5)}
 
 
-def _binary_entry(p: F, y: F, baselines: dict[str, F]) -> dict[str, Any]:
+def _binary_entry(p: F, y: F, baselines: dict[str, F], informational: tuple[str, ...] = ()) -> dict[str, Any]:
+    """Log score vs each baseline; `informational` ones are reported but don't decide publication."""
     ll = _binary_ll(p, y)
     base: dict[str, Any] = {}
     beats = True
@@ -214,7 +218,10 @@ def _binary_entry(p: F, y: F, baselines: dict[str, F]) -> dict[str, Any]:
         bl = _binary_ll(bp, y)
         d = _paired(ll - bl)
         base[name] = {"log_score": round(float(np.mean(bl)), 5), "model_minus_baseline": d}
-        beats = beats and d["lo"] > 0
+        if name in informational:
+            base[name]["required"] = False
+        else:
+            beats = beats and d["lo"] > 0
     hl = hosmer_lemeshow(p, y)
     passed = beats and hl > 0.01
     return {
@@ -283,6 +290,59 @@ def first_goal_probs(skater: Cols, games: dict[int, tuple[float, float, float, f
     return out
 
 
+def tie_win(c: Cols, ch: GameChoice, side: str) -> F:
+    """P(this side wins | tied after regulation): an OT goal, else the shootout (playoffs: OT only)."""
+    lam_h, lam_a = team_lambda(c, "h", ch), team_lambda(c, "a", ch)
+    playoff = c["playoff"] > 0.5
+    q = np.where(playoff, 1.0, c["ot_q"])
+    s_h = lam_h / (lam_h + lam_a)
+    so_h = np.where(playoff, 0.0, c["so_home"])
+    if side == "h":
+        return np.asarray(q * s_h + (1 - q) * so_h, dtype=float)
+    return np.asarray(q * (1 - s_h) + (1 - q) * np.where(playoff, 0.0, 1 - c["so_home"]), dtype=float)
+
+
+def saves_win_joint(c: Cols, ch: GameChoice, side: str, sa_size: float, p_win: F | None = None) -> F:
+    """joint[i, k] = P(this side's starting goalie makes k saves AND his team wins), shape (n, SA_MAX + 1).
+
+    Shots against ~ NB(opponent's expected shots, the goalie model's dispersion); goals against |
+    shots ~ Binomial(shots, opponent goals per shot), so expected goals against equal the game
+    model's lambda; his team's own goals follow the game model; a regulation tie is won through
+    OT or the shootout as in `outcomes`. Saves = shots against - goals against. Summing joint over
+    k gives P(win); the dependence (more shots: more saves but more goals against) is kept.
+    With `p_win` (the game model's win probability) the joint is rescaled to sum to it, so the
+    goalie has one win probability everywhere; the shots-against dispersion otherwise moves it
+    slightly.
+    """
+    opp = "a" if side == "h" else "h"
+    lam_own, lam_opp = team_lambda(c, side, ch), team_lambda(c, opp, ch)
+    shots_against = np.maximum(c[f"{opp}.S"], dist.MIN_MU)
+    q_goal = np.clip(lam_opp / shots_against, 1e-4, 0.5)
+    own = _pmf_matrix(lam_own, ch.size)  # (n, MAXG + 1)
+    own_cdf = np.cumsum(own, axis=1)
+    tw = tie_win(c, ch, side)
+    w = dist._sa_weights(shots_against, sa_size)  # (n, SA_MAX + 1)
+    sa = np.arange(dist.SA_MAX + 1, dtype=float)[None, :]
+    joint = np.zeros_like(w)
+    for g in range(MAXG + 1):
+        win_g = (1 - own_cdf[:, g]) + own[:, g] * tw  # wins outright, or level and wins the tie
+        contrib = w * stats.binom.pmf(g, sa, q_goal[:, None]) * win_g[:, None]
+        joint[:, : dist.SA_MAX + 1 - g] += contrib[:, g:]  # saves = shots - g
+    if p_win is not None:
+        joint *= (p_win / np.maximum(joint.sum(axis=1), EPS))[:, None]
+    return np.asarray(joint, dtype=float)
+
+
+def saves_over(c: Cols, side: str, sa_size: float, line: float, ch: GameChoice) -> F:
+    """P(saves > line) for this side's goalie, ignoring the result (the independence baseline)."""
+    opp = "a" if side == "h" else "h"
+    shots_against = np.maximum(c[f"{opp}.S"], dist.MIN_MU)
+    q_goal = np.clip(team_lambda(c, opp, ch) / shots_against, 1e-4, 0.5)
+    k = math.floor(line)
+    _, cd = dist.mixture_pmf_cdf(np.full(len(q_goal), float(k)), shots_against, sa_size, 1 - q_goal)
+    return np.asarray(1 - cd, dtype=float)
+
+
 def evaluate(
     report: dict[str, Any],
     game: Any,  # fit.Table of game rows
@@ -292,7 +352,13 @@ def evaluate(
     test_start: str,
 ) -> None:
     """Adds team_goals / win / shutout / first_goal entries and the game choice to `report`."""
-    units = {"team_goals": "team-games", "win": "games", "shutout": "goalie starts", "first_goal": "player-games"}
+    units = {
+        "team_goals": "team-games",
+        "win": "games",
+        "shutout": "goalie starts",
+        "first_goal": "player-games",
+        "saves_win": "goalie starts",
+    }
     entries = {
         s: {"label": LABELS[s], "family": "game_sim", "unit": units[s], "n_tune": 0, "n_test": 0} for s in GAME_STATS
     }
@@ -375,6 +441,47 @@ def evaluate(
         )
     )
     entries["shutout"]["n_test"] = int(known.sum())
+
+    # Saves + Win: each starting goalie, "wins with more than SAVES_WIN_LINE saves". It must beat
+    # the league rate of that event (tuning window) and be calibrated. Treating saves and the win
+    # as independent (same marginals) is reported too, but not required: it is a competing model
+    # built from the same parts, not a simple baseline, and the dependence it ignores is small.
+    sw = entries["saves_win"]
+    saves_ch = report["choices"].get("saves")
+    if saves_ch is None:
+        sw.update(passed=False, reason="insufficient_history", n_test=0)
+    else:
+        sa_size = INF if saves_ch.get("sa_size") is None else float(saves_ch["sa_size"])
+        k_min = math.floor(SAVES_WIN_LINE) + 1
+        p_sw, p_ind, y_sw = [], [], []
+        for side in ("h", "a"):
+            p_win_side = out.p_home_win if side == "h" else 1 - out.p_home_win
+            joint = saves_win_joint(cv, ch, side, sa_size, p_win_side)
+            p_sw.append(joint[:, k_min:].sum(axis=1))
+            p_ind.append(joint.sum(axis=1) * saves_over(cv, side, sa_size, SAVES_WIN_LINE, ch))
+            won, saves = cv[f"y.{side}_gw"], cv[f"y.{side}_saves"]
+            y_sw.append(np.where(np.isnan(won), np.nan, (saves > SAVES_WIN_LINE) * won))
+        p_all, ind_all, y_all = np.concatenate(p_sw), np.concatenate(p_ind), np.concatenate(y_sw)
+        ok = ~np.isnan(y_all)
+        ct = _subset(c, tune_m)
+        y_tune = np.concatenate([(ct[f"y.{s}_saves"] > SAVES_WIN_LINE) * ct[f"y.{s}_gw"] for s in ("h", "a")])
+        lg_rate = float(np.nanmean(y_tune)) if np.isfinite(y_tune).any() else float("nan")
+        if int(ok.sum()) < MIN_GAMES or not math.isfinite(lg_rate):
+            sw.update(passed=False, reason="insufficient_history", n_test=int(ok.sum()))
+        else:
+            sw.update(
+                _binary_entry(
+                    np.clip(p_all[ok], EPS, 1 - EPS),
+                    y_all[ok],
+                    {
+                        "league_rate": np.full(int(ok.sum()), max(lg_rate, 0.005)),
+                        "independent": np.clip(ind_all[ok], EPS, 1 - EPS),
+                    },
+                    informational=("independent",),
+                )
+            )
+            sw["n_test"] = int(ok.sum())
+            sw["line"] = SAVES_WIN_LINE
 
     # First goal: every dressed skater in games with play-by-play.
     fg = entries["first_goal"]
