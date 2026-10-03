@@ -1,0 +1,50 @@
+name: record-injury-fixtures
+
+# Records the real ESPN NHL injuries response as a parser test fixture (the same pattern as
+# record-nhl-fixtures). Public injury reports only. Runs when this file changes on a development
+# branch, or manually, and commits the result back to that branch.
+on:
+  push:
+    branches: ["claude/**"]
+    paths: [".github/workflows/record-injury-fixtures.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: record-injury-fixtures-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  record:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+      - name: Fetch
+        run: |
+          set -euo pipefail
+          out=pipeline/tests/fixtures/injuries
+          mkdir -p "$out"
+          url="https://site.api.espn.com/apis/site/v2/sports/hockey/nhl/injuries"
+          code=$(curl -sS -L --retry 3 --retry-delay 2 -A "RinkX fixture recorder (personal project)" \
+                 -o "$out/espn.raw" -w '%{http_code}' "$url")
+          echo "HTTP $code"
+          test "$code" = "200"
+          jq . "$out/espn.raw" > "$out/espn_injuries.json" && rm "$out/espn.raw"
+          jq -n --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg u "$url" \
+            '{recorded_at: $at, url: $u, note: "Unmodified response (pretty-printed), used only as a parser test fixture.", files: [{file: "espn_injuries.json", url: $u}]}' \
+            > "$out/index.json"
+          jq '{teams: (.injuries | length), entries: ([.injuries[].injuries | length] | add),
+               team_keys: (.injuries[0] | keys), entry_keys: (.injuries[0].injuries[0] | keys? // [])}' \
+            "$out/espn_injuries.json" || true
+      - name: Commit fixture
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add pipeline/tests/fixtures/injuries
+          if git diff --cached --quiet; then echo "no changes"; exit 0; fi
+          git commit -m "Record ESPN injuries fixture"
+          git push

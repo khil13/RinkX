@@ -119,6 +119,10 @@ def actual(conn: sqlite3.Connection, r: sqlite3.Row, now: datetime) -> st.Settle
             return st.void("goalie_did_not_start")
         if market == "goalie_win":
             return st.settle(kind, None, 1.0 if row["decision"] == "W" else 0.0)
+        if market == "goalie_saves_and_win":  # the win AND more saves than the line
+            if line is None or row["saves"] is None:
+                return None
+            return st.settle(kind, None, 1.0 if row["decision"] == "W" and row["saves"] > line else 0.0)
         if market == "goalie_shutout":
             return None if row["shutout"] is None else st.settle(kind, None, float(row["shutout"]))
         v = row[st.GOALIE_STAT[market]]

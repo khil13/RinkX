@@ -36,7 +36,7 @@ from rinkx.models.dist import INF, F
 from rinkx.models.history import GOALIE_STATS, SKATER_STATS
 from rinkx.models.state import HALF_LIVES, K_SV, H, Row, basis_of
 
-MODEL_VERSION = "1.3"
+MODEL_VERSION = "1.4"
 M_GRID: tuple[float, ...] = (0.25, 0.5, 1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 64.0)  # hours of ice time
 FINISH_GRID: tuple[float, ...] = (25.0, 50.0, 100.0, 200.0, 400.0, 800.0)  # shots
 BURN_IN_DAYS = 21  # the first weeks of history only build state; they are never scored
@@ -76,6 +76,7 @@ FAMILY = {
     "win": "game_sim",
     "shutout": "game_sim",
     "first_goal": "game_sim",
+    "saves_win": "game_sim",
 }
 # Published markets and the stat each is read from (yes/no markets read P(stat >= 1)).
 MARKETS: dict[str, str] = {
@@ -94,6 +95,7 @@ MARKETS: dict[str, str] = {
     "goalie_win": "win",
     "goalie_shutout": "shutout",
     "skater_first_goal": "first_goal",
+    "goalie_saves_and_win": "saves_win",
 }
 # Game- and team-level markets (stored in game_projections, not player_projections).
 GAME_MARKETS: dict[str, str] = {"game_moneyline": "win", "game_total": "team_goals", "team_total": "team_goals"}

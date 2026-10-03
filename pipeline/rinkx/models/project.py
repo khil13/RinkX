@@ -20,6 +20,7 @@ from typing import Any
 
 import numpy as np
 
+from rinkx.ingestion.injuries import espn as injuries
 from rinkx.ingestion.runs import SourceSpec, ingestion_run, register_source
 from rinkx.models import dist, fit, game_sim, history
 from rinkx.models.fit import FAMILY, LABELS, MARKETS, MODEL_VERSION, Choice
@@ -164,11 +165,13 @@ def goalie_mix(conn: sqlite3.Connection, game_id: int, team_id: int) -> GoalieMi
     ).fetchone()
     if conf:
         return GoalieMix([(conf[0], 1.0)], "confirmed", conf[2], conf[3])
+    hurt = {pid for pid, r in injured(conn, game_id).items() if r["status"] in injuries.OUT_STATUSES}
     roster = [
         r[0]
         for r in conn.execute(
             "SELECT id FROM players WHERE current_team_id = ? AND position = 'G' AND is_active = 1", (team_id,)
         )
+        if r[0] not in hurt  # a goalie on the injury report can't be the projected starter
     ]
     if not roster:
         return GoalieMix([], "unknown")
@@ -188,16 +191,49 @@ def goalie_mix(conn: sqlite3.Connection, game_id: int, team_id: int) -> GoalieMi
     return GoalieMix(mix, "projected")
 
 
+INJURY_FRESH = timedelta(hours=48)  # an injury report checked longer before the game than this is ignored
+
+
+def injury_report_fresh(conn: sqlite3.Connection, game_id: int) -> bool:
+    """Whether the injury report was checked recently enough (relative to the game) to rely on."""
+    start = conn.execute("SELECT start_time_utc FROM games WHERE id = ?", (game_id,)).fetchone()[0]
+    last = conn.execute(injuries.LAST_CHECK_SQL, (injuries.SOURCE.code,)).fetchone()
+    return last is not None and last[0] is not None and parse_iso(start) - parse_iso(last[0]) <= INJURY_FRESH
+
+
+def injured(conn: sqlite3.Connection, game_id: int) -> dict[int, sqlite3.Row]:
+    """Active injury-report entries for players on either team, if the report is fresh."""
+    if not injury_report_fresh(conn, game_id):
+        return {}
+    rows = conn.execute(
+        "SELECT i.player_id, i.status, i.description, i.source_ref, i.reported_at FROM injuries i "
+        "JOIN games g ON g.id = ? WHERE i.is_active = 1 AND i.team_id IN (g.home_team_id, g.away_team_id)",
+        (game_id,),
+    ).fetchall()
+    return {r["player_id"]: r for r in rows}
+
+
 def players_out(conn: sqlite3.Connection, game_id: int) -> dict[int, dict[str, Any]]:
+    """Players who won't play: ruled out by Quick Entry, or out / on IR / suspended on the injury
+    report. A Quick Entry "back in" for this game overrides the report."""
     out: dict[int, dict[str, Any]] = {}
+    manual: dict[int, str] = {}
     for r in conn.execute(
         "SELECT a.player_id, a.status, a.reason, a.source_ref, a.reported_at FROM game_availability a "
         "WHERE a.game_id = ? AND a.id = (SELECT a2.id FROM game_availability a2 WHERE a2.game_id = a.game_id "
         "AND a2.player_id = a.player_id ORDER BY a2.reported_at DESC, a2.id DESC LIMIT 1)",
         (game_id,),
     ):
+        manual[r[0]] = r[1]
         if r[1] == "out":
             out[r[0]] = {"reason": r[2], "source": r[3], "reported_at": r[4]}
+    for pid, r in injured(conn, game_id).items():
+        if r["status"] in injuries.OUT_STATUSES and manual.get(pid) != "available" and pid not in out:
+            out[pid] = {
+                "reason": f"injury report: {r['status'].replace('_', ' ')}",
+                "source": r["source_ref"],
+                "reported_at": r["reported_at"],
+            }
     return out
 
 
@@ -476,7 +512,7 @@ def _quality(games: float, missing: list[str]) -> float:
         q -= 0.25
     elif games < 30:
         q -= 0.1
-    q -= 0.1 * sum(m in ("goalie_unconfirmed", "lineup_unconfirmed") for m in missing)
+    q -= 0.1 * sum(m in ("goalie_unconfirmed", "lineup_unconfirmed", "injury_day_to_day") for m in missing)
     return round(max(q, 0.1), 2)
 
 
@@ -500,6 +536,8 @@ def project_game(
     shots_all = report["choices"].get("shots")
     shots = Choice.from_json(shots_all) if shots_all else None
     out = players_out(conn, g["id"])
+    report_fresh = injury_report_fresh(conn, g["id"])
+    day_to_day = {pid for pid, r in injured(conn, g["id"]).items() if r["status"] in ("day_to_day", "questionable")}
     teams = {g["home_team_id"]: True, g["away_team_id"]: False}
     abbrev = dict(conn.execute("SELECT id, abbrev FROM teams WHERE id IN (?, ?)", tuple(teams)).fetchall())
     names = {}
@@ -537,7 +575,9 @@ def project_game(
             "arena": g["venue_name"],
             "goalie_text": goalie_text,
         }
-        missing_common = ["lineup_unconfirmed", "injuries_not_connected", "odds_not_connected"]
+        missing_common = ["lineup_unconfirmed", "odds_not_connected"]
+        if not report_fresh:
+            missing_common.append("injuries_not_connected")
         if opp_mix.status != "confirmed":
             missing_common.append("goalie_unconfirmed")
         skaters = conn.execute(
@@ -548,6 +588,7 @@ def project_game(
             if pid in out or pid not in st.skaters:
                 continue  # ruled out, or no NHL history to project from
             pos = history.pos_group(position)
+            player_missing = missing_common + (["injury_day_to_day"] if pid in day_to_day else [])
             f = st.skater_features(pid, pos, team, opp, home, arena, opp_mix.mix, g["season_id"], g["game_type"] == "O")
             ctx = ctx_base | {"pos": "defenceman" if pos == "D" else "forward"}
             if env is not None and gch is not None and "first_goal" in game_passed and goals_ch is not None:
@@ -570,7 +611,7 @@ def project_game(
                     },
                 ]
                 fg_factors += env_factors(gf, gch, side, abbrev[team], abbrev[opp], home).factors
-                miss = [m for m in missing_common]
+                miss = list(player_missing)
                 projections.append(
                     Projection(
                         pid,
@@ -597,7 +638,7 @@ def project_game(
                 p = fit.pmf(_one(f), ch, shots)
                 ex = explain_skater(f, ch, shots, ctx)
                 sm = dist.summary(p)
-                miss = [m for m in missing_common if m != "goalie_unconfirmed" or "goalie" in ch.factors]
+                miss = [m for m in player_missing if m != "goalie_unconfirmed" or "goalie" in ch.factors]
                 for market in _markets_for(stat):
                     projections.append(
                         Projection(
@@ -677,6 +718,38 @@ def project_game(
                                 sm["sd"],
                                 facts,
                                 base_inputs | {"tied_after_regulation": round(float(env.p_tied_reg[0]), 4)},
+                                _quality(f["starts"], miss),
+                                miss,
+                            )
+                        )
+                    saves_choice = report["choices"].get("saves")
+                    if "saves_win" in game_passed and saves_choice is not None:
+                        sa_size = math.inf if saves_choice.get("sa_size") is None else float(saves_choice["sa_size"])
+                        joint = game_sim.saves_win_joint(_one(gf), gch, side, sa_size, np.array([win]))[0]
+                        by_line = {
+                            f"{ln:g}": round(float(joint[math.floor(ln) + 1 :].sum()), 4)
+                            for ln in game_sim.SAVES_WIN_LINES
+                        }
+                        main = by_line[f"{game_sim.SAVES_WIN_LINE:g}"]
+                        _, sm = _yes_no(main)
+                        keep = int(np.searchsorted(np.cumsum(joint), joint.sum() - 1e-6)) + 1
+                        projections.append(
+                            Projection(
+                                gid,
+                                "goalie_saves_and_win",
+                                "saves_win",
+                                _pmf_json(joint[:keep]),  # P(k saves AND a win); sums to P(win)
+                                sm["mean"],
+                                sm["median"],
+                                sm["sd"],
+                                own,
+                                base_inputs
+                                | {
+                                    "p_win": round(float(joint.sum()), 4),
+                                    "p_by_line": by_line,
+                                    "main_line": game_sim.SAVES_WIN_LINE,
+                                    "expected_shots_against": round(float(gf["a.S" if home else "h.S"]), 2),
+                                },
                                 _quality(f["starts"], miss),
                                 miss,
                             )

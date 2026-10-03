@@ -24,7 +24,8 @@ export const MODEL_REASON_TEXT: Record<ModelReason, string> = {
 const MISSING_TEXT: Record<string, string> = {
   lineup_unconfirmed: "Lineup not confirmed: assumes he dresses",
   goalie_unconfirmed: "Starting goalie not confirmed",
-  injuries_not_connected: "No injury feed yet",
+  injuries_not_connected: "No recent injury report",
+  injury_day_to_day: "Day-to-day on the injury report",
   odds_not_connected: "No odds yet: game environment from team history only",
 };
 
@@ -161,6 +162,7 @@ function FactorRow({ f }: { f: Factor }) {
 }
 
 const INPUT_LABELS: Record<string, string> = {
+  p_win: "Win probability (game model)",
   games_in_history: "Games in his history",
   starts_in_history: "Starts in his history",
   half_life_games: "Recency half-life (games)",
@@ -213,7 +215,7 @@ function Explain({ m }: { m: MarketProjection }) {
                 <dd className="num text-right">
                   {k.endsWith("toi_s")
                     ? mmss(v as number)
-                    : ["start_probability", "team_scores_first", "share_of_team_goals", "tied_after_regulation"].includes(k)
+                    : ["start_probability", "team_scores_first", "share_of_team_goals", "tied_after_regulation", "p_win"].includes(k)
                       ? pct(v as number)
                       : k === "prior_strength"
                         ? `${String(v)} ${UNIT[String(inputs.prior_strength_unit)] ?? ""}`
@@ -227,7 +229,42 @@ function Explain({ m }: { m: MarketProjection }) {
   );
 }
 
+function SavesWin({ m }: { m: MarketProjection }) {
+  const byLine = (m.inputs?.p_by_line ?? {}) as unknown as Record<string, number>;
+  return (
+    <dl className="num grid grid-cols-5 gap-1 text-center text-xs" aria-label="Win with saves">
+      {Object.entries(byLine).map(([line, p]) => (
+        <div key={line} className="rounded bg-panel px-1 py-1">
+          <dt className="text-[10px] text-muted">{Math.floor(Number(line)) + 1}+ saves</dt>
+          <dd>{pct(p)}</dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
 export function ProjectionCard({ m }: { m: MarketProjection }) {
+  if (m.market === "goalie_saves_and_win") {
+    const line = Number(m.inputs?.main_line ?? 24.5);
+    return (
+      <article className="flex flex-col gap-2 rounded-md border border-line bg-panel-2 p-3" aria-label={`${m.label} projection`}>
+        <header className="flex items-baseline justify-between gap-2">
+          <h3 className="text-sm font-semibold">{m.label}</h3>
+          <span className="num text-lg">{pct(m.mean)}</span>
+        </header>
+        <p className="num text-xs text-muted">
+          Probability he gets the win with {Math.floor(line) + 1}+ saves · win{" "}
+          {typeof m.inputs?.p_win === "number" ? pct(m.inputs.p_win) : "—"}
+        </p>
+        <SavesWin m={m} />
+        <Explain m={m} />
+        <p className="text-[11px] text-muted">
+          Joint model: more shots against mean more saves but also more goals against, so a win with many saves is
+          less likely than the two chances multiplied.
+        </p>
+      </article>
+    );
+  }
   const yes = m.kind === "yes_no";
   return (
     <article className="flex flex-col gap-2 rounded-md border border-line bg-panel-2 p-3" aria-label={`${m.label} projection`}>

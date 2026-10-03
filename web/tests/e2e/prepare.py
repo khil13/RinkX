@@ -29,6 +29,7 @@ from rinkx import crypto  # noqa: E402
 from rinkx.config import Settings  # noqa: E402
 from rinkx.alerts.evaluate import run_alerts  # noqa: E402
 from rinkx.correlation.estimate import run_correlations  # noqa: E402
+from rinkx.grading.calibration import run_calibration  # noqa: E402
 from rinkx.grading.grade import run_grading  # noqa: E402
 from rinkx.models.project import run_models  # noqa: E402
 from rinkx.pricing.price import run_pricing  # noqa: E402
@@ -175,6 +176,7 @@ def models_site(env: dict[str, str], tmp: Path) -> None:
     conn, truth = synth.build(str(tmp / "synthetic.db"), teams=20, days=days, seed=22)
     synth.add_priced_history(conn, truth, days=30)  # frozen pre-game predictions on finished games, to grade
     run_grading(conn, now, today)
+    run_calibration(conn, now)  # live calibrators from that graded history
     game = synth.add_upcoming(conn, today)
     run_models(conn, now, today)
     away = conn.execute("SELECT away_team_id FROM games WHERE id = ?", (game,)).fetchone()[0]

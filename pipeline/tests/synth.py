@@ -224,6 +224,12 @@ def build(
             conn.execute(
                 "UPDATE games SET home_score = ?, away_score = ?, ended_in = ? WHERE id = ?", (hs, aw, ended, gid)
             )
+            winner = home if hs > aw else away
+            for t in (home, away):
+                dec = "W" if t == winner else ("L" if ended == "REG" else "O")
+                conn.execute(
+                    "UPDATE goalie_game_stats SET decision = ? WHERE game_id = ? AND team_id = ?", (dec, gid, t)
+                )
     conn.commit()
     return conn, truth
 

@@ -1,4 +1,5 @@
 import { Link, useParams } from "react-router";
+import { InjuryLine } from "../components/Injuries";
 import { Missing, Notice, Panel, Spinner } from "../components/ui";
 import { useEncrypted } from "../lib/data/fetch";
 import type { GameDetail, Side } from "../lib/data/types";
@@ -276,7 +277,26 @@ export function Game() {
           )}
         </Panel>
         <Panel title="Injuries">
-          <Missing reason={g.home.injuries_reason} />
+          {g.home.injuries && g.away.injuries ? (
+            <div className="flex flex-col gap-3" aria-label="Injury report">
+              {[g.away, g.home].map((s) => (
+                <div key={s.team.abbrev} className="flex flex-col gap-2">
+                  <h3 className="num text-xs font-semibold text-muted">{s.team.abbrev}</h3>
+                  {s.injuries!.length === 0 ? (
+                    <p className="text-xs text-muted">No one on the injury report.</p>
+                  ) : (
+                    s.injuries!.map((e) => <InjuryLine key={e.player.id} e={e} />)
+                  )}
+                </div>
+              ))}
+              <p className="text-[11px] text-muted">
+                From ESPN's public injury report (unofficial). Players listed out, on IR or suspended get no
+                projection unless a Quick Entry puts them back in; day-to-day players are projected and flagged.
+              </p>
+            </div>
+          ) : (
+            <Missing reason={g.home.injuries_reason} />
+          )}
         </Panel>
         <Panel title="Lines & power-play units">
           <Missing reason={g.home.lines_reason} />

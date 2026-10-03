@@ -14,8 +14,10 @@ from rinkx.alerts import ntfy
 from rinkx.alerts.evaluate import Sender, run_alerts
 from rinkx.config import Settings
 from rinkx.correlation.estimate import run_correlations
+from rinkx.grading.calibration import run_calibration
 from rinkx.grading.grade import run_grading
-from rinkx.ingestion.http import Fetcher, HttpFetcher, ReplayFetcher
+from rinkx.ingestion.http import Fetcher, FixtureFetcher, HttpFetcher, ReplayFetcher
+from rinkx.ingestion.injuries.espn import run_injuries
 from rinkx.ingestion.nhl.jobs import NhlOptions, run_nhl
 from rinkx.ingestion.odds.client import OddsClient, UrllibTransport
 from rinkx.ingestion.odds.jobs import run_odds
@@ -157,6 +159,11 @@ def _run_stages(
     if "nhl" in settings.sources:
         fetcher: Fetcher = ReplayFetcher(settings.fixtures_dir) if settings.fixtures_dir is not None else HttpFetcher()
         run_nhl(conn, fetcher, now, NhlOptions(today=settings.today, boxscore_limit=settings.boxscore_limit))
+        # Injury report (ESPN, unofficial). Offline replay uses the report recorded next to the NHL fixtures.
+        if settings.fixtures_dir is None:
+            run_injuries(conn, HttpFetcher(), now)
+        elif (settings.fixtures_dir.parent / "injuries").is_dir():
+            run_injuries(conn, FixtureFetcher(settings.fixtures_dir.parent / "injuries"), now)
 
     # Sportsbook lines: only with an ODDS_API_KEY (or an injected client in tests).
     if odds_client is None and settings.odds_api_key and "nhl" in settings.sources:
@@ -175,6 +182,7 @@ def _run_stages(
     run_models(conn, now, today, qe.reasons if qe else None)
     run_pricing(conn, now)  # model vs market for every open line with a current projection
     run_grading(conn, now, today)  # settle predictions for finished games
+    run_calibration(conn, now)  # live isotonic calibrators for the next pricing run
     run_correlations(conn, now)  # parlay correlations, re-estimated at most every 20 h
     if send is None and settings.ntfy_topic:
         send = ntfy.sender(settings.ntfy_topic, settings.ntfy_server)

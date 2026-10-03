@@ -103,6 +103,44 @@ export function Admin() {
 
       <StoreBackups store={data.store} />
 
+      <Panel title="Injury report (ESPN)">
+        {!data.injuries ? (
+          <p className="text-sm text-muted">Not fetched yet. The pipeline reads it on every run.</p>
+        ) : (
+          <div className="flex flex-col gap-2 text-sm">
+            <p>
+              Last check {data.injuries.at ? localTime(data.injuries.at) : "—"} ·{" "}
+              <span className={data.injuries.status === "failed" ? "text-bad" : ""}>{data.injuries.status}</span> ·{" "}
+              <span className="num">
+                {data.injuries.detail.listed ?? 0} listed, {data.injuries.active} matched and active,{" "}
+                {data.injuries.unmatched.length} unmatched
+              </span>
+            </p>
+            {data.injuries.error && <p className="text-xs text-bad">{data.injuries.error}</p>}
+            {data.injuries.unmatched.length > 0 && (
+              <details>
+                <summary className="cursor-pointer text-xs text-muted">
+                  Names that didn't match an NHL player (add them to config/player_aliases.yml)
+                </summary>
+                <ul className="mt-1 text-xs">
+                  {data.injuries.unmatched.map((u) => (
+                    <li key={u.name}>
+                      {u.name}
+                      {u.suggestion && (
+                        <span className="text-muted">
+                          {" "}
+                          · maybe {u.suggestion.name} ({u.suggestion.nhl_id})
+                        </span>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            )}
+          </div>
+        )}
+      </Panel>
+
       <Panel title="Sportsbook lines (The Odds API)">
         {!data.odds || (!data.odds.credits && !data.odds.last_plan) ? (
           <p className="text-sm text-muted">

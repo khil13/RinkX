@@ -34,7 +34,7 @@ Losing stretches stay visible. Model 1.3 also prices game and team totals the wa
 - **Settings** sets odds format (American or decimal), time zone, and a **cool-off** that hides every price and prop on that device for a day to a month. It can't be ended early.
 - Pages load on demand, and CI enforces a download budget.
 
-Injuries are still marked *not connected yet* (there's no free injury feed; use Quick Entry). **Phase 10: hardening.**
+**Phase 10: hardening.**
 
 - **Backups:** the newest 10 store versions are kept, plus one a week for 8 weeks.
 - **Restore drill:** runs about once a day and shows on Admin.
@@ -94,3 +94,10 @@ cd web && RINKX_PYTHON=../pipeline/.venv/bin/python npm run e2e                 
 ## Responsible use
 
 RinkX presents probabilities, not certainties. Sports betting carries financial risk and is legal only in some jurisdictions and only for those of legal age. If gambling stops being fun, help is available: in the US, call 1-800-GAMBLER.
+
+**After Phase 10:**
+
+- **Injury report:** ESPN's public report is read every run, with a source link on every entry. Players listed out, on IR or suspended get no projection, injured goalies leave the starter mix, and day-to-day players are flagged.
+- **Line-movement markers:** player charts mark goalie confirmations, players ruled out, news and injury changes.
+- **Live calibration:** once a market has 400 graded props, the model's probabilities are recalibrated against how often they actually came true (isotonic regression). The new map is used only if it scored better on recent props it never saw.
+- **Saves + Win:** a joint model of a goalie's saves and his team winning, shown on goalie pages for 20+ to 30+ saves, with its own walk-forward test.

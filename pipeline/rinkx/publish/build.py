@@ -17,6 +17,7 @@ from rinkx.alerts import evaluate as alerts
 from rinkx.config import ConfigError, Settings
 from rinkx.correlation import estimate as correlations
 from rinkx.grading import performance
+from rinkx.ingestion.injuries import espn as injuries
 from rinkx.ingestion.nhl.jobs import current_season
 from rinkx.publish import best, guards, lines, news, projections, views
 from rinkx.publish.schemas import BuildInfo, Envelope, FeedStatus, FileEntry, Manifest, Meta
@@ -147,6 +148,7 @@ def _health(
         "table_rows": {t: conn.execute(f"SELECT count(*) FROM {t}").fetchone()[0] for t in tables},
         "synthetic_rows": guards.synthetic_row_counts(conn),
         "odds": lines.odds_admin(conn),
+        "injuries": injuries.admin(conn),
         "data_sources": sources,
         "recent_runs": runs,
     }

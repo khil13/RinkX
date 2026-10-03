@@ -1,0 +1,11 @@
+{
+  "recorded_at": "2026-10-03T06:01:10Z",
+  "url": "https://site.api.espn.com/apis/site/v2/sports/hockey/nhl/injuries",
+  "note": "Unmodified response (pretty-printed), used only as a parser test fixture.",
+  "files": [
+    {
+      "file": "espn_injuries.json",
+      "url": "https://site.api.espn.com/apis/site/v2/sports/hockey/nhl/injuries"
+    }
+  ]
+}

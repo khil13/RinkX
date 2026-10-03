@@ -33,7 +33,7 @@ SKATER_STAT = {
 }
 SKATER_YES = {"skater_anytime_goal": "goals", "skater_pp_goal": "pp_goals", "skater_pp_assist": "pp_assists"}
 GOALIE_STAT = {"goalie_saves": "saves", "goalie_goals_against": "goals_against"}
-GOALIE_YES = ("goalie_shutout", "goalie_win")
+GOALIE_YES = ("goalie_shutout", "goalie_win", "goalie_saves_and_win")
 GAME_MARKETS = ("game_moneyline", "game_total")
 GRADABLE = (*SKATER_STAT, *SKATER_YES, "skater_first_goal", *GOALIE_STAT, *GOALIE_YES, *GAME_MARKETS)
 

@@ -1,5 +1,5 @@
 import { coolOffActive, odds, useSettings } from "../lib/settings";
-import type { BookLine, GameLines, Lean, LineMarket, LineRow, Pricing } from "../lib/data/types";
+import type { BookLine, GameLines, Lean, LineEvent, LineMarket, LineRow, Pricing } from "../lib/data/types";
 import { localTime } from "../lib/format";
 import { pct } from "./Projections";
 
@@ -184,7 +184,9 @@ export function GameLinesPanel({ lines }: { lines: GameLines }) {
 }
 
 /** Step chart of the over/yes implied probability per book over time. */
-function Movement({ row }: { row: LineRow }) {
+const EVENT_MARK: Record<LineEvent["kind"], string> = { goalie: "G", availability: "L", news: "N", injury: "I" };
+
+function Movement({ row, events = [] }: { row: LineRow; events?: LineEvent[] }) {
   const series = row.books
     .map((b, i) => ({
       book: b.book_name,
@@ -203,6 +205,8 @@ function Movement({ row }: { row: LineRow }) {
   const W = 280;
   const H = 64;
   const x = (at: string) => 8 + ((Date.parse(at) - t0) / (t1 - t0)) * (W - 60);
+  // Events while this line was posted (first price to last), drawn as dashed markers.
+  const marks = events.filter((e) => Date.parse(e.at) >= t0 && Date.parse(e.at) <= t1);
   const y = (p: number) => 6 + (1 - (implied(p) - lo) / (hi - lo)) * (H - 12);
   // End labels: keep at least 10px apart so close prices don't overprint.
   const labelY = new Map<string, number>();
@@ -217,6 +221,15 @@ function Movement({ row }: { row: LineRow }) {
     <figure className="flex flex-col gap-1">
       <svg viewBox={`0 0 ${W} ${H}`} className="h-16 w-full max-w-[320px]" role="img" aria-label="Line movement">
         <line x1={8} x2={W - 52} y1={H - 6} y2={H - 6} stroke="currentColor" strokeOpacity={0.15} />
+        {marks.map((e, i) => (
+          <g key={`${e.at}-${i}`} aria-label={`Event: ${e.label}`}>
+            <line x1={x(e.at)} x2={x(e.at)} y1={2} y2={H - 6} stroke="currentColor" strokeOpacity={0.45} strokeDasharray="2 2" />
+            <text x={x(e.at) + 2} y={9} className="fill-muted text-[8px]">
+              {EVENT_MARK[e.kind]}
+            </text>
+            <title>{`${localTime(e.at)} · ${e.label}`}</title>
+          </g>
+        ))}
         {series.map((s) => {
           let d = "";
           s.pts.forEach((p, i) => {
@@ -252,11 +265,29 @@ function Movement({ row }: { row: LineRow }) {
         ))}
         <span>implied probability of the over/yes price</span>
       </figcaption>
+      {marks.length > 0 && (
+        <ul className="flex flex-col gap-0.5 text-[11px] text-muted" aria-label="Events during this line">
+          {marks.map((e, i) => (
+            <li key={`${e.at}-${i}`}>
+              <span className="num mr-1">{EVENT_MARK[e.kind]}</span>
+              {localTime(e.at)} · {e.label}
+              {e.source?.startsWith("http") && (
+                <>
+                  {" "}
+                  <a href={e.source} target="_blank" rel="noreferrer" className="underline">
+                    source
+                  </a>
+                </>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
     </figure>
   );
 }
 
-export function PlayerLinesPanel({ markets }: { markets: LineMarket[] }) {
+export function PlayerLinesPanel({ markets, events = [] }: { markets: LineMarket[]; events?: LineEvent[] }) {
   if (coolOffActive(useSettings())) return <CoolOffNote />;
   return (
     <div className="grid gap-3 sm:grid-cols-2">
@@ -288,7 +319,7 @@ export function PlayerLinesPanel({ markets }: { markets: LineMarket[] }) {
                 No-vig {a.toLowerCase()}: {r.consensus ? pct(r.consensus.p_over) : "one-sided (margin can't be removed)"}
               </p>
               <ModelVsMarket row={r} a={a} b={b} />
-              <Movement row={r} />
+              <Movement row={r} events={events} />
             </article>
           );
         }),

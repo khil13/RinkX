@@ -10,6 +10,7 @@ confidence score with its breakdown, and the step-by-step calculation. Rows are 
 from __future__ import annotations
 
 import json
+import math
 import sqlite3
 import statistics
 from dataclasses import dataclass
@@ -20,6 +21,7 @@ from typing import Any
 import yaml
 
 from rinkx.config import REPO_ROOT
+from rinkx.grading import calibration
 from rinkx.grading.performance import track_records
 from rinkx.ingestion.runs import ingestion_run, register_source
 from rinkx.models.project import MODELS_SOURCE
@@ -64,6 +66,27 @@ class Priced:
 
 def _fmt_implied(price: int) -> str:
     return f"{-price}/{-price + 100}" if price < 0 else f"100/{price + 100}"
+
+
+def calibrate(at: AtLine, cal: dict[str, Any] | None) -> tuple[AtLine, str | None]:
+    """Apply a live isotonic calibrator to P(over | no push); pushes are unchanged."""
+    if cal is None:
+        return at, None
+    raw = at.over_given_no_push
+    p = calibration.apply(cal["knots"], raw)
+    keep = 1 - at.p_push
+    note = (
+        f"Calibrated from live results: P({{side}}) {raw:.4f} → {p:.4f} (isotonic fit on {cal['n']} graded props; "
+        f"held-out Brier {cal['brier_raw']:.4f} → {cal['brier_cal']:.4f})"
+    )
+    return AtLine(p * keep, (1 - p) * keep, at.p_push), note
+
+
+def _with_note(pr: Priced, note: str | None, side: str) -> Priced:
+    if note:
+        i = next((k for k, c in enumerate(pr.calculation) if c.startswith("Model P(")), len(pr.calculation) - 1)
+        pr.calculation.insert(i + 1, note.replace("{side}", side))
+    return pr
 
 
 def price_line(
@@ -284,6 +307,8 @@ def _score(
             role_change=change,
             implausible_edge=cfg.implausible_edge,
             track_record=track_record,
+            injury_feed="injuries_not_connected" not in missing,
+            day_to_day="injury_day_to_day" in missing,
         )
     )
 
@@ -319,6 +344,7 @@ def run_pricing(conn: sqlite3.Connection, now: datetime, cfg: PricingConfig | No
     src = register_source(conn, MODELS_SOURCE)
     written = 0
     tracks = track_records(conn)
+    cals = calibration.current(conn)
     with ingestion_run(conn, src, "pricing") as run:
         prows = conn.execute(PLAYER_SQL, (iso(now),)).fetchall()
         groups: dict[tuple[int, int, int], list[sqlite3.Row]] = {}
@@ -332,7 +358,14 @@ def run_pricing(conn: sqlite3.Connection, now: datetime, cfg: PricingConfig | No
                 kind = r["kind"]
                 if kind == "over_under" and r["line"] is None:
                     continue
-                at = at_line(pmf, r["line"]) if kind == "over_under" else yes_no(pmf)
+                if r["market"] == "goalie_saves_and_win":
+                    if r["line"] is None:
+                        continue
+                    p_yes = sum(pmf[math.floor(r["line"]) + 1 :])  # pmf: P(k saves AND a win)
+                    at = AtLine(p_yes, 1 - p_yes, 0.0)
+                else:
+                    at = at_line(pmf, r["line"]) if kind == "over_under" else yes_no(pmf)
+                at, cal_note = calibrate(at, cals.get(r["market_id"]))
                 pr = price_line(
                     kind,
                     at,
@@ -343,6 +376,7 @@ def run_pricing(conn: sqlite3.Connection, now: datetime, cfg: PricingConfig | No
                     cfg,
                     r["market_name"].lower(),
                 )
+                pr = _with_note(pr, cal_note, SIDES[kind][0])
                 inputs = json.loads(r["inputs"])
                 games = int(inputs.get("games_in_history") or inputs.get("starts_in_history") or 0)
                 c = _score(
@@ -394,6 +428,7 @@ def run_pricing(conn: sqlite3.Connection, now: datetime, cfg: PricingConfig | No
                         continue
                     at = at_line(pmf, r["line"])
                     kind = "over_under"
+                at, cal_note = calibrate(at, cals.get(r["market_id"]))
                 pr = price_line(
                     kind,
                     at,
@@ -404,6 +439,7 @@ def run_pricing(conn: sqlite3.Connection, now: datetime, cfg: PricingConfig | No
                     cfg,
                     "home win" if kind == "moneyline" else "total goals",
                 )
+                pr = _with_note(pr, cal_note, SIDES[kind][0])
                 c = _score(
                     conn,
                     pr,

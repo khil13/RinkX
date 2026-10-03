@@ -602,6 +602,13 @@ def walk(games: list[GameRecord], state: State | None = None, *, emit: bool = Tr
                     "playoff": float(game.playoff),
                 }
                 so = {g.team: g.shutout for g in game.goalies if g.started}
+                # Starting goalie's saves and whether he got the win (for Saves + Win).
+                sw: dict[int, tuple[float | None, float | None]] = {}
+                for gl in game.goalies:
+                    if gl.started and gl.saves is not None and gl.decision is not None:
+                        sw[gl.team] = (float(gl.saves), float(gl.decision == "W"))
+                h_sv, h_w = sw.get(game.home_team, (None, None))
+                a_sv, a_w = sw.get(game.away_team, (None, None))
                 yield Row(
                     "game",
                     game.game_id,
@@ -619,6 +626,10 @@ def walk(games: list[GameRecord], state: State | None = None, *, emit: bool = Tr
                         "home_win": float(bool(game.home_won)),
                         "h_so": None if so.get(game.home_team) is None else float(bool(so[game.home_team])),
                         "a_so": None if so.get(game.away_team) is None else float(bool(so[game.away_team])),
+                        "h_saves": h_sv,
+                        "h_gw": h_w,
+                        "a_saves": a_sv,
+                        "a_gw": a_w,
                     },
                 )
         for game in day:

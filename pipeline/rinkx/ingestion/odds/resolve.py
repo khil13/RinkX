@@ -139,8 +139,16 @@ def _candidates(conn: sqlite3.Connection, team_ids: tuple[int, int], as_of: date
 
 
 class PlayerResolver:
-    def __init__(self, conn: sqlite3.Connection, source_id: int, now: datetime, config_aliases: dict[str, int]):
+    def __init__(
+        self,
+        conn: sqlite3.Connection,
+        source_id: int,
+        now: datetime,
+        config_aliases: dict[str, int],
+        entity_type: str = "odds_player_name",
+    ):
         self.conn, self.source_id, self.now, self.config_aliases = conn, source_id, now, config_aliases
+        self.entity_type = entity_type
         self.unresolved: dict[str, dict[str, Any]] = {}
 
     def resolve(self, name: str, team_ids: tuple[int, int], game_id: int) -> int | None:
@@ -184,9 +192,8 @@ class PlayerResolver:
         }
         self.unresolved[name] = detail
         open_issue = self.conn.execute(
-            "SELECT id FROM data_quality_issues WHERE entity_type = 'odds_player_name' AND entity_id = ? "
-            "AND resolved_at IS NULL",
-            (key,),
+            "SELECT id FROM data_quality_issues WHERE entity_type = ? AND entity_id = ? AND resolved_at IS NULL",
+            (self.entity_type, key),
         ).fetchone()
         if open_issue:
             self.conn.execute(
@@ -195,8 +202,8 @@ class PlayerResolver:
         else:
             self.conn.execute(
                 "INSERT INTO data_quality_issues (entity_type, entity_id, issue_code, severity, detail, detected_at) "
-                "VALUES ('odds_player_name', ?, 'unresolved_player', 'warn', ?, ?)",
-                (key, json.dumps(detail), iso(self.now)),
+                "VALUES (?, ?, 'unresolved_player', 'warn', ?, ?)",
+                (self.entity_type, key, json.dumps(detail), iso(self.now)),
             )
 
 

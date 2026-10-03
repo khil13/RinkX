@@ -277,6 +277,37 @@ export function Performance() {
             </div>
           </Panel>
 
+          {p.calibrators && p.calibrators.length > 0 && (
+            <Panel title="Live calibration">
+              <ul className="flex flex-col gap-1.5 text-sm" aria-label="Calibrators">
+                {p.calibrators.map((c) => (
+                  <li key={c.market} className="flex flex-wrap items-baseline justify-between gap-2">
+                    <span>
+                      {c.market}{" "}
+                      <span className={`text-xs ${c.applied ? "text-over" : "text-muted"}`}>
+                        {c.applied
+                          ? "applied to pricing"
+                          : c.reason === "too_few"
+                            ? `waiting: ${c.n_fit} of 400 graded props`
+                            : "not applied: no improvement on recent props"}
+                      </span>
+                    </span>
+                    {c.brier_raw !== null && c.brier_cal !== null && (
+                      <span className="num text-xs text-muted">
+                        held-out Brier {c.brier_raw.toFixed(4)} → {c.brier_cal.toFixed(4)} ({c.n_holdout} props)
+                      </span>
+                    )}
+                  </li>
+                ))}
+              </ul>
+              <p className="mt-2 text-[11px] text-muted">
+                Each market's probabilities are mapped to how often they actually came true (isotonic regression), fit on
+                the earlier 70% of graded props and checked on the latest 30%. A map is used for pricing only if it
+                scored better there; it is refit daily on everything graded. Past predictions are never changed.
+              </p>
+            </Panel>
+          )}
+
           <SplitTable title="By market" rows={p.by_market} />
           <SplitTable
             title="By confidence"

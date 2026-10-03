@@ -8,7 +8,8 @@ const BASELINE_LABEL: Record<string, string> = {
   l10: "last-10 average",
   home_rate: "home-team win rate",
   log5_record: "standings records (log5)",
-  league_rate: "league shutout rate",
+  league_rate: "league rate of this outcome",
+  independent: "saves and win treated as independent",
   goalie_season_rate: "goalie's season shutout rate",
   equal_chance: "equal chance per skater",
   season_goal_share: "season goal share",
@@ -52,10 +53,14 @@ function Pit({ hist }: { hist: number[] }) {
 function Diff({ label, b }: { label: string; b: NonNullable<StatTest["baselines"]>[string] }) {
   const d = b.model_minus_baseline;
   const better = d.lo > 0;
+  const required = b.required !== false;
   return (
     <div className="flex items-baseline justify-between gap-2 text-xs">
-      <span className="text-muted">vs {label}</span>
-      <span className={`num ${better ? "text-over" : "text-bad"}`}>
+      <span className="text-muted">
+        vs {label}
+        {!required && " (shown, not required)"}
+      </span>
+      <span className={`num ${!required ? "text-muted" : better ? "text-over" : "text-bad"}`}>
         {d.mean >= 0 ? "+" : ""}
         {d.mean.toFixed(4)} <span className="text-muted">(95% low {d.lo.toFixed(4)})</span>
       </span>
@@ -199,7 +204,7 @@ export function Models() {
         <Panel title="Not modeled yet">
           <ul className="text-sm text-muted">
             {r.not_modeled.map((m) => (
-              <li key={m.market}>{m.label}: needs a joint saves-and-win model (later)</li>
+              <li key={m.market}>{m.label}: not modeled</li>
             ))}
           </ul>
         </Panel>

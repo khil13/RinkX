@@ -51,7 +51,13 @@ daily on all loaded history, and the Model Tests page (`/#/models`) shows the re
   one goal in game and team totals. The game-total and team-total distributions offered for pricing
   now include it, so a regulation tie always adds exactly one goal (OT or shootout). Team goals in
   the walk-forward test are still real goals. Checked against a 400,000-game simulation in the tests.
-* **Not modeled yet:** saves + win, which needs a joint model of the goalie's saves and the result.
+* **Version 1.4 adds Saves + Win** (`game_sim.saves_win_joint`): the joint distribution of a starting goalie's saves and his team winning.
+  - **How it's built:** shots against are negative binomial, using the opponent's expected shots and the saves model's dispersion. Goals against, given those shots, are binomial at the opponent's goals per shot, so expected goals against equal the game model's λ. His team's goals and the OT/shootout rules come from the game model.
+  - **What it captures:** P(k saves and a win) keeps the dependence: more shots mean more saves but also more goals against. The joint is rescaled so that it sums to the game model's win probability, giving him one win probability everywhere.
+  - **Checks:** the closed form matches a 400,000-game simulation.
+  - **Walk-forward test:** the event "wins with 25+ saves" must beat the league rate and be calibrated. Treating saves and the win as independent is reported too ("shown, not required"): it is a competing model from the same parts, and on the synthetic league the two can't be told apart.
+  - **Grading:** a "Yes" needs the decision W and more saves than the line. The goalie must start.
+* Every market in the catalogue now has a model.
 
 ## Module layout
 
@@ -336,9 +342,17 @@ The breakdown is always displayed. Confidence buckets (50–59, 60–69, …) ar
    - Splits by market, confidence bucket, month and model version.
    - Below 100 bets the page says the sample is too small to judge.
 
+**Live calibration (after Phase 10, `grading/calibration.py`):**
+- **What it fits:** per market, an isotonic map from the model's P(over / yes / home), pushes excluded, to the observed rate. It uses one row per graded prop, in time order, once a market has at least 400 graded props.
+- **When it's used:** the map is fit on the earliest 70% and scored on the latest 30%, which it never saw. It is applied to pricing only if held-out Brier improves by at least 0.0005. The published map is then refit on everything graded.
+- **Refit:** at most daily.
+- **Pricing:** the calibrated probability replaces the raw one at the line, pushes unchanged, and a "Calibrated from live results" line in the calculation shows the before and after with the held-out scores.
+- **History:** past predictions keep the probabilities they were frozen with.
+- **Display:** Model Performance lists each market's status.
+
 *Not built in Phase 7.*
 - A separate weekly workflow: the hourly pipeline already re-tests every 20 h and grades every run.
-- Isotonic calibrators.
+- Isotonic calibrators *(built later: see "Live calibration" above)*.
 - Automated champion/challenger promotion. A model version changes only by merging code, and its
   walk-forward test still decides what is published. Results are split by model version, so
   versions can be compared on live bets.

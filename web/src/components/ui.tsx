@@ -91,6 +91,8 @@ const REASON_LABEL: Record<string, string> = {
   insufficient_sample: "Insufficient data",
   not_final: "Available after the game",
   no_games_this_season: "No games this season",
+  past_game: "Shown for upcoming games only",
+  stale: "Injury report out of date",
 };
 
 /** Renders a missing value with its reason. Never a zero, never a guess. */

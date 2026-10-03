@@ -239,7 +239,10 @@ test("model tests page shows what passed and what was held back", async ({ page 
   await expect(win).toContainText("Did not clearly beat the simple baselines");
   await expect(win).toContainText("vs standings records (log5)");
   await expect(page.getByRole("article", { name: "First goal scorer test" })).toContainText("PASSED · PUBLISHED");
-  await expect(page.getByText(/Saves \+ Win: needs a joint saves-and-win model/)).toBeVisible();
+  const sw = page.getByRole("article", { name: "Saves + Win (goalie) test" });
+  await expect(sw).toContainText("vs league rate of this outcome");
+  await expect(sw).toContainText("vs saves and win treated as independent (shown, not required)");
+  await expect(page.getByText(/not modeled/)).toHaveCount(0); // every market in the catalogue has a model
 });
 
 test("sportsbook lines: comparison table, best price, no-vig, movement (synthetic)", async ({ page }) => {
@@ -261,6 +264,10 @@ test("sportsbook lines: comparison table, best price, no-vig, movement (syntheti
   const card = page.getByRole("article", { name: "Shots on Goal line" });
   await expect(card).toBeVisible();
   await expect(card.getByRole("img", { name: "Line movement" })).toBeVisible();
+  // Event markers: what happened while the line moved (Quick Entry goalie + news), with sources.
+  const events = card.getByRole("list", { name: "Events during this line" });
+  await expect(events).toContainText(/goalie confirmed: /);
+  await expect(events).toContainText("Injury: Synthetic note: day-to-day with a minor injury");
   await expect(card).toContainText("FanDuel");
   await expect(card).toContainText(/Model over \d+% vs market \d+%/);
   await card.getByText("Show the calculation").click();
@@ -283,17 +290,17 @@ test("best props: leans only, source and time on every row, filters, sort and th
   await expect(page.getByRole("heading", { name: "Best Props" })).toBeVisible();
   const list = page.getByRole("list", { name: "Props" });
   const cards = list.getByRole("listitem");
-  await expect(cards).toHaveCount(3); // 3 of the 6 priced lines clear the bar
-  await expect(page.getByText(/3 leans of 6 priced lines/)).toBeVisible();
+  await expect(cards).toHaveCount(2); // 2 of the 6 priced lines clear the bar (after live calibration)
+  await expect(page.getByText(/2 leans of 6 priced lines/)).toBeVisible();
   for (const c of await cards.all()) await expect(c).toContainText(/via The Odds API · line seen /);
   await expect(cards.first()).toContainText("Syn P8000002"); // highest expected value first
   await expect(list).not.toContainText("No lean");
 
   const filters = page.getByRole("group", { name: "Filters" });
+  await filters.getByLabel("Side").selectOption("over");
+  await expect(cards).toHaveCount(2);
+  await expect(cards.first()).toContainText("Syn P8000002");
   await filters.getByLabel("Side").selectOption("under");
-  await expect(cards).toHaveCount(1);
-  await expect(cards.first()).toContainText("Syn P8000003");
-  await filters.getByLabel("Side").selectOption("yes");
   await expect(page.getByText("Your filters hide every prop.")).toBeVisible();
   await page.getByRole("button", { name: "Reset filters" }).click();
   await filters.getByLabel("Book").selectOption("betmgm");
@@ -301,7 +308,7 @@ test("best props: leans only, source and time on every row, filters, sort and th
   await expect(page.getByRole("group", { name: "Filters" }).getByLabel("Book")).toHaveValue("betmgm");
   await expect(cards).toHaveCount(1);
   await page.getByRole("button", { name: "Reset filters" }).click();
-  await expect(cards).toHaveCount(3);
+  await expect(cards).toHaveCount(2);
 
   await cards.first().getByRole("button").click();
   const dialog = page.getByRole("dialog", { name: "Prop card" });
@@ -309,6 +316,7 @@ test("best props: leans only, source and time on every row, filters, sort and th
   await expect(dialog).toContainText(/Confidence \d+\/100/);
   await expect(dialog.getByText("Market agreement")).toBeVisible();
   await expect(dialog.getByText(/^Implied\(/).first()).toBeVisible();
+  await expect(dialog.getByText(/^Calibrated from live results: P\(over\) 0\.\d{4} → 0\.\d{4}/)).toBeVisible();
   await expect(dialog).toContainText(/Prediction #\d+ is frozen/);
   await dialog.getByRole("button", { name: "Close" }).click();
   await expect(dialog).toBeHidden();
@@ -319,7 +327,7 @@ test("props: every priced line, sortable, with changes since the last visit mark
   await page.goto(`${MODELS}#/props`);
   const cards = page.getByRole("list", { name: "Props" }).getByRole("listitem");
   await expect(cards).toHaveCount(6);
-  await expect(cards.filter({ hasText: "No lean" })).toHaveCount(3);
+  await expect(cards.filter({ hasText: "No lean" })).toHaveCount(4);
   await expect(page.getByText("NEW", { exact: true })).toHaveCount(0); // first visit: nothing to compare
   await page.getByLabel("Sort by").selectOption("confidence");
   await expect(cards.first()).toContainText("Syn P8000002");
@@ -369,6 +377,10 @@ test("model performance: graded results, calibration vs market, splits and recen
   await expect(recent.first()).toContainText(/actual \d+/);
   await expect(recent.first()).toContainText(/WIN|LOSS|win|loss/);
   await expect(page.getByText(/far too few to tell skill from luck/)).toHaveCount(0); // 600+ bets here
+  const cals = page.getByRole("list", { name: "Calibrators" });
+  await expect(cals).toContainText("Shots on Goal");
+  await expect(cals).toContainText(/applied to pricing|not applied: no improvement/);
+  await expect(cals).toContainText(/held-out Brier 0\.\d{4} → 0\.\d{4}/);
 });
 
 test("model performance before anything is graded says so", async ({ page }) => {
@@ -546,4 +558,35 @@ test("admin: stored versions and the daily restore drill", async ({ page }) => {
   await expect(panel).toContainText(/policy: newest 10 plus one per week for 8 weeks/);
   await expect(panel).toContainText(/Restore drill\s*passed/);
   await expect(panel).toContainText(/Keep offline copies of STORE_KEY and DATA_KEY/);
+});
+
+test("injury report (recorded ESPN response): player status with source, game note, admin review list", async ({ page }) => {
+  await unlock(page);
+  await page.goto(`${CONFIGURED}#/players/8479325`);
+  await expect(page.getByRole("heading", { name: "Charlie McAvoy" })).toBeVisible();
+  const status = page.getByLabel("Injury status");
+  await expect(status.getByText("SUSPENDED", { exact: true })).toBeVisible();
+  await expect(status).toContainText(/expected back/);
+  await expect(status.getByRole("link", { name: "source" })).toHaveAttribute("href", /^https:\/\/www\.espn\.com\//);
+  await page.goto(`${CONFIGURED}#/players/8477942`);
+  await expect(page.getByLabel("Injury status").getByText("IR", { exact: true })).toBeVisible();
+
+  await page.goto(`${CONFIGURED}#/games/2025021012`);
+  await expect(page.getByRole("heading", { name: "Box score" })).toBeVisible();
+  await expect(page.getByText("Shown for upcoming games only")).toBeVisible(); // the report describes now, not the past
+
+  await page.goto(`${CONFIGURED}#/admin`);
+  const panel = page.locator("section", { has: page.getByRole("heading", { name: "Injury report (ESPN)" }) });
+  await expect(panel).toContainText("109 listed, 4 matched and active, 105 unmatched");
+  await expect(panel).toContainText("partial");
+});
+
+test("saves + win: the confirmed starter's joint projection by save line (synthetic)", async ({ page }) => {
+  await unlock(page, true, MODELS);
+  await page.goto(`${MODELS}#/players/8000040`); // T01's backup, confirmed through Quick Entry
+  const card = page.getByRole("article", { name: "Saves + Win projection" });
+  await expect(card).toContainText(/Probability he gets the win with 25\+ saves · win \d+%/);
+  const lines = card.getByLabel("Win with saves");
+  await expect(lines).toContainText("20+ saves");
+  await expect(lines).toContainText("30+ saves");
 });
