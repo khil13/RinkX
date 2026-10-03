@@ -65,7 +65,7 @@ def feed_statuses(conn: sqlite3.Connection, now: datetime) -> list[FeedStatus]:
         last_any = conn.execute(
             "SELECT r.status FROM ingestion_runs r JOIN data_sources s ON s.id = r.source_id "
             "WHERE s.category = ? AND s.is_enabled = 1 AND r.finished_at IS NOT NULL "
-            "ORDER BY r.finished_at DESC LIMIT 1",
+            "ORDER BY r.finished_at DESC, r.id DESC LIMIT 1",  # runs often finish within the same second
             (category,),
         ).fetchone()
         if last_ok is None and last_any is not None and last_any[0] == "failed":

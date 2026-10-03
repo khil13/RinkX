@@ -181,6 +181,8 @@ def _sync_rosters(conn: sqlite3.Connection, fetcher: Fetcher, source_id: int, to
         "SELECT id, abbrev FROM teams WHERE is_active = 1 AND id IN "
         "(SELECT home_team_id FROM games UNION SELECT away_team_id FROM games) ORDER BY abbrev"
     ).fetchall()
+    if not teams:  # nothing scheduled yet (e.g. the schedule fetch failed): no run, not a vacuous success
+        return
     calls0 = fetcher.calls
     with ingestion_run(conn, source_id, "nhl.rosters") as st:
         for team_id, abbrev in teams:
