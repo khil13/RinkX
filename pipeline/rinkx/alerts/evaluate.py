@@ -20,6 +20,7 @@ from typing import Any
 
 import yaml
 
+from rinkx.alerts import pregame
 from rinkx.config import REPO_ROOT
 from rinkx.ingestion.runs import SourceSpec, ingestion_run, register_source
 from rinkx.models import deployment
@@ -40,6 +41,7 @@ TYPES = {
     "deployment": "deployment",
     "projection": "projection_change",
     "scratch": "scratch",
+    "pregame": "pregame",
 }
 OPTIONS = {
     "edge": {"min_edge", "min_confidence", "min_ev", "market", "player", "team"},
@@ -50,6 +52,7 @@ OPTIONS = {
     "deployment": {"changes", "player", "team"},
     "projection": {"min_change_pct", "direction", "market", "player", "team"},
     "scratch": {"player", "team"},
+    "pregame": {"minutes_before", "min_price_move"},
 }
 DEPLOYMENT_CHANGES = set(deployment.CHANGE_TEXT)
 NEWS_CATEGORIES = {"injury", "lineup", "goalie", "scratch", "suspension", "coach", "rest", "transaction", "general"}
@@ -60,7 +63,7 @@ MAX_LINES = 5
 
 Sender = Callable[[dict[str, Any]], None]  # raises on failure
 Games = dict[int, sqlite3.Row]
-Hits = Iterator[tuple[sqlite3.Row, str]]  # (game, one line of the notification)
+Hits = Iterator[tuple[Any, str]]  # (game row or dict with id, nhl_game_id, matchup; one line of the notification)
 
 
 class AlertConfigError(ValueError):
@@ -110,6 +113,11 @@ def load_specs(path: Path = ALERTS_FILE) -> tuple[list[AlertSpec], list[str]]:
                     raise AlertConfigError(f"changes must be a list of: {', '.join(sorted(DEPLOYMENT_CHANGES))}")
             if kind == "projection" and opts.get("direction", "both") not in ("up", "down", "both"):
                 raise AlertConfigError("direction must be up, down or both")
+            if kind == "pregame":
+                for k, lo, hi in (("minutes_before", 20, 240), ("min_price_move", 0.5, 20)):
+                    v = opts.get(k)
+                    if v is not None and (not isinstance(v, int | float) or not lo <= v <= hi):
+                        raise AlertConfigError(f"{k} must be a number from {lo} to {hi}")
             if kind == "news":
                 cats = opts.get("categories") or []
                 if not isinstance(cats, list) or set(cats) - NEWS_CATEGORIES:
@@ -354,6 +362,11 @@ def _scratch(conn: sqlite3.Connection, a: sqlite3.Row, c: dict[str, Any], now: d
             yield g, f"Scratch: {r['full_name']} ({r['abbrev']}) out ({r['source_ref']})"
 
 
+def _pregame(conn: sqlite3.Connection, a: sqlite3.Row, c: dict[str, Any], now: datetime, games: Games) -> Hits:
+    """Card of the Day picks that changed since they made the card, shortly before the first game."""
+    yield from pregame.check(conn, now, float(c.get("minutes_before", 60)), float(c.get("min_price_move", 2)))
+
+
 MATCHERS = {
     "edge": _edge,
     "line_move": _line_move,
@@ -363,6 +376,7 @@ MATCHERS = {
     "deployment": _deployment,
     "projection": _projection,
     "scratch": _scratch,
+    "pregame": _pregame,
 }
 
 
@@ -384,7 +398,9 @@ def evaluate(conn: sqlite3.Connection, now: datetime, site_url: str | None) -> i
             payload = {
                 "title": f"RinkX · {a['key']} · {m.matchup}",
                 "message": "\n".join(body),
-                "click": f"{site_url}#/games/{m.nhl_game_id}" if site_url else None,
+                "click": (f"{site_url}#/props/best" if c["type"] == "pregame" else f"{site_url}#/games/{m.nhl_game_id}")
+                if site_url
+                else None,
                 "game": m.nhl_game_id,
                 "matchup": m.matchup,
                 "matches": len(m.lines),
