@@ -4,17 +4,21 @@ prod: assets on a GitHub Release (default tag `store`), managed with the `gh` CL
 dev/tests: a local directory with the same semantics.
 
 Each upload is a new, timestamped asset; older ones are deleted only after the new one is
-uploaded, so a failed run can never leave the store missing.
+uploaded, so a failed run can never leave the store missing. Kept: the newest KEEP_VERSIONS,
+plus the newest version of each of the last WEEKLY_SNAPSHOTS ISO weeks (weekly snapshots), so a
+problem noticed days later can still be rolled back.
 """
 
 from __future__ import annotations
 
 import json
 import shutil
+import sqlite3
 import subprocess
-from datetime import UTC, datetime
+from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol
 
 from rinkx import crypto
 from rinkx.config import ConfigError, Settings
@@ -22,6 +26,7 @@ from rinkx.config import ConfigError, Settings
 ASSET_PREFIX = "rinkx-"
 ASSET_SUFFIX = ".db.enc"
 KEEP_VERSIONS = 10
+WEEKLY_SNAPSHOTS = 8
 
 
 class StoreError(RuntimeError):
@@ -141,6 +146,110 @@ def push(backend: Backend, store_key: bytes, plaintext_db: Path, *, now: datetim
     assets = _store_assets(backend)
     if name not in assets:
         raise StoreError(f"upload of {name} not visible; refusing to prune old versions")
-    for old in assets[:-KEEP_VERSIONS]:
-        backend.delete(old)
+    keep = retained(assets, now or datetime.now(UTC))
+    for old in assets:
+        if old not in keep:
+            backend.delete(old)
     return name
+
+
+def stamp_of(name: str) -> datetime:
+    return datetime.strptime(name[len(ASSET_PREFIX) : -len(ASSET_SUFFIX)], "%Y%m%dT%H%M%S%fZ").replace(tzinfo=UTC)
+
+
+def retained(assets: list[str], now: datetime) -> set[str]:
+    """The newest KEEP_VERSIONS, plus the newest version of each of the last WEEKLY_SNAPSHOTS ISO weeks."""
+    ordered = sorted(assets)
+    keep = set(ordered[-KEEP_VERSIONS:])
+    weeks: dict[tuple[int, int], str] = {}
+    oldest = now - timedelta(weeks=WEEKLY_SNAPSHOTS)
+    for a in ordered:
+        t = stamp_of(a)
+        if t >= oldest:
+            iso = t.isocalendar()
+            weeks[(iso.year, iso.week)] = a  # ordered: the last one seen is the newest that week
+    keep.update(weeks.values())
+    return keep
+
+
+def versions(backend: Backend, now: datetime) -> list[dict[str, Any]]:
+    """Stored versions, newest first, for the Admin page."""
+    assets = sorted(_store_assets(backend), reverse=True)
+    recent = set(sorted(assets)[-KEEP_VERSIONS:])
+    return [
+        {"name": a, "at": stamp_of(a).strftime("%Y-%m-%dT%H:%M:%SZ"), "kind": "recent" if a in recent else "weekly"}
+        for a in assets
+    ]
+
+
+def restore(backend: Backend, store_key: bytes, name: str, workdir: Path, *, now: datetime | None = None) -> str:
+    """Make an older version the current one: decrypt it (proving the key and file are good), check
+    it, and upload it again as a new version. Nothing is deleted except by normal rotation."""
+    if name not in set(_store_assets(backend)):
+        raise StoreError(f"no stored version named {name!r}")
+    db = workdir / "restore.db"
+    tmp = workdir / "restore.download"
+    backend.download(name, tmp)
+    try:
+        db.write_bytes(crypto.decrypt_store(tmp.read_bytes(), store_key))
+    finally:
+        tmp.unlink(missing_ok=True)
+    try:
+        check = integrity(db)
+        if check["integrity"] != "ok":
+            raise StoreError(f"{name} failed its integrity check: {check['integrity']}")
+        return push(backend, store_key, db, now=now)
+    finally:
+        db.unlink(missing_ok=True)
+
+
+COUNTED = ("games", "players", "player_game_stats", "prop_lines", "predictions", "model_results")
+
+
+def integrity(db: Path) -> dict[str, Any]:
+    conn = sqlite3.connect(db)
+    try:
+        ok = conn.execute("PRAGMA integrity_check").fetchone()[0]
+        tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+        counts = {t: conn.execute(f"SELECT count(*) FROM {t}").fetchone()[0] for t in COUNTED if t in tables}
+        return {"integrity": ok, "rows": counts}
+    finally:
+        conn.close()
+
+
+@dataclass
+class DrillResult:
+    ok: bool
+    version: str | None
+    age_days: float | None
+    detail: dict[str, Any] = field(default_factory=dict)
+
+
+def drill(backend: Backend, store_key: bytes, workdir: Path, db_dir: Path, now: datetime) -> DrillResult:
+    """Restore drill, read-only: the OLDEST kept version must download, decrypt, pass SQLite's
+    integrity check, and migrate to the current schema. Nothing is uploaded."""
+    from rinkx.store.db import connect, migrate  # local import: db imports nothing from here
+
+    assets = _store_assets(backend)
+    if not assets:
+        return DrillResult(True, None, None, {"note": "no stored versions yet"})
+    oldest = sorted(assets)[0]
+    age = (now - stamp_of(oldest)).total_seconds() / 86400
+    db = workdir / "drill.db"
+    tmp = workdir / "drill.download"
+    try:
+        backend.download(oldest, tmp)
+        db.write_bytes(crypto.decrypt_store(tmp.read_bytes(), store_key))
+        check = integrity(db)
+        conn = connect(db)
+        try:
+            version = migrate(conn, db_dir)
+        finally:
+            conn.close()
+        ok = check["integrity"] == "ok"
+        return DrillResult(ok, oldest, age, check | {"schema": version})
+    except Exception as exc:  # reported, never raised: a failed drill must not stop the run
+        return DrillResult(False, oldest, age, {"error": type(exc).__name__})
+    finally:
+        tmp.unlink(missing_ok=True)
+        db.unlink(missing_ok=True)

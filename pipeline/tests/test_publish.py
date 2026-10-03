@@ -1,5 +1,5 @@
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -44,6 +44,7 @@ def test_configured_run_publishes_encrypted_bundle(tmp_path: Path, keys):
         "news.json.enc",
         "alerts.json.enc",
         "correlations.json.enc",
+        "lines/movement.json.enc",
     }
     assert result.store_pulled is None and result.store_pushed is not None
 
@@ -65,6 +66,21 @@ def test_configured_run_publishes_encrypted_bundle(tmp_path: Path, keys):
     # Second run pulls what the first pushed.
     again = run(make_settings(tmp_path, keys), tmp_path / "data", now=NOW)
     assert again.store_pulled == result.store_pushed
+    # Phase 10: Admin sees the stored versions and the daily restore drill.
+    h2 = crypto.decrypt_json(
+        json.loads((tmp_path / "data/admin/health.json.enc").read_text()), "admin/health.json", data_key
+    )["data"]["store"]
+    assert [v["name"] for v in h2["versions"]] == [result.store_pushed]
+    assert h2["keep"] == {"recent": 10, "weekly": 8}
+    assert h2["drill"]["status"] == "succeeded"  # first run: nothing stored yet, so nothing to restore
+    assert h2["drill"]["detail"]["note"] == "no stored versions yet"
+    # Within a day the drill isn't repeated; a day later it restores the oldest version.
+    later = run(make_settings(tmp_path, keys), tmp_path / "data2", now=NOW + timedelta(hours=21))
+    h3 = crypto.decrypt_json(
+        json.loads((tmp_path / "data2/admin/health.json.enc").read_text()), "admin/health.json", data_key
+    )["data"]["store"]
+    assert later.store_pulled == again.store_pushed
+    assert h3["drill"]["detail"]["version"] == result.store_pushed and h3["drill"]["detail"]["integrity"] == "ok"
 
 
 def test_manifest_hashes_match_files(tmp_path: Path, keys):

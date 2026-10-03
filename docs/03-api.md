@@ -46,6 +46,7 @@ Each file gets a fresh random IV. The file path is bound in as GCM additional da
 | `games/{id}.json.enc` | `GET /games/{id}` + `/games/{id}/props` | Full game detail, lineups (ES + PP/PK), injuries, every priced prop card for the game |
 | `props/best.json.enc` | `GET /props/best`, `/props` | *(Phase 6)* One row per open line for upcoming games: the latest frozen prediction, priced against a current projection. Filtering and sorting happen in the browser. |
 | `props/{prediction_id}.json.enc` | `GET /props/{id}` + `/explain` + `/history` | Prop card (shape below), explain trail, projection revisions |
+| `lines/movement.json.enc` | `GET /lines/movement` | *(Phase 10)* Every open main line for upcoming games: first and current prices, number of changes, and the change in implied probability (over / yes / home side). |
 | `lines/{game_id}.json.enc` | `GET /lines/compare`, `/lines/movement` | Per prop: book-by-book current lines, movement series, best price, consensus |
 | `players/index.json.enc` | `GET /players?q=` | Compact search index (id, name, team, position) |
 | `players/{id}.json.enc` | `GET /players/{id}` (+ games, props, shots) | Season stats, splits, complete game log, usage trends, line history, prop history, shot locations |

@@ -65,7 +65,19 @@ export interface OddsAdmin {
 export interface HealthData {
   odds?: OddsAdmin;
   build: BuildInfo;
-  store: { asset: string | null; schema_version: number };
+  store: {
+    asset: string | null;
+    schema_version: number;
+    /** versions found at the start of the run, newest first (Phase 10) */
+    versions?: { name: string; at: string; kind: "recent" | "weekly" }[];
+    keep?: { recent: number; weekly: number };
+    drill?: {
+      status: string;
+      at: string | null;
+      detail: { checked_at?: string; version?: string | null; age_days?: number | null; integrity?: string; schema?: number; note?: string; error?: string; rows?: Record<string, number> };
+      error: string | null;
+    } | null;
+  };
   table_rows: Record<string, number>;
   synthetic_rows: Record<string, number>;
   data_sources: { code: string; name: string; category: string; tier: string; is_enabled: number }[];
@@ -726,4 +738,30 @@ export interface AlertsHistory {
     delivery: "pending" | "sent" | "failed";
     delivered_at: string | null;
   }[];
+}
+
+// ---- Line movement board (Phase 10) ----------------------------------------------------------------
+
+export interface MovementRow {
+  subject: string;
+  player_id: number | null;
+  team: string | null;
+  game: { id: number; home: string; away: string; start_time_utc: string };
+  market: string;
+  market_label: string;
+  kind: "over_under" | "yes_no" | "moneyline";
+  book_name: string;
+  line: number | null;
+  first: { over: number | null; under: number | null; at: string };
+  now: { over: number | null; under: number | null; at: string };
+  changed_at: string;
+  moves: number;
+  /** change in the over / yes / home side's implied probability, points */
+  change_pts: number | null;
+}
+
+export interface MovementBoard {
+  generated_at: string;
+  source: string;
+  rows: MovementRow[];
 }

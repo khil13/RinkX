@@ -1,0 +1,36 @@
+name: watchdog
+
+# Separate from pipeline.yml on purpose: it has to run when the pipeline is broken. Hourly, it
+# checks the last successful pipeline run (2 h limit on NHL game days, 26 h otherwise) and opens
+# one issue, plus one ntfy push if NTFY_TOPIC is set, when that's exceeded. Messages carry only
+# timestamps and a link to the Actions page.
+on:
+  schedule:
+    - cron: "47 * * * *"
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  issues: write
+
+concurrency:
+  group: rinkx-watchdog
+  cancel-in-progress: true
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pipeline/pyproject.toml
+      - run: pip install ./pipeline
+      - name: Check the pipeline
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RINKX_NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+        run: python -m rinkx watchdog

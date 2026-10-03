@@ -26,6 +26,7 @@ jobs:
         working-directory: pipeline
       - run: python db/tests/test_schema.py
       - run: python scripts/lint_copy.py
+      - run: python scripts/check_workflows.py # scheduled workflows survive 60 idle days
       # Run the pipeline exactly as pipeline.yml does: a regular (non-editable) install, from the
       # repo root, prod env, no keys. Catches anything that only works from an editable install.
       - name: Smoke-test the installed pipeline like production

@@ -57,10 +57,14 @@ test("not-remembered key is gone after reload", async ({ page }) => {
   await expect(page.getByLabel("Passphrase")).toBeVisible();
 });
 
-test("unbuilt pages show no sample data", async ({ page }) => {
+test("every page in the menu is built: none shows a placeholder", async ({ page }) => {
   await unlock(page);
-  await page.goto(`${CONFIGURED}#/goalies`);
-  await expect(page.getByText(/Not built yet\. This page arrives in Phase \d+/)).toBeVisible();
+  for (const route of ["/", "/games", "/props", "/props/best", "/players", "/models", "/goalies", "/lines", "/parlay",
+    "/performance", "/news", "/settings", "/admin"]) {
+    await page.goto(`${CONFIGURED}#${route}`);
+    await expect(page.locator("main h1").first()).toBeVisible();
+    await expect(page.getByText(/Not built yet/)).toHaveCount(0);
+  }
 });
 
 test("setup page generates keys the Python pipeline accepts", async ({ page }) => {
@@ -507,4 +511,39 @@ test("home-screen app: manifest and icons, and it opens offline after a visit", 
   await page.reload();
   await expect(page.getByLabel("Passphrase")).toBeVisible();
   await context.setOffline(false);
+});
+
+test("goalies: today's starters with confirmed vs projected status (synthetic)", async ({ page }) => {
+  await unlock(page, true, MODELS);
+  await page.goto(`${MODELS}#/goalies`);
+  await expect(page.getByRole("heading", { name: "Goalies" })).toBeVisible();
+  const today = page.getByRole("list", { name: /^Goalies \d{4}-\d{2}-\d{2}$/ }).first();
+  await expect(today).toContainText("T01 @ T00");
+  await expect(today.getByText("CONFIRMED", { exact: true })).toBeVisible(); // entered through Quick Entry
+  await expect(today.getByText(/PROJECTED · \d+%/)).toBeVisible();
+  await expect(page.getByText(/1 of 2 starters confirmed/)).toBeVisible();
+});
+
+test("line movement: every open line from first seen to now, biggest moves first (synthetic)", async ({ page }) => {
+  await unlock(page, true, MODELS);
+  await page.goto(`${MODELS}#/lines`);
+  await expect(page.getByRole("heading", { name: "Line movement" })).toBeVisible();
+  const moves = page.getByRole("list", { name: "Line moves" }).getByRole("listitem");
+  await expect(moves.first()).toContainText(/over [+−]\d+ → [+−]\d+/);
+  await expect(moves.first()).toContainText(/[+−]\d+\.\d pts/);
+  await expect(moves.first()).toContainText("2 price changes");
+  const moved = await moves.count();
+  await page.getByLabel("Moved only").uncheck();
+  expect(await moves.count()).toBeGreaterThanOrEqual(moved);
+  await expect(page.getByText(/Source: The Odds API/)).toBeVisible();
+});
+
+test("admin: stored versions and the daily restore drill", async ({ page }) => {
+  await unlock(page);
+  await page.goto(`${CONFIGURED}#/admin`);
+  const panel = page.locator("section", { has: page.getByRole("heading", { name: "Store & backups" }) });
+  await expect(panel).toContainText(/Versions kept/);
+  await expect(panel).toContainText(/policy: newest 10 plus one per week for 8 weeks/);
+  await expect(panel).toContainText(/Restore drill\s*passed/);
+  await expect(panel).toContainText(/Keep offline copies of STORE_KEY and DATA_KEY/);
 });

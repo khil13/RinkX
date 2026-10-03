@@ -88,7 +88,22 @@ Open the site in Safari (iPhone) or Chrome (Android), unlock it, then choose **S
 
 Run the Setup page again with a new passphrase, but **keep your existing STORE_KEY secret unchanged**. Replace DATA_KEY with the new one and commit the new keyfile. The store is untouched because it uses STORE_KEY. Every device must unlock again.
 
+### Keys, backups and the watchdog (Phase 10)
+
+- **Keep offline copies of STORE_KEY and DATA_KEY**, e.g. in your password manager and on paper in a safe place. GitHub never shows a secret again after you save it. Without STORE_KEY, no backup of the store can be read, by you or anyone.
+- **Backups:** each run uploads a new encrypted version of the store. The newest 10 are kept, plus the newest of each of the last 8 weeks.
+- **Restore drill:** about once a day the pipeline proves the oldest kept version still downloads, decrypts, passes SQLite's integrity check and upgrades to today's schema. The result is on **Admin → Store & backups**.
+- **Rolling back:** **Actions → store → Run workflow**.
+  1. Choose `list` to see the versions.
+  2. Choose `restore`, paste a version name, and type `RESTORE`.
+  3. That version becomes the newest. Nothing is deleted, so a restore can itself be undone the same way.
+- **Watchdog:** `watchdog.yml` runs hourly, separately from the pipeline.
+  - If no pipeline run has succeeded for 2 hours on an NHL game day (26 hours otherwise), it opens one issue (GitHub emails you) and pushes one ntfy notification if `NTFY_TOPIC` is set.
+  - It closes the issue when a run succeeds again. It never posts data, only times.
+- **Keepalive:** `keepalive.yml` re-enables every scheduled workflow weekly and fails (emailing you) if one is still disabled. CI checks that every scheduled workflow is on its list, so none can be forgotten.
+
 ### If something goes wrong
 
 * **"DATA_KEY does not match keyfile.json"** in the run log: the secret and the committed keyfile came from different setups. Redo steps 3–5 with one fresh setup, keeping STORE_KEY if a store already exists.
-* **"wrong STORE_KEY or corrupted store"**: the pipeline refuses to continue rather than start an empty store over your data. Restore the original STORE_KEY from your password manager.
+* **"wrong STORE_KEY or corrupted store"**: the pipeline refuses to continue rather than start an empty store over your data. Restore the original STORE_KEY from your password manager. If the newest version itself is damaged, restore an older one (Actions → store → restore).
+* **A "Watchdog" issue opened:** open the linked Actions page and read the first failing step. It closes itself once a run succeeds.

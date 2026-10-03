@@ -84,6 +84,8 @@ flowchart LR
 | ↳ nightly | 09:37 UTC (5:37 am ET) | Final boxscores + PBP, shift-chart lineups, grading and CLV, rolling features, correlations. |
 | ↳ weekly | Monday 10:13 UTC | *Not built (Phase 7 decision):* the hourly run already re-tests the models every 20 h and grades every run. Model versions change by merging code. |
 | `quick-entry.yml` | `issues: opened` with label `quick-entry` | Validates that the author is the repo owner, writes the row (`provenance='manual'`, `source_ref` = your URL), recomputes affected projections, publishes, then closes the issue with a summary comment. |
+| `watchdog.yml` | hourly, minute 47 | *(Phase 10)* Alerts (one issue + one ntfy push) when no pipeline run has succeeded for 2 h on a game day or 26 h otherwise; closes the issue on recovery. |
+| `store.yml` | manual | *(Phase 10)* `list`, `drill` (read-only restore check) or `restore` a stored version (uploads it as the newest; deletes nothing). |
 | `keepalive.yml` | weekly | Re-enables the scheduled workflows through the API. GitHub silently disables schedules in public repos after 60 days without repository activity, and pipeline runs don't count as activity. |
 | `ci.yml` | push / PR | Lint, typecheck, unit tests, schema tests, copy lint, contract tests. |
 

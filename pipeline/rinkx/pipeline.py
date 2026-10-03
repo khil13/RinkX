@@ -7,7 +7,7 @@ import sqlite3
 import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from rinkx.alerts import ntfy
@@ -19,6 +19,7 @@ from rinkx.ingestion.http import Fetcher, HttpFetcher, ReplayFetcher
 from rinkx.ingestion.nhl.jobs import NhlOptions, run_nhl
 from rinkx.ingestion.odds.client import OddsClient, UrllibTransport
 from rinkx.ingestion.odds.jobs import run_odds
+from rinkx.ingestion.runs import SourceSpec, ingestion_run, register_source
 from rinkx.models.project import run_models
 from rinkx.pricing.price import run_pricing
 from rinkx.publish.build import build_bundle, missing_setup
@@ -26,7 +27,7 @@ from rinkx.publish.schemas import Manifest
 from rinkx.quick_entry import GhIssues, IssueTracker, finish, run_quick_entry
 from rinkx.store import remote
 from rinkx.store.db import connect, migrate, snapshot
-from rinkx.timeutil import iso, slate_date, utcnow
+from rinkx.timeutil import iso, parse_iso, slate_date, utcnow
 
 log = logging.getLogger("rinkx")
 
@@ -76,8 +77,12 @@ def run(
     try:
         version = migrate(conn, settings.db_dir)
         log.info("schema version %d", version)
+        stored = remote.versions(backend, now)
+        _restore_drill(conn, backend, store_key, settings, now)
         after_save = _run_stages(conn, settings, now, tracker, odds_client, send)
-        manifest = build_bundle(conn, out_dir, settings, now=now, store_asset=pulled, today=settings.today)
+        manifest = build_bundle(
+            conn, out_dir, settings, now=now, store_asset=pulled, today=settings.today, store_versions=stored
+        )
         pushed = None
         if push:
             snap = settings.workdir / "rinkx.snapshot.db"
@@ -94,6 +99,44 @@ def run(
     finally:
         conn.close()
     return RunResult(manifest, pulled, pushed)
+
+
+STORE_SOURCE = SourceSpec(
+    "store",
+    "Encrypted data store (GitHub Release)",
+    "store",
+    "free",
+    "",
+    "The pipeline's own encrypted SQLite store and its backups.",
+    1.0,
+)
+DRILL_EVERY = timedelta(hours=20)
+
+
+def _restore_drill(
+    conn: sqlite3.Connection, backend: remote.Backend, store_key: bytes, settings: Settings, now: datetime
+) -> None:
+    """About once a day: prove the oldest kept backup still restores (download, decrypt, integrity
+    check, migrate to today's schema). Read-only; a failure is recorded and shown on Admin."""
+    src = register_source(conn, STORE_SOURCE)
+    last = conn.execute(
+        "SELECT json_extract(meta, '$.checked_at') FROM ingestion_runs WHERE source_id = ? "
+        "AND job_name = 'restore_drill' ORDER BY id DESC LIMIT 1",
+        (src,),
+    ).fetchone()
+    if last is not None and last[0] is not None and now - parse_iso(last[0]) < DRILL_EVERY:
+        return
+    with ingestion_run(conn, src, "restore_drill") as run:
+        result = remote.drill(backend, store_key, settings.workdir, settings.db_dir, now)
+        run.meta.update(
+            checked_at=iso(now),
+            version=result.version,
+            age_days=round(result.age_days, 1) if result.age_days is not None else None,
+            ok=result.ok,
+            **result.detail,
+        )
+        if not result.ok:
+            raise remote.StoreError(f"restore drill failed for {result.version}: {result.detail}")
 
 
 def _issue_tracker(settings: Settings) -> IssueTracker | None:
