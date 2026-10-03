@@ -376,6 +376,10 @@ class State:
         f["prior_finish"] = self.prior_finish(pos)
         for j, k in enumerate(K_SV):
             f[f"gf.{j}"] = self.goalie_factor(opp_goalies, k)
+        # Context shown with projections (not model inputs): league team averages and shot pace.
+        f["lg_team.shots"] = self.team_avg("shots")
+        f["pace.for"] = self.team_factor(team, "shots", "for")
+        f["pace.opp_against"] = self.team_factor(opp, "shots", "against")
         f |= self._lineup_features(st, team, lineup)
         return f
 

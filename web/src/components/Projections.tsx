@@ -247,6 +247,52 @@ function Explain({ m }: { m: MarketProjection }) {
   );
 }
 
+/** VIEW CALCULATION: the same multiplicative factors as additive steps (each step applies one
+ * factor to the running total, largest effect first), ending at the projection. */
+export function additiveSteps(reference: number, factors: { name: string; effect: number }[]): { name: string; delta: number; total: number }[] {
+  let cur = reference;
+  return factors.map((f) => {
+    const delta = cur * f.effect;
+    cur += delta;
+    return { name: f.name, delta, total: cur };
+  });
+}
+
+function ViewCalculation({ m }: { m: MarketProjection }) {
+  const ref = m.inputs?.reference_mean;
+  const factors = [...(m.factors_for ?? []), ...(m.factors_against ?? [])].sort((a, b) => Math.abs(b.effect) - Math.abs(a.effect));
+  if (typeof ref !== "number" || factors.length === 0) return null;
+  const steps = additiveSteps(ref, factors);
+  return (
+    <details className="text-sm">
+      <summary className="cursor-pointer text-xs text-accent">View calculation</summary>
+      <ol className="num mt-1 flex flex-col text-xs" aria-label="Calculation steps">
+        <li className="flex justify-between">
+          <span>Base projection (average player)</span>
+          <span>{ref.toFixed(2)}</span>
+        </li>
+        {steps.map((s) => (
+          <li key={s.name} className="flex justify-between">
+            <span className="text-muted">{s.name} adjustment</span>
+            <span className={s.delta >= 0 ? "text-over" : "text-bad"}>
+              {s.delta >= 0 ? "+" : "−"}
+              {Math.abs(s.delta).toFixed(2)}
+            </span>
+          </li>
+        ))}
+        <li className="flex justify-between border-t border-line pt-0.5 font-semibold">
+          <span>Final projection</span>
+          <span>{m.mean.toFixed(2)}</span>
+        </li>
+      </ol>
+      <p className="mt-1 text-[10px] text-muted">
+        Each adjustment is that factor applied to the running total, so the order changes how much each step shows,
+        never the final number.
+      </p>
+    </details>
+  );
+}
+
 function SavesWin({ m }: { m: MarketProjection }) {
   const byLine = (m.inputs?.p_by_line ?? {}) as unknown as Record<string, number>;
   return (
@@ -276,6 +322,7 @@ export function ProjectionCard({ m }: { m: MarketProjection }) {
         </p>
         <SavesWin m={m} />
         <Explain m={m} />
+        <ViewCalculation m={m} />
         <p className="text-[11px] text-muted">
           Joint model: more shots against mean more saves but also more goals against, so a win with many saves is
           less likely than the two chances multiplied.
@@ -303,6 +350,7 @@ export function ProjectionCard({ m }: { m: MarketProjection }) {
       {!yes && <Bars m={m} />}
       {!yes && <Thresholds m={m} />}
       <Explain m={m} />
+      <ViewCalculation m={m} />
       <p className="text-[11px] text-muted">
         Data quality {Math.round(m.data_quality * 100)}%
         {m.missing_inputs.length > 0 && ` · ${m.missing_inputs.map((x) => MISSING_TEXT[x] ?? x).join(" · ")}`}

@@ -319,6 +319,16 @@ test("card of the day: the date's best team and player props, one per player, in
   await expect(dialog.getByText(/^Implied\(/).first()).toBeVisible();
   await expect(dialog.getByText(/^Calibrated from live results: P\(over\) 0\.\d{4} → 0\.\d{4}/)).toBeVisible();
   await expect(dialog).toContainText(/Prediction #\d+ is frozen/);
+  // Scores and explanations, built only from the frozen inputs.
+  const why = dialog.getByRole("region", { name: "Why this prop" }).or(dialog.getByLabel("Why this prop"));
+  await expect(why).toContainText("Projected Shots on Goal");
+  await expect(why).toContainText("Last 10 at this line");
+  await expect(why).toContainText("These are estimates");
+  await expect(dialog.getByLabel("Prop scores")).toContainText(/Prop Intelligence \d+\/100/);
+  await expect(dialog.getByLabel("Prop scores")).toContainText(/Shot Environment: \d+\/100/);
+  await dialog.getByRole("button", { name: "Why?" }).click();
+  await expect(dialog.getByRole("table", { name: "Prop Intelligence parts" })).toContainText("Model edge");
+  await expect(dialog.getByLabel("Confidence vs value")).toContainText("Prop value");
   await dialog.getByRole("button", { name: "Close" }).click();
   await expect(dialog).toBeHidden();
 });

@@ -10,6 +10,7 @@ confidence score with its breakdown, and the step-by-step calculation. Rows are 
 from __future__ import annotations
 
 import json
+import math
 import sqlite3
 import statistics
 from dataclasses import dataclass
@@ -26,6 +27,7 @@ from rinkx.ingestion.runs import ingestion_run, register_source
 from rinkx.models import promotion
 from rinkx.models.project import MODELS_SOURCE
 from rinkx.pricing import confidence as conf
+from rinkx.pricing import scores
 from rinkx.pricing.model_probs import AtLine
 from rinkx.pricing.odds import NoVig, devig, ev_per_unit, implied
 from rinkx.timeutil import iso
@@ -197,6 +199,68 @@ def _book_novigs(rows: list[sqlite3.Row], line: float | None, over_side: bool) -
             nv = devig(r["over_price"], r["under_price"])
             out.append(nv.over if over_side else nv.under)
     return out
+
+
+def _scored_side(pr: Priced, kind: str) -> tuple[str, bool]:
+    """The side the scores describe: the lean, else the side with the larger edge."""
+    s_over, s_under = SIDES[kind]
+    if pr.side != "none":
+        return pr.side, pr.side == s_over
+    over = (pr.edge_over if pr.edge_over is not None else -1.0) >= (
+        pr.edge_under if pr.edge_under is not None else -1.0
+    )
+    return (s_over if over else s_under), over
+
+
+def _save_scores(
+    conn: sqlite3.Connection,
+    pred: int,
+    pr: Priced,
+    kind: str,
+    r: sqlite3.Row,
+    projection: Any,
+    *,
+    player: int | None,
+    position: str | None,
+    now: datetime,
+) -> None:
+    side, over = _scored_side(pr, kind)
+    game = conn.execute("SELECT * FROM games WHERE id = ?", (r["game_id"],)).fetchone()
+    opp = None
+    if player is not None:
+        team = conn.execute("SELECT current_team_id FROM players WHERE id = ?", (player,)).fetchone()[0]
+        opp = game["away_team_id"] if team == game["home_team_id"] else game["home_team_id"]
+    sc = scores.score_prop(
+        conn,
+        market=r["market"],
+        kind=kind,
+        side=side,
+        line=r["line"],
+        price=r["over_price"] if over else r["under_price"],
+        edge=pr.edge_over if over else pr.edge_under,
+        ev=pr.ev_over if over else pr.ev_under,
+        moved_against_pts=_moved_against(conn, r["line_id"], over, now),
+        projection=projection,
+        player=player,
+        position=position,
+        game=game,
+        opp=opp,
+    )
+    scores.save(conn, pred, sc, iso(now))
+
+
+def _game_projection(conn: sqlite3.Connection, proj_id: int) -> dict[str, Any]:
+    gp = conn.execute("SELECT mean, pmf, inputs, factors FROM game_projections WHERE id = ?", (proj_id,)).fetchone()
+    pmf = json.loads(gp["pmf"])["p"]
+    m = sum(k * p for k, p in enumerate(pmf))
+    sd = math.sqrt(max(sum((k - m) ** 2 * p for k, p in enumerate(pmf)), 0.0))
+    return {
+        "mean": gp["mean"],
+        "std_dev": sd,
+        "inputs": gp["inputs"],
+        "factors_for": gp["factors"],
+        "factors_against": "[]",
+    }
 
 
 def _latest_same(conn: sqlite3.Connection, line_id: int, col: str, proj_id: int, r: sqlite3.Row) -> bool:
@@ -408,6 +472,11 @@ def run_pricing(conn: sqlite3.Connection, now: datetime, cfg: PricingConfig | No
                     c=c,
                     now=now,
                 )
+                proj = conn.execute(
+                    "SELECT mean, std_dev, inputs, factors_for, factors_against FROM player_projections WHERE id = ?",
+                    (r["proj_id"],),
+                ).fetchone()
+                _save_scores(conn, pred, pr, kind, r, proj, player=r["player_id"], position=r["position"], now=now)
                 shadows += promotion.record_shadow(
                     conn,
                     pred,
@@ -478,6 +547,20 @@ def run_pricing(conn: sqlite3.Connection, now: datetime, cfg: PricingConfig | No
                     c=c,
                     now=now,
                 )
+                if r["market"] == "game_total":
+                    _save_scores(
+                        conn,
+                        pred,
+                        pr,
+                        kind,
+                        r,
+                        _game_projection(conn, r["proj_id"]),
+                        player=None,
+                        position=None,
+                        now=now,
+                    )
+                else:
+                    _save_scores(conn, pred, pr, kind, r, None, player=None, position=None, now=now)
                 shadows += promotion.record_shadow(
                     conn,
                     pred,

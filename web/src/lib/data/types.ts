@@ -685,6 +685,29 @@ export interface PropRow {
   line_seen_at: string;
   line_changed_at: string;
   priced_at: string;
+  /** projected mean of the stat (player props; game totals) */
+  projection?: number | null;
+  scores?: PropScores | null;
+}
+
+export interface ScorePart {
+  part: string;
+  label: string;
+  weight: number;
+  score: number | null;
+  points: number | null;
+  detail: string;
+}
+
+export interface PropScores {
+  intelligence: number | null;
+  intelligence_parts: ScorePart[];
+  shot_environment: number | null;
+  shot_env_parts: ScorePart[];
+  value: number | null;
+  config_version: string;
+  why: { label: string; value: string }[];
+  summary: string;
 }
 
 export interface BestProps {

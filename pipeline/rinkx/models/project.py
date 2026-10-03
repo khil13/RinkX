@@ -507,6 +507,15 @@ def explain_skater(f: dict[str, float], ch: Choice, shots: Choice | None, ctx: d
         else round(f[f"eb.toi.{i}"] * 3600),
         "expected_pp_toi_s": round(float(fit.expected_basis(c, "pp_points", ch)[0]) * 3600),
     }
+    lg_shots = f.get("lg_team.shots", 0.0)
+    inputs |= {
+        "pos_toi_s": round(f["pos_toi"] * 3600),
+        "pos_pp_toi_s": round(f["pos_pp"] * 3600),
+        "opp_allowed_ratio": round(f[f"opp.{stat}"], 4),
+        "league_team_shots": round(lg_shots, 2),
+        "team_shots_expected": round(lg_shots * f.get("pace.for", 1.0) * f.get("pace.opp_against", 1.0), 2),
+        "opp_shots_allowed": round(lg_shots * f.get("pace.opp_against", 1.0), 2),
+    }
     for key in ("line", "pp_unit", "linemates", "back_to_back", "opp_back_to_back"):
         if ctx.get(key) is not None:
             inputs[key] = ctx[key]

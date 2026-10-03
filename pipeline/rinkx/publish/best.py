@@ -9,6 +9,7 @@ import sqlite3
 from datetime import datetime
 from typing import Any
 
+from rinkx.publish import why
 from rinkx.timeutil import iso
 
 SQL = """
@@ -21,7 +22,9 @@ SELECT pr.*, m.code AS market, m.name AS market_name, m.kind, b.code AS book, b.
        g.nhl_game_id, g.game_date, g.start_time_utc, h.abbrev AS home, a.abbrev AS away,
        pl.nhl_player_id, pl.full_name, pl.position, t.abbrev AS team,
        pp.is_current AS proj_current, pp.data_quality, pp.missing_inputs, pp.mean AS proj_mean,
-       gp.is_current AS gproj_current
+       pp.std_dev AS proj_sd, gp.is_current AS gproj_current,
+       sc.intelligence, sc.intelligence_parts, sc.shot_environment, sc.shot_env_parts, sc.value AS value_score,
+       sc.facts, sc.config_version
 FROM latest pr
 JOIN prop_lines l ON l.id = pr.prop_line_id
 JOIN markets m ON m.id = pr.market_id
@@ -32,6 +35,7 @@ LEFT JOIN players pl ON pl.id = pr.player_id
 LEFT JOIN teams t ON t.id = pl.current_team_id
 LEFT JOIN player_projections pp ON pp.id = pr.projection_id
 LEFT JOIN game_projections gp ON gp.id = pr.game_projection_id
+LEFT JOIN prediction_scores sc ON sc.prediction_id = pr.id
 WHERE l.status = 'open' AND g.status IN ('scheduled','pregame') AND g.start_time_utc > ?
 """
 
@@ -95,6 +99,25 @@ def _row(r: sqlite3.Row) -> dict[str, Any]:
         "line_seen_at": r["last_seen_at"],
         "line_changed_at": r["last_changed_at"],
         "priced_at": r["created_at"],
+        "projection": round(r["proj_mean"], 3) if r["proj_mean"] is not None else None,
+        "scores": _scores(r, p_model=r["p_model_over"] if over else r["p_model_under"], p_market=p_market, edge=edge),
+    }
+
+
+def _scores(r: sqlite3.Row, *, p_model: float, p_market: float | None, edge: float | None) -> dict[str, Any] | None:
+    if r["facts"] is None:
+        return None
+    facts = json.loads(r["facts"])
+    label = r["market_name"]
+    return {
+        "intelligence": r["intelligence"],
+        "intelligence_parts": json.loads(r["intelligence_parts"]),
+        "shot_environment": r["shot_environment"],
+        "shot_env_parts": json.loads(r["shot_env_parts"]),
+        "value": r["value_score"],
+        "config_version": r["config_version"],
+        "why": why.bullets(facts, label=label, p_model=p_model, p_market=p_market, edge=edge),
+        "summary": why.summary(facts, label=label, edge=edge, p_model=p_model, p_market=p_market),
     }
 
 

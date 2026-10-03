@@ -186,6 +186,13 @@ export function GameLinesPanel({ lines }: { lines: GameLines }) {
 /** Step chart of the over/yes implied probability per book over time. */
 const EVENT_MARK: Record<LineEvent["kind"], string> = { goalie: "G", availability: "L", news: "N", injury: "I" };
 
+/** Cents moved on the over/yes price (-105 -> -125 is 20 cents; +105 -> -105 is 10). Positive =
+ * the over got more expensive (moved toward it). */
+export function cents(from: number, to: number): number {
+  const c = (x: number) => (x < 0 ? x + 100 : x - 100);
+  return c(from) - c(to);
+}
+
 function Movement({ row, events = [] }: { row: LineRow; events?: LineEvent[] }) {
   const series = row.books
     .map((b, i) => ({
@@ -265,6 +272,24 @@ function Movement({ row, events = [] }: { row: LineRow; events?: LineEvent[] }) 
         ))}
         <span>implied probability of the over/yes price</span>
       </figcaption>
+      <ul className="num flex flex-col gap-0.5 text-[11px]" aria-label="Open vs current">
+        {series.map((sr) => {
+          const a = sr.pts[0]!;
+          const b = sr.pts[sr.pts.length - 1]!;
+          const c = cents(a.over!, b.over!);
+          return (
+            <li key={sr.book}>
+              {sr.book}: open {a.line ?? ""} {odds(a.over)} → now {b.line ?? ""} {odds(b.over)}
+              {c !== 0 && <span className="ml-1">{c > 0 ? "📈" : "📉"} {Math.abs(c)}-cent move</span>}
+              {a.line !== b.line && a.line !== null && b.line !== null && (
+                <span className="ml-1 text-warn">
+                  line {a.line} → {b.line}
+                </span>
+              )}
+            </li>
+          );
+        })}
+      </ul>
       {marks.length > 0 && (
         <ul className="flex flex-col gap-0.5 text-[11px] text-muted" aria-label="Events during this line">
           {marks.map((e, i) => (

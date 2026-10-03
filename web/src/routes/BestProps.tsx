@@ -1,3 +1,4 @@
+import { ConfidenceVsValue, ScoreBadge, ScoreDetails, WhyThisProp } from "../components/Scores";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router";
 import { odds, ConfidenceBreakdown, pts, SIDE_LABEL } from "../components/Lines";
@@ -88,6 +89,7 @@ function PropCard({ r, change, onOpen }: { r: PropRow; change: "new" | "moved" |
             <span className="font-semibold">{r.subject.name}</span>
             {r.subject.team && <TeamChip abbrev={r.subject.team} />}
             {change && <Chip kind={change} />}
+            <ScoreBadge score={r.scores?.intelligence} label="Prop Intelligence" />
           </span>
           <span className="num text-xs text-muted">
             {r.game.away} @ {r.game.home} · {clock(r.game.start_time_utc)}
@@ -97,6 +99,12 @@ function PropCard({ r, change, onOpen }: { r: PropRow; change: "new" | "moved" |
           <span className="text-sm">
             {r.lean ? betText(r) : <span className="text-muted">No lean · {betText(r)}</span>}{" "}
             <span className="num font-semibold">{odds(r.price)}</span>
+            {r.projection != null && r.line !== null && (
+              <span className="num ml-1 text-xs text-muted">
+                proj {r.projection.toFixed(2)} ({r.projection - r.line >= 0 ? "+" : "−"}
+                {Math.abs(r.projection - r.line).toFixed(2)})
+              </span>
+            )}
           </span>
           <span className="num text-xs">
             edge {pts(r.edge)} pts · EV {r.ev !== null ? `${r.ev >= 0 ? "+" : "−"}${Math.abs(r.ev).toFixed(2)}u` : "—"} ·
@@ -106,6 +114,7 @@ function PropCard({ r, change, onOpen }: { r: PropRow; change: "new" | "moved" |
         <div className="num flex flex-wrap justify-between gap-2 text-[11px] text-muted">
           <span>
             model {pct(r.p_model)} vs {r.market_is_novig ? "no-vig" : "implied"} {r.p_market !== null ? pct(r.p_market) : "—"}
+            {r.scores?.shot_environment != null && ` · Shot Environment ${r.scores.shot_environment}/100`}
           </span>
           <span>
             {r.book_name} via {r.source} · line seen {localTime(r.line_seen_at)}
@@ -186,7 +195,19 @@ export function Drawer({ r, onClose }: { r: PropRow; onClose: () => void }) {
           <dd>{r.ev !== null ? `${r.ev >= 0 ? "+" : "−"}${Math.abs(r.ev).toFixed(3)} units per unit staked` : "—"}</dd>
           <dt className="text-muted">Lean</dt>
           <dd>{r.lean ? SIDE_LABEL[r.lean] : "None at this price"}</dd>
+          {r.projection != null && r.line !== null && (
+            <>
+              <dt className="text-muted">Projection vs line</dt>
+              <dd>
+                {r.projection.toFixed(2)} vs {r.line} ({r.projection - r.line >= 0 ? "+" : "−"}
+                {Math.abs(r.projection - r.line).toFixed(2)})
+              </dd>
+            </>
+          )}
         </dl>
+        <WhyThisProp r={r} />
+        <ScoreDetails r={r} />
+        <ConfidenceVsValue r={r} />
         {parts && (
           <section>
             <h3 className="mb-1 text-xs font-semibold uppercase tracking-wider text-muted">

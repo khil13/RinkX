@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { cents } from "../components/Lines";
+import { additiveSteps } from "../components/Projections";
 import { ago, githubRepo, longDate, minutesSince, mmss, seasonLabel, signed, wilson } from "./format";
 
 const now = Date.parse("2026-10-10T18:00:00Z");
@@ -47,5 +49,25 @@ describe("hit-rate helpers", () => {
   it("labels seasons", () => {
     expect(seasonLabel(20262027)).toBe("2026-27");
     expect(seasonLabel(null)).toBe("");
+  });
+});
+
+
+describe("line movement in cents", () => {
+  it("counts cents across even money", () => {
+    expect(cents(-105, -125)).toBe(20);
+    expect(cents(105, -105)).toBe(10);
+    expect(cents(-125, -105)).toBe(-20);
+  });
+});
+
+describe("view calculation", () => {
+  it("additive steps end at the multiplicative projection", () => {
+    const steps = additiveSteps(3.2, [
+      { name: "Ice time", effect: 0.1 },
+      { name: "Opponent", effect: -0.05 },
+    ]);
+    expect(steps[steps.length - 1]!.total).toBeCloseTo(3.2 * 1.1 * 0.95, 12);
+    expect(steps[0]!.delta).toBeCloseTo(0.32, 12);
   });
 });

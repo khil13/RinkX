@@ -1,0 +1,33 @@
+# Prop scores (pipeline/rinkx/pricing/scores.py). Change weights here; no code change needed.
+# Each score is a weighted average of 0-100 parts; a part without data is left out and the
+# remaining weights are rescaled (the prop says which parts were missing).
+version: "1"
+
+# Prop Intelligence Score: how well everything lines up behind the side RinkX scored.
+intelligence:
+  model_edge: 25          # model probability minus the no-vig market, on that side
+  projection_vs_line: 20  # projected mean vs the line, in standard deviations
+  recent_volume: 15       # last-10 hit rate at this line, on that side
+  season_volume: 10       # season hit rate at this line, on that side
+  matchup: 10             # opponent (and opposing goalie) factors in the projection
+  deployment: 10          # expected ice time vs an average player at his position
+  power_play: 5           # expected power-play time vs an average player at his position
+  market_movement: 5      # how the price moved over the last 24 h (toward or against this side)
+
+# Shot Environment Score (shots-on-goal props): how favourable the setting is for shots.
+shot_environment:
+  shooting_volume: 25     # his shot rate per 60 (shrunk) vs his position
+  opponent_allowance: 20  # opponent's shots allowed vs the league (model factor)
+  expected_toi: 20        # expected ice time vs his position
+  game_pace: 15           # his team's expected shots in this game vs the league
+  pp_opportunity: 10      # expected power-play time vs his position
+  shot_share: 5           # his share of his team's expected shots vs a typical player's
+  opponent_by_position: 5 # shots the opponent allowed to his position (forwards / defence), last 20 games
+
+# Scale: a ratio r to average becomes 50 + 50 * tanh(ratio_k * ln r); an edge e becomes
+# 50 + 50 * tanh(e / edge_scale); a z-score z becomes 50 + 50 * tanh(z * z_k).
+ratio_k: 2.5
+edge_scale: 0.06
+ev_scale: 0.10
+z_k: 1.0
+min_games_for_hit_rate: 5

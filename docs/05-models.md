@@ -337,6 +337,41 @@ Every part carries notes explaining its score.
 
 The breakdown is always displayed. Confidence buckets (50–59, 60–69, …) are evaluated on graded results (Model Performance). Once at least two buckets have 30 bets, the page says whether ROI rises with confidence. If it doesn't, the weights get revised.
 
+## 8b. Prop scores (`rinkx/pricing/scores.py`, weights in `config/scoring.yml`)
+
+Computed when a line is priced and frozen with the prediction (`prediction_scores`), from data available
+before the game only. Each score is a weighted average of 0–100 parts. A part without data is left out, and the
+remaining weights are rescaled. With less than half the weight available, there is no score ("insufficient
+data"). The parts use these transforms:
+
+* ratios to an average: 50 + 50·tanh(2.5·ln r);
+* edges and EV: 50 + 50·tanh(e/scale);
+* z-scores: 50 + 50·tanh(z).
+
+* **Prop Intelligence** (for the lean, or the better side):
+  * model edge 25%;
+  * projection vs line 20% (in standard deviations);
+  * last-10 hit rate at this line 15%;
+  * season hit rate 10%;
+  * matchup factors 10%;
+  * expected ice time vs his position 10%;
+  * power-play time 5%;
+  * 24-hour price movement toward or against the side 5%.
+* **Shot Environment** (shots-on-goal props; describes the setting, not a side):
+  * his shot rate 25%;
+  * opponent shots allowed (model factor) 20%;
+  * expected ice time 20%;
+  * his team's expected shots 15%;
+  * PP time 10%;
+  * his share of team shots 5%;
+  * shots the opponent allowed to his position over its last 20 games 5%.
+* **Prop value**: expected value at the price. **Model confidence** (§8) is separate and stays separate: it says
+  how far to trust the probability, while value says how good the price is. The prop card says why the two
+  differ.
+
+"Why this prop?" lists only those frozen inputs, and its summary sentences are templates filled with the same
+numbers (`rinkx/publish/why.py`). Nothing is generated freely.
+
 ## 9. Hit-rate engine
 
 * Windows: L5, L10, L15, L20 and season, plus home/away, vs. this opponent, and the last 2 seasons vs. this opponent.
