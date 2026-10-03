@@ -180,7 +180,9 @@ def check(
         if first is None:
             continue
         start = parse_iso(first["start_time_utc"])
-        if not (start - timedelta(minutes=minutes_before + 30) <= now <= start - LATEST_BEFORE):
+        # game-day runs come every 10 minutes (pipeline.yml), so the first run in this window is
+        # within about 10 minutes of `minutes_before`; the hourly baseline still lands inside it
+        if not (start - timedelta(minutes=minutes_before + 10) <= now <= start - LATEST_BEFORE):
             continue
         current = {_key(r): r for r in card(rows, date)}
         # a pick whose line moved is a different card row: find it by game, player, market and side
