@@ -376,3 +376,36 @@ def test_pregame_is_silent_when_nothing_changed(league, tmp_path):
 def test_pregame_options_are_checked(tmp_path):
     _, errors = al.load_specs(_yml(tmp_path, "alerts:\n  - {key: p, type: pregame, minutes_before: 5}\n"))
     assert errors and "minutes_before" in errors[0]
+
+
+def test_pregame_card_handles_game_props_and_a_broken_alert_does_not_stop_the_rest(league, tmp_path, monkeypatch):
+    """Regression: game-line props (moneyline, totals) have no player id; the card must still build.
+    And one alert that raises is recorded and skipped while the others still fire."""
+    from rinkx.alerts import pregame
+
+    conn, *_ = league
+    player = {"subject": {"type": "player", "id": 1, "name": "P"}, "game": {"id": 9, "date": "2025-11-06"},
+              "market": "skater_shots_on_goal", "lean": "over", "line": 2.5, "ev": 0.1}  # fmt: skip
+    game = {"subject": {"type": "game", "name": "A @ B", "team": None}, "game": {"id": 9, "date": "2025-11-06"},
+            "market": "game_moneyline", "lean": "home", "line": None, "ev": 0.2}  # fmt: skip
+    picks = pregame.card([player, game], "2025-11-06")
+    assert [p["market"] for p in picks] == ["game_moneyline", "skater_shots_on_goal"]
+
+    def boom(*_a, **_k):
+        raise RuntimeError("broken")
+
+    monkeypatch.setitem(al.MATCHERS, "pregame", boom)
+    path = _yml(tmp_path, "alerts:\n  - {key: pre, type: pregame}\n  - {key: leans, type: edge, min_edge: 4}\n")
+    assert al.run_alerts(conn, NOW, send=None, site_url=None, path=path) == 1  # the edge alert still fires
+    run = conn.execute("SELECT status, meta FROM ingestion_runs WHERE job_name = 'alerts' ORDER BY id DESC").fetchone()
+    assert run["status"] == "partial" and "alert 'pre' failed: RuntimeError" in run["meta"]
+
+
+def test_run_log_diagnostics_count_lines_and_leans_per_market(league):
+    from rinkx.pipeline import diagnostics
+
+    conn, *_ = league
+    d = diagnostics(conn, NOW)
+    assert d["markets"] == {"skater_shots_on_goal": {"open_lines": 2, "priced": 2, "leans": 2}}
+    # counts and names only: no odds or probabilities go to the public log
+    assert set(d) == {"markets", "models_passed", "models_not_passed"}

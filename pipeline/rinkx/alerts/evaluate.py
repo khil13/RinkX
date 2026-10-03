@@ -380,17 +380,24 @@ MATCHERS = {
 }
 
 
-def evaluate(conn: sqlite3.Connection, now: datetime, site_url: str | None) -> int:
-    """Record new alert events; returns how many fired."""
+def evaluate(conn: sqlite3.Connection, now: datetime, site_url: str | None, errors: list[str] | None = None) -> int:
+    """Record new alert events; returns how many fired. One alert that fails is recorded in
+    `errors` and skipped; the others still run."""
     games = _upcoming(conn, now)
     fired = 0
     for a in conn.execute("SELECT * FROM alerts WHERE is_active = 1 ORDER BY id").fetchall():
         c = json.loads(a["condition"])
         matches: dict[int, Match] = {}
-        for g, text in MATCHERS[c["type"]](conn, a, c, now, games):
-            m = matches.setdefault(g["id"], Match(g["id"], g["nhl_game_id"], g["matchup"]))
-            if text not in m.lines:
-                m.lines.append(text)
+        try:
+            for g, text in MATCHERS[c["type"]](conn, a, c, now, games):
+                m = matches.setdefault(g["id"], Match(g["id"], g["nhl_game_id"], g["matchup"]))
+                if text not in m.lines:
+                    m.lines.append(text)
+        except Exception as exc:  # the message never includes notification text (public logs)
+            log.error("alert '%s' failed: %s: %s", a["key"], type(exc).__name__, exc)
+            if errors is not None:
+                errors.append(f"alert '{a['key']}' failed: {type(exc).__name__}")
+            continue
         for m in matches.values():
             body = m.lines[:MAX_LINES]
             if len(m.lines) > MAX_LINES:
@@ -450,11 +457,12 @@ def run_alerts(
     path: Path = ALERTS_FILE,
 ) -> int:
     src = register_source(conn, SOURCE)
+    fired = 0  # stays 0 if the stage fails (the failure is recorded and shown; the run goes on)
     with ingestion_run(conn, src, "alerts") as run:
         specs, errors = load_specs(path)
         errors += sync(conn, specs)
         run.errors.extend(errors)
-        fired = evaluate(conn, now, site_url)
+        fired = evaluate(conn, now, site_url, run.errors)
         sent, failed = deliver(conn, now, send)
         run.rows_upserted = fired
         run.meta.update(fired=fired, sent=sent, failed=failed, delivery="ntfy" if send else "not configured")

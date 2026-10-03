@@ -60,6 +60,8 @@ def cmd_run(args: argparse.Namespace) -> int:
                 "files": sorted(m.files),
                 # the same feed states the public manifest.json carries (no data, no prices)
                 "feeds": {f.name: f.state + (f" ({f.reason})" if f.reason else "") for f in m.feeds},
+                # per market: open lines, priced, leans (counts only); which model tests passed
+                "diagnostics": result.diagnostics,
                 "store_pulled": result.store_pulled,
                 "store_pushed": result.store_pushed,
             },

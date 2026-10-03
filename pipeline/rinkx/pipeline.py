@@ -9,6 +9,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 from rinkx.alerts import ntfy
 from rinkx.alerts.evaluate import Sender, run_alerts
@@ -22,7 +23,7 @@ from rinkx.ingestion.nhl.jobs import NhlOptions, run_nhl
 from rinkx.ingestion.odds.client import OddsClient, UrllibTransport
 from rinkx.ingestion.odds.jobs import run_odds
 from rinkx.ingestion.runs import SourceSpec, ingestion_run, register_source
-from rinkx.models.project import run_models
+from rinkx.models.project import published_report, run_models
 from rinkx.models.promotion import run_promotion
 from rinkx.models.xg import run_xg
 from rinkx.pricing.price import run_pricing
@@ -44,6 +45,7 @@ class RunResult:
     manifest: Manifest
     store_pulled: str | None
     store_pushed: str | None
+    diagnostics: dict[str, Any] | None = None
 
 
 def run(
@@ -87,6 +89,7 @@ def run(
         manifest = build_bundle(
             conn, out_dir, settings, now=now, store_asset=pulled, today=settings.today, store_versions=stored
         )
+        diag = diagnostics(conn, now)
         pushed = None
         if push:
             snap = settings.workdir / "rinkx.snapshot.db"
@@ -102,7 +105,34 @@ def run(
                 log.warning("quick entry follow-up failed: %s", exc)
     finally:
         conn.close()
-    return RunResult(manifest, pulled, pushed)
+    return RunResult(manifest, pulled, pushed, diag)
+
+
+def diagnostics(conn: sqlite3.Connection, now: datetime) -> dict[str, Any]:
+    """Counts for the public run log (no prices, no names): per market, the open lines for upcoming
+    games, how many are priced against a current projection, and how many are leans; and which
+    stats passed their model test. Answers "why is market X missing from the card?" from the log."""
+    markets: dict[str, dict[str, int]] = {}
+    for code, open_n, priced, leans in conn.execute(
+        "SELECT m.code, count(DISTINCT l.id), count(DISTINCT p.prop_line_id), "
+        "count(DISTINCT CASE WHEN p.side <> 'none' THEN p.prop_line_id END) FROM prop_lines l "
+        "JOIN markets m ON m.id = l.market_id JOIN games g ON g.id = l.game_id "
+        "LEFT JOIN predictions p ON p.prop_line_id = l.id AND p.id = (SELECT max(p2.id) FROM predictions p2 "
+        "WHERE p2.prop_line_id = l.id) AND (p.projection_id IN "
+        "(SELECT id FROM player_projections WHERE is_current = 1) OR p.game_projection_id IN "
+        "(SELECT id FROM game_projections WHERE is_current = 1)) "
+        "WHERE l.status = 'open' AND g.status IN ('scheduled','pregame') AND g.start_time_utc > ? "
+        "GROUP BY m.code ORDER BY m.code",
+        (iso(now),),
+    ):
+        markets[code] = {"open_lines": open_n, "priced": priced, "leans": leans}
+    report, _ = published_report(conn)
+    stats = (report or {}).get("stats", {})
+    return {
+        "markets": markets,
+        "models_passed": sorted(s for s, e in stats.items() if e.get("passed")),
+        "models_not_passed": {s: e.get("reason") for s, e in sorted(stats.items()) if not e.get("passed")},
+    }
 
 
 STORE_SOURCE = SourceSpec(
