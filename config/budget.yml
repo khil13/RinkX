@@ -18,6 +18,10 @@ props:
   first_look_markets: 4    # a game's first fetch: just the first markets below (every game gets a cheap look).
                            # The Odds API charges only for markets it returns, so one a book doesn't offer
                            # yet (points, early in the season) costs nothing until it appears.
+  pace:                    # share of the day's credits that may be spent by each Eastern hour, so the
+    0: 0.3                 # overnight run (when lines first post) can't spend the whole day and leave
+    12: 0.6                # nothing for afternoon refreshes and the closing fetch
+    16: 1.0
   closing:                 # one more fetch just before puck drop, for games where the model has leans,
     hours_before: 1.5      # so the closing price (closing-line value) is measured on the bets that matter
     markets: 2             # markets with leans first

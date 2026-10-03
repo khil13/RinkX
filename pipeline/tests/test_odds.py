@@ -5,6 +5,7 @@ format is checked separately with the probe-odds workflow."""
 from __future__ import annotations
 
 import copy
+import dataclasses
 import json
 import sqlite3
 import urllib.parse
@@ -345,7 +346,7 @@ def test_pipeline_publishes_lines_without_leaking_the_key(tmp_path, keys):
 
 
 def test_budget_first_looks_then_biggest_edges_then_closing_fetch():
-    cfg = bud.BudgetConfig.load()
+    cfg = dataclasses.replace(bud.BudgetConfig.load(), pace=())  # order of spending, not pacing
     books = ["fanduel", "betmgm"]
     now = datetime(2026, 11, 10, 15, 0, tzinfo=UTC)
     s = now + timedelta(hours=8)
@@ -487,3 +488,22 @@ def test_main_points_line_wins_over_the_ladder(conn, monkeypatch):
         ["player_points", "player_points_alternate"],
     )  # fmt: skip
     assert stored == [(1.5, 140, -170)]
+
+
+def test_budget_paces_the_day_so_the_overnight_run_cannot_spend_it_all():
+    cfg = bud.BudgetConfig.load()
+    assert cfg.pace and cfg.pace[-1][1] == 1.0
+    books = ["fanduel", "betmgm"]
+    games = [bud.Candidate(i, f"g{i}", datetime(2026, 11, 10, 23, 0, tzinfo=UTC), None) for i in range(12)]
+    # 3 am ET (07:00 UTC): only the first share of the day is spendable
+    night = datetime(2026, 11, 10, 8, 0, tzinfo=UTC)
+    p = bud.plan(cfg, night, remaining=440, spent_today=0, game_lines_today=0, last_game_lines=None,
+                 candidates=games, books=books)  # fmt: skip
+    daily = (440 - cfg.reserve) / bud.days_left_in_month(night)
+    assert p.allowance <= int(daily * cfg.pace[0][1]) < int(daily)
+    # 5 pm ET: the rest of the day is available
+    evening = datetime(2026, 11, 10, 22, 0, tzinfo=UTC)
+    spent = p.cost(cfg, books)
+    q = bud.plan(cfg, evening, remaining=440 - spent, spent_today=spent, game_lines_today=1,
+                 last_game_lines=night, candidates=games, books=books)  # fmt: skip
+    assert q.allowance > 0 and spent + q.allowance <= int(daily) + 1

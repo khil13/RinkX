@@ -46,6 +46,10 @@ class BudgetConfig:
     first_look_markets: int = 2
     closing_hours: float = 1.5
     closing_markets: int = 2
+    # (Eastern hour, share of the day's credits that may be spent by then). Keeps the overnight
+    # run from spending the whole day as soon as lines post, leaving credits for afternoon
+    # refreshes and the closing fetch. Empty = no pacing.
+    pace: tuple[tuple[int, float], ...] = ()
 
     @staticmethod
     def load(path: Path = BUDGET_FILE) -> BudgetConfig:
@@ -62,6 +66,7 @@ class BudgetConfig:
             int(pr.get("first_look_markets", 2)),
             float((pr.get("closing") or {}).get("hours_before", 1.5)),
             int((pr.get("closing") or {}).get("markets", 2)),
+            tuple(sorted((int(h), float(f)) for h, f in (pr.get("pace") or {}).items())),
         )
 
 
@@ -85,6 +90,18 @@ class Plan:
     def cost(self, cfg: BudgetConfig, books: list[str]) -> int:
         c = credits_for(cfg.game_markets, books) if self.game_lines else 0
         return c + sum(credits_for(m, books) for _, m in self.props)
+
+
+def pace_share(cfg: BudgetConfig, now: datetime) -> float:
+    """The share of today's credits that may be spent by `now` (Eastern hour), 1.0 without pacing."""
+    if not cfg.pace:
+        return 1.0
+    hour = now.astimezone(EASTERN).hour
+    share = 0.0
+    for h, f in cfg.pace:
+        if hour >= h:
+            share = f
+    return min(max(share, 0.0), 1.0)
 
 
 def days_left_in_month(now: datetime) -> int:
@@ -122,6 +139,9 @@ def plan(
     start_of_day = remaining + spent_today
     daily = (start_of_day - cfg.reserve) / days_left_in_month(now)
     allowance = max(0, min(math.floor(daily - spent_today), remaining - cfg.reserve))
+    share = pace_share(cfg, now)
+    if share < 1.0:  # paced: only this share of the day's credits may be spent by now
+        allowance = max(0, min(allowance, math.floor(daily * share - spent_today)))
     p = Plan(allowance)
     left = allowance
     gl_cost = credits_for(cfg.game_markets, books)
