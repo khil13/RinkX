@@ -1,5 +1,6 @@
 import { DataChip, Notice, Panel, Spinner } from "../components/ui";
-import { useEncrypted } from "../lib/data/fetch";
+import { FeedsPanel } from "../components/Feeds";
+import { useEncrypted, useManifest } from "../lib/data/fetch";
 import type { HealthData } from "../lib/data/types";
 import { localTime } from "../lib/format";
 
@@ -53,6 +54,7 @@ function StoreBackups({ store }: { store: HealthData["store"] }) {
 
 export function Admin() {
   const health = useEncrypted<HealthData>("admin/health.json");
+  const manifest = useManifest().data;
 
   if (health.state === "loading") return <Spinner label="Decrypting health report…" />;
   if (health.state === "unavailable") return <Notice tone="warn">Health report unavailable in this build.</Notice>;
@@ -88,6 +90,15 @@ export function Admin() {
           <dd className="num">v{data.store.schema_version}</dd>
           <dt className="text-muted">Report generated</dt>
           <dd className="num">{localTime(meta.generated_at)}</dd>
+          {manifest && (
+            <>
+              <dt className="text-muted">Build</dt>
+              <dd className="num">
+                v{manifest.build.app_version}
+                {manifest.build.git_sha && ` · ${manifest.build.git_sha.slice(0, 7)}`} · {manifest.env}
+              </dd>
+            </>
+          )}
           <dt className="text-muted">Run log</dt>
           <dd>
             {data.build.run_url ? (
@@ -100,6 +111,8 @@ export function Admin() {
           </dd>
         </dl>
       </Panel>
+
+      {manifest && <FeedsPanel feeds={manifest.feeds} generatedAt={manifest.generated_at} />}
 
       <StoreBackups store={data.store} />
 
@@ -194,23 +207,6 @@ export function Admin() {
               </p>
             </div>
           </div>
-        )}
-      </Panel>
-
-      <Panel title="Data sources">
-        {data.data_sources.length === 0 ? (
-          <p className="text-sm text-muted">None registered yet. Phase 1 adds the NHL API.</p>
-        ) : (
-          <ul className="divide-y divide-line text-sm">
-            {data.data_sources.map((s) => (
-              <li key={s.code} className="flex justify-between py-2">
-                <span>{s.name}</span>
-                <span className="num text-muted">
-                  {s.category} · {s.tier} · {s.is_enabled ? "enabled" : "disabled"}
-                </span>
-              </li>
-            ))}
-          </ul>
         )}
       </Panel>
 

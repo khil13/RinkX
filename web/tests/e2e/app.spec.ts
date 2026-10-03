@@ -13,7 +13,14 @@ async function unlock(page: Page, remember = true, site = CONFIGURED) {
   await page.getByLabel("Passphrase").fill(passphrase);
   if (!remember) await page.getByLabel("Remember on this device").uncheck();
   await page.getByRole("button", { name: "Unlock" }).click();
-  await expect(page.getByRole("heading", { name: "Dashboard" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /Today's slate/ })).toBeVisible();
+}
+
+/** On a phone the props filters sit in a bottom sheet behind a "Filters" button. */
+async function openFilters(page: Page) {
+  if ((page.viewportSize()?.width ?? 1280) >= 640) return; // desktop: always shown
+  await page.getByRole("button", { name: /^Filters/ }).click();
+  await expect(page.getByRole("group", { name: "Filters" })).toBeVisible();
 }
 
 test("wrong passphrase is rejected and nothing is shown", async ({ page }) => {
@@ -21,7 +28,7 @@ test("wrong passphrase is rejected and nothing is shown", async ({ page }) => {
   await page.getByLabel("Passphrase").fill("not the passphrase at all");
   await page.getByRole("button", { name: "Unlock" }).click();
   await expect(page.getByText("That passphrase doesn't unlock this site.")).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Dashboard" })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: /Today's slate/ })).toHaveCount(0);
 });
 
 test("unlocks pipeline-encrypted data and reports honest empty state", async ({ page }) => {
@@ -44,7 +51,7 @@ test("unlocks pipeline-encrypted data and reports honest empty state", async ({ 
 test("remembered key survives reload; Lock forgets it", async ({ page }) => {
   await unlock(page, true);
   await page.reload();
-  await expect(page.getByRole("heading", { name: "Dashboard" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /Today's slate/ })).toBeVisible();
   await page.getByRole("button", { name: "Lock" }).click();
   await expect(page.getByLabel("Passphrase")).toBeVisible();
   await page.reload();
@@ -57,13 +64,22 @@ test("not-remembered key is gone after reload", async ({ page }) => {
   await expect(page.getByLabel("Passphrase")).toBeVisible();
 });
 
-test("every page in the menu is built: none shows a placeholder", async ({ page }) => {
+test("every menu page opens with a heading; grouped pages share section tabs", async ({ page, isMobile }) => {
+  test.skip(isMobile, "sidebar layout");
   await unlock(page);
-  for (const route of ["/", "/games", "/props", "/props/best", "/players", "/models", "/goalies", "/lines", "/parlay",
-    "/performance", "/news", "/settings", "/admin"]) {
-    await page.goto(`${CONFIGURED}#${route}`);
+  const menu = page.getByRole("navigation", { name: "Main" });
+  const sections = await menu.getByRole("link").allTextContents();
+  expect(sections).toEqual(["Today", "Card of the Day", "Props", "Games", "Players", "Lineups", "Parlay", "Results", "Settings"]);
+  for (const name of sections) {
+    await menu.getByRole("link", { name, exact: true }).click();
     await expect(page.locator("main h1").first()).toBeVisible();
-    await expect(page.getByText(/Not built yet/)).toHaveCount(0);
+  }
+  await menu.getByRole("link", { name: "Results", exact: true }).click();
+  const tabs = page.getByRole("navigation", { name: "Results pages" });
+  for (const t of ["Performance", "Backtest", "My bets", "Model tests"]) {
+    await tabs.getByRole("link", { name: t, exact: true }).click();
+    await expect(page.locator("main h1").first()).toBeVisible();
+    await expect(tabs.getByRole("link", { name: t, exact: true })).toHaveAttribute("aria-current", "page");
   }
 });
 
@@ -125,7 +141,7 @@ test("pages fit the screen with no horizontal page scroll", async ({ page }) => 
 
 test("daily slate shows real games with records, rest and honest gaps", async ({ page }) => {
   await unlock(page);
-  await expect(page.getByText(/Today · /)).toBeVisible();
+  await expect(page.getByRole("list", { name: "Starting goalies" }).getByRole("listitem")).toHaveCount(13);
   await page.goto(`${CONFIGURED}#/games`);
   await expect(page.getByText(/13 games/)).toBeVisible();
   const card = page.locator("a", { hasText: "Bruins" }).filter({ hasText: "Kings" });
@@ -340,6 +356,7 @@ test("props: filters, persisted on the device, and team colours on every card (s
   await expect(cards).toHaveCount(6);
   for (const c of await cards.all()) await expect(c).toContainText(/via The Odds API · line seen /);
   await expect(cards.first().locator("[data-team]")).toHaveText("T00");
+  await openFilters(page);
   const filters = page.getByRole("group", { name: "Filters" });
   await filters.getByLabel("Side").selectOption("over");
   await expect(cards).toHaveCount(3);
@@ -348,8 +365,9 @@ test("props: filters, persisted on the device, and team colours on every card (s
   await page.getByRole("button", { name: "Reset filters" }).click();
   await filters.getByLabel("Book").selectOption("betmgm");
   await page.reload(); // filters persist on this device
-  await expect(page.getByRole("group", { name: "Filters" }).getByLabel("Book")).toHaveValue("betmgm");
   await expect(cards).toHaveCount(3);
+  await openFilters(page);
+  await expect(page.getByRole("group", { name: "Filters" }).getByLabel("Book")).toHaveValue("betmgm");
   await page.getByRole("button", { name: "Reset filters" }).click();
   await expect(cards).toHaveCount(6);
 });
@@ -361,6 +379,7 @@ test("props: every priced line, sortable, with changes since the last visit mark
   await expect(cards).toHaveCount(6);
   await expect(cards.filter({ hasText: "No lean" })).toHaveCount(4);
   await expect(page.getByText("NEW", { exact: true })).toHaveCount(0); // first visit: nothing to compare
+  await openFilters(page);
   await page.getByLabel("Sort by").selectOption("confidence");
   await expect(cards.first()).toContainText("Syn P8000002");
   await expect(cards.last()).toContainText("Syn P8000001");
@@ -405,6 +424,8 @@ test("model performance: graded results, calibration vs market, splits and recen
   await expect(page.getByRole("table", { name: "By confidence" })).toBeVisible();
   await expect(page.getByRole("table", { name: "By model version" })).toContainText("synthetic");
   const recent = page.getByRole("list", { name: "Recent graded bets" }).getByRole("listitem");
+  await expect(recent).toHaveCount(15);
+  await page.getByRole("button", { name: "Show all 50" }).click();
   await expect(recent).toHaveCount(50);
   await expect(recent.first()).toContainText(/actual \d+/);
   await expect(recent.first()).toContainText(/WIN|LOSS|win|loss/);
@@ -427,7 +448,7 @@ test("parlay builder: legs from props, correlation-adjusted probability, varianc
   await page.goto(`${MODELS}#/props`);
   const cards = page.getByRole("list", { name: "Props" }).getByRole("listitem");
   for (const name of ["Syn P8000002", "Syn P8000003"]) {
-    await cards.filter({ hasText: name }).first().getByRole("button").click();
+    await cards.filter({ hasText: name }).first().getByRole("button").first().click();
     const dialog = page.getByRole("dialog", { name: "Prop card" });
     await dialog.getByRole("button", { name: "Add to parlay" }).click();
     await expect(dialog.getByRole("button", { name: "Remove from parlay" })).toBeVisible();
@@ -480,7 +501,7 @@ test("phone: tab bar, More bottom sheet, and the prop card as a bottom sheet", a
   test.skip(!isMobile, "phone layout only");
   await unlock(page, true, MODELS);
   const tabs = page.getByRole("navigation", { name: "Tabs" });
-  for (const t of ["Slate", "Card", "Search", "Parlay", "More"]) await expect(tabs.getByText(t, { exact: true })).toBeVisible();
+  for (const t of ["Today", "Card", "Props", "Parlay", "More"]) await expect(tabs.getByText(t, { exact: true })).toBeVisible();
   await tabs.getByRole("button", { name: "More" }).click();
   const sheet = page.getByRole("dialog", { name: "More" });
   await expect(sheet).toBeVisible();
@@ -494,8 +515,27 @@ test("phone: tab bar, More bottom sheet, and the prop card as a bottom sheet", a
   await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
   await expect(sheet).toBeHidden();
 
+  // Props come first; the filters open in a bottom sheet.
   await page.goto(`${MODELS}#/props`);
-  await page.getByRole("list", { name: "Props" }).getByRole("listitem").first().getByRole("button").click();
+  await expect(page.getByRole("group", { name: "Filters" })).toBeHidden();
+  await page.getByRole("button", { name: /^Filters/ }).click();
+  await page.getByRole("group", { name: "Filters" }).getByLabel("Side").selectOption("over");
+  await page.getByRole("button", { name: "Show 3 props" }).click();
+  await expect(page.getByRole("group", { name: "Filters" })).toBeHidden();
+  await expect(page.getByRole("button", { name: "Filters · 1 on" })).toBeVisible();
+  await page.getByRole("button", { name: /^Filters/ }).click();
+  await page.getByRole("button", { name: "Reset filters" }).click();
+  await page.keyboard.press("Escape");
+
+  // Today: the long sections start folded on a phone.
+  await page.goto(MODELS);
+  const report = page.getByRole("button", { name: "Daily report" });
+  await expect(report).toHaveAttribute("aria-expanded", "false");
+  await report.click();
+  await expect(page.getByLabel("Daily report")).toBeVisible();
+
+  await page.goto(`${MODELS}#/props`);
+  await page.getByRole("list", { name: "Props" }).getByRole("listitem").first().getByRole("button").first().click();
   const card = page.getByRole("dialog", { name: "Prop card" });
   await expect(card).toBeVisible();
   const box = (await card.boundingBox())!;
@@ -627,7 +667,7 @@ test("saves + win: the confirmed starter's joint projection by save line (synthe
 
 test("today: top props, by market, moves, goalies and a daily report from published data (synthetic)", async ({ page }) => {
   await unlock(page, true, MODELS);
-  await page.goto(`${MODELS}#/today`);
+  await page.goto(`${MODELS}#/today`); // old address: redirects to the home page
   await expect(page.getByRole("heading", { name: /Today's slate/ })).toBeVisible();
   await expect(page.getByLabel("Data freshness")).toContainText(/Updated/);
   await expect(page.getByRole("list", { name: "Top 10 props" }).getByRole("listitem").first()).toContainText("Syn P8000002");
@@ -643,6 +683,7 @@ test("today: top props, by market, moves, goalies and a daily report from publis
 test("game prop center and advanced filters (synthetic)", async ({ page }) => {
   await unlock(page, true, MODELS);
   await page.goto(`${MODELS}#/props`);
+  await openFilters(page);
   await page.getByText("More filters").click();
   const more = page.getByRole("group", { name: "More filters" });
   await more.getByLabel("Player").fill("P8000002");
@@ -660,7 +701,7 @@ test("game prop center and advanced filters (synthetic)", async ({ page }) => {
   await page.getByRole("link", { name: /T01.*T00/ }).first().click();
   const center = page.getByLabel("Game prop center");
   await expect(center.getByLabel("Best SOG props")).toContainText("Syn P8000002");
-  await expect(center.getByLabel("Best hit props")).toContainText("No priced lines in this market.");
+  await expect(center.getByLabel("Markets without priced lines")).toContainText("hit");
 });
 
 test("player prop profile and shot map from recorded play-by-play", async ({ page }) => {
@@ -684,7 +725,7 @@ test("lines & PP tracker, goalie numbers and the synthetic player profile (synth
   await expect(page.getByRole("list", { name: "Deployment T01 @ T00" })).toContainText("last game (shift chart)");
   await page.goto(`${MODELS}#/goalies`);
   await expect(page.getByLabel("Goalie numbers").first()).toContainText(/\d+ starts · SV% \.\d{3}/);
-  await expect(page.getByLabel("Goalie numbers").first()).toContainText("advanced metrics: unavailable");
+  await expect(page.getByLabel("Goalie numbers").first()).toContainText("expected-goals numbers: INSUFFICIENT DATA");
   await page.goto(`${MODELS}#/players/8000002`);
   const prof = page.getByLabel("Prop profile");
   await expect(prof.getByLabel("Props")).toContainText("Shots on Goal");
@@ -726,11 +767,17 @@ test("backtest with filters, CLV by group, and tracking my own bets (synthetic)"
   await expect(page.getByRole("table", { name: "CLV breakdown" })).toContainText(/FanDuel|BetMGM/);
 
   await page.goto(`${MODELS}#/props`);
-  await page.getByRole("list", { name: "Props" }).getByRole("listitem").first().getByRole("button").click();
+  await page.getByRole("list", { name: "Props" }).getByRole("listitem").first().getByRole("button").first().click();
   const dialog = page.getByRole("dialog", { name: "Prop card" });
-  await dialog.getByRole("button", { name: "Track this bet" }).click();
-  await expect(dialog.getByRole("button", { name: "Tracked" })).toBeDisabled();
+  await dialog.getByRole("button", { name: "I placed this" }).click();
+  await expect(dialog.getByLabel("Placed bet")).toContainText("Placed ✓");
   await dialog.getByRole("button", { name: "Close" }).click();
+  // the second card: one tap on the list, then undone
+  const second = page.getByRole("list", { name: "Props" }).getByRole("listitem").nth(1);
+  await second.getByRole("button", { name: "I placed this" }).click();
+  await expect(second.getByLabel("Placed bet")).toBeVisible();
+  await second.getByRole("button", { name: "Undo" }).click();
+  await expect(second.getByRole("button", { name: "I placed this" })).toBeVisible();
   await page.goto(`${MODELS}#/my`);
   await expect(page.getByRole("heading", { name: "My performance" })).toBeVisible();
   await expect(page.getByRole("list", { name: "Tracked bets" })).toContainText("pending");

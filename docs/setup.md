@@ -72,7 +72,7 @@ Only issues **you** open count. Anyone else's issues are ignored and start nothi
 
 1. Install the **ntfy** app (iOS or Android) and subscribe to a topic with a long random name, e.g. `rinkx-` followed by 20 random letters. On ntfy.sh, anyone who knows a topic can read it, so treat the name like a password.
 2. Add it as the repository secret `NTFY_TOPIC`.
-3. Edit `config/alerts.yml` in the GitHub app to choose what you're alerted about. Strong leans are on by default; goalie confirmations and injury news can be switched on.
+3. Edit `config/alerts.yml` in the GitHub app to choose what you're alerted about. Strong leans and the pre-game check (about an hour before the first game: Card of the Day picks whose price, line, goalie or line/PP unit changed since they made the card) are on by default; goalie confirmations and injury news can be switched on.
 
 Each alert fires at most once per game. Without the secret, alerts still appear in the app under **News**, marked "not sent". Notification text never goes to the Actions logs.
 

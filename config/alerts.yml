@@ -24,6 +24,11 @@
 #   projection a projection changed by at least min_change_pct (default 15) since the one it replaced:
 #              direction (up, down or both), market, player, team
 #   scratch    a player entered as a healthy scratch (Quick Entry: player out), player, team
+#   pregame    about `minutes_before` (default 60) minutes before the day's first game: Card of the
+#              Day picks that changed since they made the card (price moved against the pick by at
+#              least `min_price_move` implied-probability points, default 2; line moved; no longer a
+#              lean; a different starting goalie; a new line or PP unit; ruled out). Silent if nothing
+#              changed. One message per day.
 #
 # market: a market code (skater_shots_on_goal, skater_goals, skater_assists, skater_points,
 #         skater_pp_points, skater_blocked_shots, skater_anytime_goal, skater_first_goal,
@@ -57,3 +62,8 @@ alerts:
   - key: scratches
     type: scratch
     enabled: false
+
+  - key: pregame-check
+    type: pregame
+    minutes_before: 60
+    min_price_move: 2

@@ -143,6 +143,36 @@ position, pace, home/away and deployment changes. On the synthetic test league (
 defence), 1.6 overfits a little and tests slightly worse than 1.5. That is what the promotion rules below are
 for.
 
+## Expected goals (`rinkx/models/xg.py`)
+
+RinkX fits its own xG model; there is no third-party xG source. It covers every unblocked, non-empty-net
+attempt with a location (shots on goal, misses and goals; blocked attempts are left out because their
+coordinates are where the block happened). The inputs are distance and angle to the net, shot type, power
+play or shorthanded, a rebound (within 3 seconds of the same team's previous attempt) and attempts from
+behind the goal line. A logistic regression with a light ridge penalty maps them to a probability.
+
+* **Fit and test.** The coefficients are fit only on games before the model test window
+  (`fit.split_dates`, the same 60/40 split the walk-forward test uses), then scored on the later games. So
+  no model test is scored on games that trained xG.
+* **Gate.** It is used only if, on those later games, it beats the league-average goal rate on log loss (95%
+  low end above zero) and its calibration gap (equal-count bins) is at most 1.5 points. A distance-and-angle-only
+  fit and the AUC are shown for reference. The Models page shows the test.
+* **Cadence.** It is refit at most every 20 hours, or when shot history grows 10%. Each run scores new
+  attempts with the last fit that passed. A fit that fails leaves the last one that passed in use. With none,
+  every xG number on the site says INSUFFICIENT DATA.
+* **Where it shows.** On the player prop profile (xG per game, goals vs xG, xG on each shot-map dot), as goals
+  saved above expected on starting-goalie lines (xG of attempts faced minus goals, after 3+ starts with xG),
+  and in model 1.7.
+
+## Model version 1.7: finishing from shot quality (challenger)
+
+Version 1.7 adds one candidate input for **goals**, in the finishing route (goals = shots x goals per shot).
+1.6 shrinks a player's goals per shot toward the league average. 1.7 can shrink it toward **his own shot
+quality** instead: his expected goals per shot on goal, itself shrunk toward the league's by 25, 100 or 400
+shots and put on the league's goals-per-shot scale. A player who gets to the slot is pulled toward a higher
+rate than one who shoots from the point. The tuner keeps it only if it improves the tuning window. Without xG
+(the model hasn't passed, or no play-by-play), 1.7 is the same as 1.6.
+
 ## Champion and challenger (`rinkx/models/promotion.py`)
 
 Every version the code can run is tested every day. Each model family has one **champion**: the version the

@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { Link } from "react-router";
+import { FeedsPanel } from "../components/Feeds";
 import { Freshness } from "../components/Freshness";
 import { PublicBetting } from "../components/Scores";
 import { cents, odds } from "../components/Lines";
@@ -14,6 +15,7 @@ import { buildReport, reportText } from "../lib/report";
 import { projEdge } from "../lib/propFilters";
 
 const STALE_MIN = 120;
+const SIDE: Record<string, string> = { over: "Over", under: "Under", yes: "Yes", no: "No" };
 
 
 export function Today() {
@@ -33,11 +35,32 @@ export function Today() {
     [props, date],
   );
   if (!manifest || props.state === "loading") return <Spinner label="Loading today…" />;
+  const title = <h1 className="text-lg font-semibold">Today's slate · {date ? longDate(date) : "—"}</h1>;
+  if (!manifest.feeds.some((f) => f.state !== "unavailable")) {
+    return (
+      <div className="mx-auto flex max-w-4xl flex-col gap-4">
+        {title}
+        <Notice tone="warn">
+          Live data unavailable. No data sources are connected yet, so there is no slate, no projections and no lines
+          to show.
+        </Notice>
+        <FeedsPanel feeds={manifest.feeds} generatedAt={manifest.generated_at} />
+      </div>
+    );
+  }
   const games = slate.state === "ready" ? slate.value.data.games : [];
   const marketRows = market ? rows.filter((r) => GROUPS.find((g) => g.key === market)!.markets.includes(r.market)) : rows;
   const leans = bestPerProp(marketRows.filter((r) => r.lean));
   const top10 = [...leans].sort((a, b) => (b.scores?.intelligence ?? -1) - (a.scores?.intelligence ?? -1)).slice(0, 10);
-  const edges = [...bestPerProp(marketRows)].filter((r) => projEdge(r) !== null).sort((a, b) => projEdge(b)! - projEdge(a)!).slice(0, 5);
+  // one row per player/market/line, on the side the projection favours; only positive gaps
+  const edgeBy = new Map<string, PropRow>();
+  for (const r of bestPerProp(marketRows)) {
+    const e = projEdge(r);
+    if (e === null || e <= 0) continue;
+    const k = `${r.subject.name}|${r.market}|${r.line}`;
+    if (!edgeBy.has(k) || projEdge(edgeBy.get(k)!)! < e) edgeBy.set(k, r);
+  }
+  const edges = [...edgeBy.values()].sort((a, b) => projEdge(b)! - projEdge(a)!).slice(0, 5);
   const moveRows = moves.state === "ready" ? moves.value.data.rows.filter((m) => m.game.start_time_utc.slice(0, 10) >= date) : [];
   const bigMoves = [...moveRows].filter((m) => m.change_pts !== null).sort((a, b) => Math.abs(b.change_pts!) - Math.abs(a.change_pts!)).slice(0, 5);
   const newsItems = news.state === "ready" ? news.value.data.items : [];
@@ -49,7 +72,7 @@ export function Today() {
   return (
     <div className="mx-auto flex max-w-4xl flex-col gap-4">
       <header className="flex flex-col gap-1">
-        <h1 className="text-lg font-semibold">Today's slate · {date ? longDate(date) : "—"}</h1>
+        {title}
         <Freshness at={generated} staleAfterMin={STALE_MIN} source="RinkX pipeline" />
         <label className="flex items-center gap-2 self-start text-[11px] text-muted">
           Market
@@ -77,20 +100,20 @@ export function Today() {
         )}
       </Panel>
 
-      <Panel title="By market">
+      <Panel title="By market" collapsible="phone">
         <PropGroups rows={marketRows.filter((r) => r.lean)} label="Today by market" />
       </Panel>
 
       <div className="grid gap-4 sm:grid-cols-2">
         <Panel title="🔥 Biggest projection edges">
           {edges.length === 0 ? (
-            <p className="text-sm text-muted">INSUFFICIENT DATA: no priced projections today.</p>
+            <p className="text-sm text-muted">INSUFFICIENT DATA: no projection clears a priced line today.</p>
           ) : (
             <ul className="divide-y divide-line text-sm" aria-label="Projection edges">
               {edges.map((r) => (
                 <li key={r.prediction_id} className="flex justify-between gap-2 py-1">
                   <button type="button" className="text-left hover:text-accent" onClick={() => setOpen(r)}>
-                    {r.subject.name} {r.line} {r.market_label}
+                    {r.subject.name} {SIDE[r.lean ?? r.side_scored] ?? ""} {r.line} {r.market_label}
                   </button>
                   <span className="num">
                     proj {r.projection?.toFixed(2)} ({projEdge(r)! >= 0 ? "+" : "−"}
@@ -165,6 +188,7 @@ export function Today() {
 
       <Panel
         title="Daily report"
+        collapsible="phone"
         right={
           <button
             type="button"
@@ -193,6 +217,7 @@ export function Today() {
           <PublicBetting />
         </div>
       </Panel>
+      <FeedsPanel feeds={manifest.feeds} generatedAt={manifest.generated_at} only={(f) => f.state === "failed" || f.state === "stale"} collapsible="phone" />
       {open && <Drawer r={open} onClose={() => setOpen(null)} />}
     </div>
   );

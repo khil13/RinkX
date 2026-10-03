@@ -38,6 +38,14 @@ export function PropProfile({ p, props }: { p: SkaterProfile; props: PropRow[] }
               <Stat label="Last 5 / last 10" value={`${n2(s.l5_avg, 1)} / ${n2(s.l10_avg, 1)}`} />
               <Stat label="Home / away" value={`${n2(s.home_avg, 1)} / ${n2(s.away_avg, 1)}`} />
               <Stat label="Recent SOG" value={s.recent_sog.join(" ") || "—"} />
+              <Stat
+                label="xG / game (RinkX)"
+                value={s.ixg_per_game == null ? "INSUFFICIENT DATA" : n2(s.ixg_per_game)}
+              />
+              <Stat
+                label="Goals vs xG"
+                value={s.xg == null ? "—" : `${s.xg_goals} vs ${s.xg.toFixed(1)} (${s.xg_games} games)`}
+              />
             </dl>
           )}
         </section>
@@ -154,12 +162,16 @@ export function ShotMapView({ m }: { m: ShotMap }) {
       cells.set(k, (cells.get(k) ?? 0) + 1);
     }
   const maxCell = Math.max(1, ...cells.values());
-  const counts = { goal: 0, shot: 0, attempt: 0, hd: 0 };
+  const counts = { goal: 0, shot: 0, attempt: 0, hd: 0, xg: 0, withXg: 0 };
   for (const e of ev) {
     if (e.t === "goal") counts.goal++;
     if (e.t === "shot" || e.t === "goal") counts.shot++;
     counts.attempt++;
     if (e.hd) counts.hd++;
+    if (e.xg != null) {
+      counts.xg += e.xg;
+      counts.withXg++;
+    }
   }
   return (
     <section aria-label="Shot map">
@@ -199,12 +211,13 @@ export function ShotMapView({ m }: { m: ShotMap }) {
           : ev.map((e, i) => (
               <circle key={i} cx={sx(Math.max(X0, e.x))} cy={sy(e.y)} r={e.t === "goal" ? 5 : 3.5}
                 fill={e.t === "goal" || e.t === "shot" ? COLORS[e.t] : "none"} stroke={COLORS[e.t]} strokeWidth={e.hd ? 2 : 1}>
-                <title>{`${e.t}${e.hd ? " (high danger)" : ""} vs ${e.opp}`}</title>
+                <title>{`${e.t}${e.hd ? " (high danger)" : ""} vs ${e.opp}${e.xg != null ? ` · xG ${e.xg.toFixed(2)}` : ""}`}</title>
               </circle>
             ))}
       </svg>
       <p className="num mt-1 text-xs">
         {counts.attempt} attempts · {counts.shot} on goal · {counts.goal} goals · {counts.hd} high danger
+        {counts.withXg > 0 && ` · ${counts.xg.toFixed(2)} xG`}
       </p>
       <p className="text-[11px] text-muted">
         Filled: on goal (gold = goal); hollow: missed or blocked; thick ring: high danger. {m.definition} Dashed box: the

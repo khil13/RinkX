@@ -55,6 +55,9 @@ export function PropGroups({ rows, perGroup = 3, label }: { rows: PropRow[]; per
   const [sort, setSort] = useState<SortKey>("intelligence");
   const [open, setOpen] = useState<PropRow | null>(null);
   const pool = bestPerProp(rows);
+  const empty = GROUPS.filter((g) => !pool.some((r) => g.markets.includes(r.market))).map((g) =>
+    g.title.replace("🔥 Best ", "").replace(" props", ""),
+  );
   return (
     <div className="flex flex-col gap-3" aria-label={label}>
       <label className="flex items-center gap-2 self-end text-[11px] text-muted">
@@ -67,23 +70,23 @@ export function PropGroups({ rows, perGroup = 3, label }: { rows: PropRow[]; per
           ))}
         </select>
       </label>
-      {GROUPS.map((g) => {
-        const items = pool.filter((r) => g.markets.includes(r.market)).sort(SORTS[sort]).slice(0, perGroup);
-        return (
+      {GROUPS.map((g) => ({ g, items: pool.filter((r) => g.markets.includes(r.market)).sort(SORTS[sort]).slice(0, perGroup) }))
+        .filter((x) => x.items.length > 0)
+        .map(({ g, items }) => (
           <section key={g.key} aria-label={g.title.replace("🔥 ", "")}>
             <h3 className="text-xs font-semibold uppercase tracking-wider text-muted">{g.title}</h3>
-            {items.length === 0 ? (
-              <p className="text-xs text-muted">No priced lines in this market.</p>
-            ) : (
-              <ul className="divide-y divide-line">
-                {items.map((r) => (
-                  <PropLine key={r.prediction_id} r={r} onOpen={() => setOpen(r)} />
-                ))}
-              </ul>
-            )}
+            <ul className="divide-y divide-line">
+              {items.map((r) => (
+                <PropLine key={r.prediction_id} r={r} onOpen={() => setOpen(r)} />
+              ))}
+            </ul>
           </section>
-        );
-      })}
+        ))}
+      {empty.length > 0 && (
+        <p className="text-xs text-muted" aria-label="Markets without priced lines">
+          No priced lines yet: {empty.join(", ")}.
+        </p>
+      )}
       {open && <Drawer r={open} onClose={() => setOpen(null)} />}
     </div>
   );

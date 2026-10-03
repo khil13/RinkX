@@ -39,7 +39,7 @@ PLAYOFF_K_GAMES = 40.0  # ...and by this many team-games for team shot volume
 REST_K_H = 200.0  # back-to-back factors: shrink toward "no effect" by this many skater-hours
 REST_K_GAMES = 40.0  # ...and by this many team-games for team shots and goals
 TEAM_REST_STATS = ("shots", "goals")
-AUX_STATS = ("attempts",)  # tracked like a stat (rate per hour) but not projected
+AUX_STATS = ("attempts", "xg", "xg_sog")  # tracked like a stat but not projected
 TRACKED = (*SKATER_STATS, *AUX_STATS)
 FORM_GAMES = 5  # recent form: his last 5 games' shot rate...
 FORM_K_H = 3.0  # ...shrunk toward his long-run rate by this many hours
@@ -202,6 +202,11 @@ class State:
     def prior_finish(self, pos: str) -> float:
         lg = self.league.pos[pos]
         return lg.x["goals"] / lg.x["shots"] if lg.x["shots"] else 0.0
+
+    def prior_xq(self, pos: str) -> float:
+        """League expected goals per shot on goal (shots whose attempts have an xG); 0 if none."""
+        lg = self.league.pos[pos]
+        return lg.x["xg"] / lg.x["xg_sog"] if lg.x["xg_sog"] else 0.0
 
     def league_sv(self) -> float:
         return self.league.saves / self.league.sa if self.league.sa else 0.0
@@ -389,6 +394,10 @@ class State:
         f["prior.attempts"] = self.prior_rate(pos, "attempts")
         f |= self._shot_inputs(st, pos, team, opp)
         f["prior_finish"] = self.prior_finish(pos)
+        for i in range(H):
+            f[f"x.xg.{i}"] = st.x["xg"][i]
+            f[f"x.xg_sog.{i}"] = st.x["xg_sog"][i]
+        f["prior.xq"] = self.prior_xq(pos)
         for j, k in enumerate(K_SV):
             f[f"gf.{j}"] = self.goalie_factor(opp_goalies, k)
         # Context shown with projections (not model inputs): league team averages and shot pace.
@@ -625,6 +634,13 @@ class State:
                 st.b["attempts"][i] += toi_h
             lg.x["attempts"] += att
             lg.b["attempts"] += toi_h
+        xg, xg_sog = line.stats.get("xg"), line.stats.get("xg_sog")
+        if xg is not None and xg_sog is not None:  # expected goals and the shots on goal they cover
+            for i in range(H):
+                st.x["xg"][i] += xg
+                st.x["xg_sog"][i] += xg_sog
+            lg.x["xg"] += xg
+            lg.x["xg_sog"] += xg_sog
         seas = st.season.setdefault(season, {})
         for s in SKATER_STATS:
             v = line.stats[s]

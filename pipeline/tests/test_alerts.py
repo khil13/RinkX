@@ -315,3 +315,64 @@ def test_site_url_and_topic_settings():
     s = Settings.from_env({"GITHUB_REPOSITORY": "Khil13/RinkX", "RINKX_NTFY_TOPIC": "t"})
     assert s.site_url == "https://khil13.github.io/RinkX/" and s.ntfy_topic == "t"
     assert Settings.from_env({}).site_url is None
+
+
+def test_pregame_check_lists_what_changed_on_the_card(league, tmp_path):
+    conn, gid, pid, books, sog, src = league
+    path = _yml(tmp_path, "alerts:\n  - {key: pre, type: pregame, minutes_before: 60}\n")
+    sent: list[dict] = []
+    # 15:00: the pick makes the card; the 23:00 game is far off, so nothing is checked yet
+    assert al.run_alerts(conn, NOW, send=sent.append, site_url="https://o.github.io/RinkX/", path=path) == 0
+    was = json.loads(conn.execute("SELECT state FROM card_picks").fetchone()[0])
+    assert was["price"] in (-105, -110) and was["goalie"]["status"] == "projected"
+
+    # by 22:00 the price has moved against the pick and the other goalie is confirmed
+    later = NOW + timedelta(hours=7)
+    for code in ("fanduel", "betmgm"):
+        upsert_line(
+            conn,
+            game_id=gid,
+            market_id=sog,
+            book_id=books[code],
+            player_id=pid,
+            team_id=None,
+            line=2.5,
+            over=-150,
+            under=120,
+            at=iso(later - timedelta(minutes=5)),
+            source_id=src,
+            source_ref="test",
+        )
+    run_pricing(conn, later, CFG)
+    away = conn.execute("SELECT away_team_id FROM games WHERE id = ?", (gid,)).fetchone()[0]
+    other = conn.execute(
+        "SELECT id, full_name FROM players WHERE current_team_id = ? AND position = 'G' AND id != ? LIMIT 1",
+        (away, was["goalie"]["id"]),
+    ).fetchone()
+    conn.execute(
+        "INSERT INTO goalie_starts (game_id, team_id, player_id, status, reported_at, provenance, source_id, "
+        "fetched_at) VALUES (?, ?, ?, 'confirmed', ?, 'manual', ?, ?)",
+        (gid, away, other["id"], iso(later), src, iso(later)),
+    )
+    assert al.run_alerts(conn, later, send=sent.append, site_url="https://o.github.io/RinkX/", path=path) == 1
+    p = sent[-1]
+    assert p["title"].startswith("RinkX · pre · Card of the Day")
+    assert p["click"].endswith("#/props/best")
+    assert "Over 2.5 Shots on Goal" in p["message"]
+    assert "→ -150" in p["message"] or "no longer a lean" in p["message"]
+    assert f"goalie now {other['full_name']} (confirmed)" in p["message"]
+    # once per day
+    assert al.run_alerts(conn, later + timedelta(minutes=20), send=sent.append, site_url=None, path=path) == 0
+
+
+def test_pregame_is_silent_when_nothing_changed(league, tmp_path):
+    conn, *_ = league
+    path = _yml(tmp_path, "alerts:\n  - {key: pre, type: pregame}\n")
+    assert al.run_alerts(conn, NOW, send=None, site_url=None, path=path) == 0
+    assert al.run_alerts(conn, NOW + timedelta(hours=7), send=None, site_url=None, path=path) == 0
+    assert conn.execute("SELECT count(*) FROM card_picks").fetchone()[0] == 1
+
+
+def test_pregame_options_are_checked(tmp_path):
+    _, errors = al.load_specs(_yml(tmp_path, "alerts:\n  - {key: p, type: pregame, minutes_before: 5}\n"))
+    assert errors and "minutes_before" in errors[0]

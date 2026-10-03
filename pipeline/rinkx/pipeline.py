@@ -24,6 +24,7 @@ from rinkx.ingestion.odds.jobs import run_odds
 from rinkx.ingestion.runs import SourceSpec, ingestion_run, register_source
 from rinkx.models.project import run_models
 from rinkx.models.promotion import run_promotion
+from rinkx.models.xg import run_xg
 from rinkx.pricing.price import run_pricing
 from rinkx.publish.build import build_bundle, missing_setup
 from rinkx.publish.schemas import Manifest
@@ -180,6 +181,7 @@ def _run_stages(
         qe = run_quick_entry(conn, tracker, owner, now)
 
     today = settings.today or slate_date(now)
+    run_xg(conn, now)  # expected goals on every shot (used by the models and the site only if it passed its test)
     run_models(conn, now, today, qe.reasons if qe else None)
     run_pricing(conn, now)  # model vs market for every open line with a current projection
     run_grading(conn, now, today)  # settle predictions for finished games

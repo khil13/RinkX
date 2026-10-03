@@ -394,7 +394,15 @@ export interface GoalieImpact {
   last5_save_pct: number | null;
   starts_last_7_days: number;
   last_start: string;
-  advanced: null;
+  /** Goals saved above expected from RinkX xG; null until the model passes and 3+ starts have xG. */
+  advanced: {
+    starts: number;
+    xg_against: number;
+    goals_against: number;
+    gsax: number;
+    gsax_per_start: number;
+    source: string;
+  } | null;
 }
 
 export interface SkaterProfile {
@@ -409,6 +417,11 @@ export interface SkaterProfile {
     l10_avg: number | null;
     home_avg: number | null;
     away_avg: number | null;
+    /** RinkX expected goals this season (null when no game of his has xG) */
+    xg?: number | null;
+    xg_goals?: number | null;
+    xg_games?: number;
+    ixg_per_game?: number | null;
   };
   usage: {
     toi_avg_s: number | null;
@@ -430,7 +443,7 @@ export interface SkaterProfile {
 
 export interface ShotMap {
   games: string[];
-  events: { g: number; t: "shot" | "miss" | "block" | "goal"; x: number; y: number; hd: boolean; opp: string }[];
+  events: { g: number; t: "shot" | "miss" | "block" | "goal"; x: number; y: number; hd: boolean; opp: string; xg?: number | null }[];
   with_coordinates: number;
   without_coordinates: number;
   definition: string;
@@ -600,8 +613,33 @@ export interface ChallengerStat {
   choice: StatTest["choice"];
 }
 
+export interface XgSummary {
+  version: string;
+  fitted_at: string;
+  train: [string | null, string | null];
+  test: [string | null, string | null];
+  n_train: number;
+  n_test: number;
+  passed: boolean;
+  reason: string | null;
+  metrics: {
+    log_loss?: number;
+    baseline_log_loss?: number;
+    distance_only_log_loss?: number;
+    vs_baseline?: { mean: number; se: number; lo: number };
+    vs_distance_only?: { mean: number; se: number; lo: number };
+    auc?: number | null;
+    calibration?: { pred: number; obs: number; n: number }[];
+    ece?: number;
+    goal_rate_test?: number;
+    mean_xg_test?: number;
+  };
+  in_use: { id: number; fitted_at: string } | null;
+}
+
 export interface ModelsReport {
   version: string;
+  xg?: XgSummary | null;
   /** model family -> published (champion) version */
   versions?: Record<string, string>;
   all_versions?: string[];
