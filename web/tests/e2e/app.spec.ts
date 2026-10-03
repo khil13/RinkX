@@ -284,35 +284,32 @@ test("real-data site without an odds key says lines aren't connected", async ({ 
   await expect(page.getByText(/Not connected\. Add the ODDS_API_KEY repository secret/)).toBeVisible();
 });
 
-test("best props: leans only, source and time on every row, filters, sort and the prop card (synthetic)", async ({ page }) => {
+test("card of the day: the date's best team and player props, one per player, in team colours (synthetic)", async ({ page }) => {
   await unlock(page, true, MODELS);
   await page.goto(`${MODELS}#/props/best`);
-  await expect(page.getByRole("heading", { name: "Best Props" })).toBeVisible();
-  const list = page.getByRole("list", { name: "Props" });
-  const cards = list.getByRole("listitem");
-  await expect(cards).toHaveCount(2); // 2 of the 6 priced lines clear the bar (after live calibration)
-  await expect(page.getByText(/2 leans of 6 priced lines/)).toBeVisible();
-  for (const c of await cards.all()) await expect(c).toContainText(/via The Odds API · line seen /);
-  await expect(cards.first()).toContainText("Syn P8000002"); // highest expected value first
-  await expect(list).not.toContainText("No lean");
+  await expect(page.getByRole("heading", { name: "Card of the Day" })).toBeVisible();
+  await expect(page.getByRole("tab", { name: "Today" })).toHaveAttribute("aria-selected", "true");
+  // The card is built only from this date's schedule: its games, with how many picks each has.
+  const games = page.getByRole("list", { name: "Games on this date" }).getByRole("listitem");
+  await expect(games.first()).toBeVisible();
+  const withPick = games.filter({ hasText: "1 pick" });
+  await expect(withPick).toHaveCount(1);
+  await expect(withPick.locator("[data-team]")).toHaveText(["T01", "T00"]);
+  // No game line clears the bar here: the section says so rather than filling the card.
+  await expect(page.getByText(/No moneyline or total clears the bar on this date/)).toBeVisible();
+  const picks = page.getByRole("list", { name: "Player props" }).getByRole("listitem");
+  // Two leans, both on the same player at two books: one pick, at the better price.
+  await expect(picks).toHaveCount(1);
+  await expect(picks.first()).toContainText("Syn P8000002");
+  await expect(picks.first()).toContainText(/Over 2\.5 Shots on Goal −140 at BetMGM/);
+  await expect(picks.first()).toContainText(/via The Odds API · line seen /);
+  await expect(picks.first()).toContainText("#1");
+  await expect(picks.first().locator("[data-team]")).toHaveText("T00"); // team chip in the team's colours
 
-  const filters = page.getByRole("group", { name: "Filters" });
-  await filters.getByLabel("Side").selectOption("over");
-  await expect(cards).toHaveCount(2);
-  await expect(cards.first()).toContainText("Syn P8000002");
-  await filters.getByLabel("Side").selectOption("under");
-  await expect(page.getByText("Your filters hide every prop.")).toBeVisible();
-  await page.getByRole("button", { name: "Reset filters" }).click();
-  await filters.getByLabel("Book").selectOption("betmgm");
-  await page.reload(); // filters persist on this device
-  await expect(page.getByRole("group", { name: "Filters" }).getByLabel("Book")).toHaveValue("betmgm");
-  await expect(cards).toHaveCount(1);
-  await page.getByRole("button", { name: "Reset filters" }).click();
-  await expect(cards).toHaveCount(2);
-
-  await cards.first().getByRole("button").click();
+  await picks.first().getByRole("button").click();
   const dialog = page.getByRole("dialog", { name: "Prop card" });
   await expect(dialog).toBeVisible();
+  await expect(dialog.locator("[data-team]")).toHaveText("T00");
   await expect(dialog).toContainText(/Confidence \d+\/100/);
   await expect(dialog.getByText("Market agreement")).toBeVisible();
   await expect(dialog.getByText(/^Implied\(/).first()).toBeVisible();
@@ -320,6 +317,27 @@ test("best props: leans only, source and time on every row, filters, sort and th
   await expect(dialog).toContainText(/Prediction #\d+ is frozen/);
   await dialog.getByRole("button", { name: "Close" }).click();
   await expect(dialog).toBeHidden();
+});
+
+test("props: filters, persisted on the device, and team colours on every card (synthetic)", async ({ page }) => {
+  await unlock(page, true, MODELS);
+  await page.goto(`${MODELS}#/props`);
+  const cards = page.getByRole("list", { name: "Props" }).getByRole("listitem");
+  await expect(cards).toHaveCount(6);
+  for (const c of await cards.all()) await expect(c).toContainText(/via The Odds API · line seen /);
+  await expect(cards.first().locator("[data-team]")).toHaveText("T00");
+  const filters = page.getByRole("group", { name: "Filters" });
+  await filters.getByLabel("Side").selectOption("over");
+  await expect(cards).toHaveCount(3);
+  await filters.getByLabel("Side").selectOption("yes");
+  await expect(page.getByText("Your filters hide every prop.")).toBeVisible();
+  await page.getByRole("button", { name: "Reset filters" }).click();
+  await filters.getByLabel("Book").selectOption("betmgm");
+  await page.reload(); // filters persist on this device
+  await expect(page.getByRole("group", { name: "Filters" }).getByLabel("Book")).toHaveValue("betmgm");
+  await expect(cards).toHaveCount(3);
+  await page.getByRole("button", { name: "Reset filters" }).click();
+  await expect(cards).toHaveCount(6);
 });
 
 test("props: every priced line, sortable, with changes since the last visit marked (synthetic)", async ({ page }) => {
@@ -446,7 +464,7 @@ test("phone: tab bar, More bottom sheet, and the prop card as a bottom sheet", a
   test.skip(!isMobile, "phone layout only");
   await unlock(page, true, MODELS);
   const tabs = page.getByRole("navigation", { name: "Tabs" });
-  for (const t of ["Slate", "Best", "Search", "Parlay", "More"]) await expect(tabs.getByText(t, { exact: true })).toBeVisible();
+  for (const t of ["Slate", "Card", "Search", "Parlay", "More"]) await expect(tabs.getByText(t, { exact: true })).toBeVisible();
   await tabs.getByRole("button", { name: "More" }).click();
   const sheet = page.getByRole("dialog", { name: "More" });
   await expect(sheet).toBeVisible();
@@ -472,7 +490,7 @@ test("phone: tab bar, More bottom sheet, and the prop card as a bottom sheet", a
 test("settings: decimal odds and time zone apply everywhere and persist", async ({ page }) => {
   await unlock(page, true, MODELS);
   await page.goto(`${MODELS}#/props/best`);
-  const first = page.getByRole("list", { name: "Props" }).getByRole("listitem").first();
+  const first = page.getByRole("list", { name: "Player props" }).getByRole("listitem").first();
   await expect(first).toContainText("−140");
   await page.goto(`${MODELS}#/settings`);
   await page.getByLabel(/^Decimal/).check();

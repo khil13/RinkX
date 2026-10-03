@@ -43,7 +43,7 @@ export function Parlay() {
         <h1 className="text-lg font-semibold">Parlay builder</h1>
         <p className="text-sm text-muted">
           Combines RinkX's probabilities for each leg, adjusted for how such props have moved together in past games.
-          Add legs from a prop on Props or Best Props. Legs stay on this device.
+          Add legs from a prop on Props or the Card of the Day. Legs stay on this device.
         </p>
       </header>
 
@@ -60,7 +60,7 @@ export function Parlay() {
           </Link>{" "}
           or{" "}
           <Link to="/props/best" className="text-accent underline">
-            Best Props
+            Card of the Day
           </Link>{" "}
           and tap “Add to parlay”.
         </Notice>

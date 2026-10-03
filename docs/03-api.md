@@ -161,7 +161,7 @@ The TypeScript implementation (`web/src/lib/parlay.ts`) is tested against **shar
 - `confidence`, `confidence_parts` (or `null`), `calculation`, `data_quality`, `missing_inputs`;
 - `line_seen_at`, `line_changed_at`, `priced_at`.
 
-Only the latest prediction per open line is included, and only when its projection is still current. The Best Props page shows rows with a lean; the Props page shows all of them.
+Only the latest prediction per open line is included, and only when its projection is still current. Card of the Day uses the rows with a lean, limited to one date's slate games; the Props page shows all of them.
 
 ## Write path: Quick Entry and config
 

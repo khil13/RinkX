@@ -7,10 +7,10 @@ import { useSession } from "../lib/session";
 import { BUILT_ROUTES, NAV } from "../nav";
 import { DataChip } from "./ui";
 
-// Phone tab bar (docs/06-ui.md): Slate · Best Props · Search · Parlay · More.
+// Phone tab bar (docs/06-ui.md): Slate · Card (of the Day) · Search · Parlay · More.
 const TABS: [string, string][] = [
   ["/games", "Slate"],
-  ["/props/best", "Best"],
+  ["/props/best", "Card"],
   ["/players", "Search"],
   ["/parlay", "Parlay"],
 ];

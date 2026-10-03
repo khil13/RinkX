@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router";
 import { odds, ConfidenceBreakdown, pts, SIDE_LABEL } from "../components/Lines";
 import { pct } from "../components/Projections";
+import { TeamChip, TeamStripe } from "../components/Team";
 import { Notice, Panel, Spinner } from "../components/ui";
 import { useEncrypted } from "../lib/data/fetch";
 import { legFromRow, parlayStore, useParlayLegs } from "../lib/parlayStore";
@@ -44,7 +45,17 @@ function save(key: string, value: unknown) {
 
 const lineKey = (r: PropRow) => `${r.game.id}|${r.subject.name}|${r.market}|${r.book}`;
 
-function betText(r: PropRow) {
+/** The team(s) a prop is about: the player's team, the team picked on a moneyline, or both teams. */
+export function propTeams(r: PropRow): string[] {
+  if (r.subject.type === "player") return r.subject.team ? [r.subject.team] : [];
+  if (r.kind === "moneyline") {
+    const side = r.lean ?? r.side_scored;
+    return [side === "home" ? r.game.home : r.game.away];
+  }
+  return [r.game.away, r.game.home];
+}
+
+export function betText(r: PropRow) {
   const side = SIDE_LABEL[r.lean ?? r.side_scored] ?? r.side_scored;
   if (r.kind === "moneyline") return `${side === "Home" ? r.game.home : r.game.away} to win`;
   return `${side}${r.line !== null ? ` ${r.line}` : ""} ${r.market_label}`;
@@ -68,13 +79,14 @@ function PropCard({ r, change, onOpen }: { r: PropRow; change: "new" | "moved" |
       <button
         type="button"
         onClick={onOpen}
-        className="flex w-full flex-col gap-1 rounded-md border border-line bg-panel-2 p-3 text-left hover:border-accent/50"
+        className="relative flex w-full flex-col gap-1 overflow-hidden rounded-md border border-line bg-panel-2 p-3 pl-4 text-left hover:border-accent/50"
         aria-label={`${r.subject.name} ${betText(r)}`}
       >
+        <TeamStripe teams={propTeams(r)} />
         <div className="flex flex-wrap items-center justify-between gap-2">
           <span className="flex flex-wrap items-center gap-2 text-sm">
             <span className="font-semibold">{r.subject.name}</span>
-            {r.subject.team && <span className="num text-xs text-muted">{r.subject.team}</span>}
+            {r.subject.team && <TeamChip abbrev={r.subject.team} />}
             {change && <Chip kind={change} />}
           </span>
           <span className="num text-xs text-muted">
@@ -127,7 +139,7 @@ function ParlayButton({ r }: { r: PropRow }) {
   );
 }
 
-function Drawer({ r, onClose }: { r: PropRow; onClose: () => void }) {
+export function Drawer({ r, onClose }: { r: PropRow; onClose: () => void }) {
   const ref = useRef<HTMLDialogElement>(null);
   useEffect(() => {
     ref.current?.showModal();
@@ -143,6 +155,11 @@ function Drawer({ r, onClose }: { r: PropRow; onClose: () => void }) {
       <div className="flex max-h-[85vh] flex-col gap-3 overflow-y-auto p-4">
         <header className="flex items-start justify-between gap-3">
           <div>
+            <div className="mb-1 flex gap-1">
+              {propTeams(r).map((t) => (
+                <TeamChip key={t} abbrev={t} />
+              ))}
+            </div>
             <h2 className="text-base font-semibold">
               {r.subject.name} · {betText(r)}
             </h2>
