@@ -292,3 +292,23 @@ def test_confidence_check_uses_roi_and_needs_enough_bets():
     assert _monotonic([b("50-59", 40, -0.02, wins=25), b("60-69", 40, 0.01, wins=15)]) is True
     assert _monotonic([b("50-59", 40, 0.05), b("60-69", 40, -0.03)]) is False
     assert _monotonic([b("50-59", 40, 0.05), b("60-69", 5, -0.03)]) is None  # one bucket too small
+
+
+def test_backtest_file_has_every_book_side_result_and_clv(league):
+    from rinkx.publish import backtest
+
+    conn, today, now, _ = league
+    grade.run_grading(conn, now, today)
+    out = backtest.published(conn, now)
+    f = {k: i for i, k in enumerate(out["fields"])}
+    rows = out["rows"]
+    assert rows and all(r[f["result"]] in ("win", "loss", "push", "void") for r in rows)
+    for r in rows:
+        if r[f["result"]] == "win":
+            assert r[f["profit"]] > 0
+        elif r[f["result"]] == "loss":
+            assert r[f["profit"]] == -1.0
+        assert r[f["side"]] in ("over", "under") and 0 < r[f["p"]] < 1 and r[f["synthetic"]] == 1
+    # Two books per prop are both kept (the browser picks a book per bet).
+    assert len({r[f["book"]] for r in rows}) == 2
+    assert any(r[f["clv"]] is not None for r in rows) and any(r[f["close"]] is not None for r in rows)

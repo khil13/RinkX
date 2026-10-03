@@ -712,3 +712,27 @@ test("parlay builder from the slate: risk levels and BUILD MY 8-LEG (synthetic)"
   await opts.getByRole("button", { name: "🔥 BUILD MY 8-LEG" }).click();
   await expect(built).toContainText(/Only \d legs meet the rules|INSUFFICIENT DATA|Estimated combined probability/);
 });
+
+test("backtest with filters, CLV by group, and tracking my own bets (synthetic)", async ({ page }) => {
+  await unlock(page, true, MODELS);
+  await page.goto(`${MODELS}#/backtest`);
+  await expect(page.getByText("SYNTHETIC test data")).toBeVisible();
+  const res = page.getByLabel("Backtest results");
+  await expect(res).toContainText(/W–L–P\d+–\d+–\d+/);
+  const before = await page.getByRole("heading", { name: /Results \(\d+ bets\)/ }).textContent();
+  await page.getByRole("group", { name: "Backtest filters" }).getByLabel("Min model probability").selectOption("70");
+  await expect(page.getByRole("heading", { name: /Results \(\d+ bets\)/ })).not.toHaveText(before!);
+  await page.getByLabel("Group CLV by").selectOption("book");
+  await expect(page.getByRole("table", { name: "CLV breakdown" })).toContainText(/FanDuel|BetMGM/);
+
+  await page.goto(`${MODELS}#/props`);
+  await page.getByRole("list", { name: "Props" }).getByRole("listitem").first().getByRole("button").click();
+  const dialog = page.getByRole("dialog", { name: "Prop card" });
+  await dialog.getByRole("button", { name: "Track this bet" }).click();
+  await expect(dialog.getByRole("button", { name: "Tracked" })).toBeDisabled();
+  await dialog.getByRole("button", { name: "Close" }).click();
+  await page.goto(`${MODELS}#/my`);
+  await expect(page.getByRole("heading", { name: "My performance" })).toBeVisible();
+  await expect(page.getByRole("list", { name: "Tracked bets" })).toContainText("pending");
+  await expect(page.getByRole("table", { name: "My results by market" })).toContainText("SOG");
+});

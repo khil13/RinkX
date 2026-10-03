@@ -7,6 +7,7 @@ import { TeamChip, TeamStripe } from "../components/Team";
 import { Notice, Panel, Spinner } from "../components/ui";
 import { useEncrypted } from "../lib/data/fetch";
 import { legFromRow, parlayStore, useParlayLegs } from "../lib/parlayStore";
+import { betFromRow, myBets, useMyBets } from "../lib/myBets";
 import type { BestProps as BestPropsData, PropRow } from "../lib/data/types";
 import { clock, localTime, longDate } from "../lib/format";
 import { ADVANCED, type Advanced, matches, SORT_LABELS, SORTS, type SortKey } from "../lib/propFilters";
@@ -137,6 +138,28 @@ function PropCard({ r, change, onOpen }: { r: PropRow; change: "new" | "moved" |
   );
 }
 
+function TrackButton({ r }: { r: PropRow }) {
+  const bets = useMyBets();
+  const tracked = bets.some((b) => b.prediction_id === r.prediction_id);
+  const bet = betFromRow(r);
+  if (!bet) return null;
+  return (
+    <div className="flex items-center gap-3">
+      <button
+        type="button"
+        disabled={tracked}
+        onClick={() => myBets.add(bet)}
+        className="min-h-9 rounded-md border border-line px-3 text-sm hover:border-accent/50 disabled:opacity-60"
+      >
+        {tracked ? "Tracked" : "Track this bet"}
+      </button>
+      <Link to="/my" className="text-xs text-accent underline">
+        My performance
+      </Link>
+    </div>
+  );
+}
+
 function ParlayButton({ r }: { r: PropRow }) {
   const legs = useParlayLegs();
   const leg = legFromRow(r);
@@ -243,6 +266,7 @@ export function Drawer({ r, onClose }: { r: PropRow; onClose: () => void }) {
           and will be graded after the game. Statistical estimates, not guarantees.
         </p>
         <ParlayButton r={r} />
+        <TrackButton r={r} />
         {r.subject.type === "player" && (
           <Link to={`/players/${r.subject.id}`} className="text-sm text-accent underline">
             Player page: projection, Explain, hit rates
