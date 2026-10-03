@@ -123,11 +123,32 @@ family only after it beats 1.4 on live graded props (*Champion and challenger* b
   usually plays with (decayed average), raised to a power of 0.25, 0.5 or 1 picked by the tuner. Applied to
   goals, assists and points.
 
+## Model version 1.6: more shot inputs (challenger)
+
+Version 1.6 adds these candidates for **shots on goal** to everything in 1.5. As always, each is kept only if
+it helps on the tuning window:
+
+* **Shot attempts.** His attempt rate times the league's shots per attempt, blended 25/50/75% into his shot
+  rate. Attempts are steadier than shots on goal.
+* **Recent form.** His last 5 games' shot rate, pulled toward his long-run rate by 3 hours of ice time.
+* **Opponent vs his position.** The shots the opponent allowed to forwards (or defence) per game, shrunk over
+  10 games.
+* **Team pace.** His team's shot volume.
+* **PP-time change.** His recent PP time vs his long-run PP time, raised to a power of 0.1, 0.25 or 0.5. A
+  promotion to PP1 shows up here before the long-run average catches up.
+
+Along with the existing opponent, home/away, back-to-back, line-slot and expected-TOI terms, this covers
+SOG/game, SOG/60, attempts, recent and season volume, TOI, line and PP usage, the opponent overall and by
+position, pace, home/away and deployment changes. On the synthetic test league (which has no position-specific
+defence), 1.6 overfits a little and tests slightly worse than 1.5. That is what the promotion rules below are
+for.
+
 ## Champion and challenger (`rinkx/models/promotion.py`)
 
 Every version the code can run is tested every day. Each model family has one **champion**: the version the
-site publishes. A family with no champion takes the first version (oldest first) that passes its test. A newer
-version that passes becomes the **challenger**. Its projections are stored, unpublished, in
+site publishes. A family with no champion takes the first version (oldest first) that passes its test. Among
+newer versions that pass, the one with the better walk-forward score for the family becomes the
+**challenger**. There is one challenger at a time. Its projections are stored, unpublished, in
 `challenger_projections`. Every line priced also freezes the challenger's probability for that same line
 (`shadow_predictions`), before live calibration, beside the champion's.
 

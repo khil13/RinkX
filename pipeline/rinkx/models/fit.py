@@ -44,12 +44,16 @@ from rinkx.models.state import HALF_LIVES, K_SV, H, Row, basis_of
 VERSIONS: dict[str, frozenset[str]] = {
     "1.4": frozenset(),
     "1.5": frozenset({"rest", "lines"}),  # back-to-back terms; line and PP-unit deployment, linemates
+    # shots: shot attempts, recent form, opponent's allowance to his position, team pace, PP-time change
+    "1.6": frozenset({"rest", "lines", "shot_inputs"}),
 }
 BASE_VERSION = "1.4"  # champion of a family that has none yet
-MODEL_VERSION = "1.5"  # the newest version
+MODEL_VERSION = "1.6"  # the newest version
 SLOT_W_GRID: tuple[float, ...] = (0.25, 0.5, 0.75)  # weight on the line slot's ice time
 MATES_G_GRID: tuple[float, ...] = (0.25, 0.5, 1.0)  # strength of the linemate-quality factor
 MATES_STATS = ("goals", "assists", "points")
+ATT_W_GRID: tuple[float, ...] = (0.25, 0.5, 0.75)  # weight on the shot-attempts route to the shot rate
+PP_G_GRID: tuple[float, ...] = (0.1, 0.25, 0.5)  # strength of the PP-time-change factor
 M_GRID: tuple[float, ...] = (0.25, 0.5, 1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 64.0)  # hours of ice time
 FINISH_GRID: tuple[float, ...] = (25.0, 50.0, 100.0, 200.0, 400.0, 800.0)  # shots
 BURN_IN_DAYS = 21  # the first weeks of history only build state; they are never scored
@@ -61,7 +65,7 @@ BASELINE_FLOOR = 0.02
 # "playoff" is 1.0 in regular-season games; the tuner can only drop it if a tuning window
 # contains playoff games, so it is kept by default and judged by the test like everything else.
 SKATER_FACTORS: dict[str, tuple[str, ...]] = {
-    "shots": ("opp", "home", "playoff", "rest"),
+    "shots": ("opp", "home", "playoff", "rest", "form", "opp_pos", "team_pace", "pp_change"),
     "goals": ("opp_shots", "goalie", "home", "playoff", "rest", "mates"),
     "assists": ("opp_shots", "goalie", "home", "playoff", "rest", "mates"),
     "points": ("opp_shots", "goalie", "home", "playoff", "rest", "mates"),
@@ -73,7 +77,14 @@ SKATER_FACTORS: dict[str, tuple[str, ...]] = {
 }
 GOALIE_FACTORS = ("fd", "fo", "po", "rest")
 # Which version input each factor belongs to (factors not listed are in every version).
-FACTOR_INPUT = {"rest": "rest", "mates": "lines"}
+FACTOR_INPUT = {
+    "rest": "rest",
+    "mates": "lines",
+    "form": "shot_inputs",
+    "opp_pos": "shot_inputs",
+    "team_pace": "shot_inputs",
+    "pp_change": "shot_inputs",
+}
 
 
 def allowed(factors: tuple[str, ...], version: str) -> tuple[str, ...]:
@@ -148,6 +159,8 @@ class Choice:
     sa_size: float = INF  # goalie: NB size of shots against
     slot_w: float = 0.0  # weight on the ice time of the player's line slot / PP unit (0 = his own record only)
     mates_g: float = 0.5  # linemate factor = (current linemates' quality / his usual linemates') ** mates_g
+    att_w: float = 0.0  # shots: weight on the rate implied by his shot attempts (x league shots per attempt)
+    pp_g: float = 0.25  # shots: PP-time-change factor = (recent PP time / long-run PP time) ** pp_g
 
     def to_json(self) -> dict[str, Any]:
         d = asdict(self)
@@ -171,6 +184,8 @@ class Choice:
             sa_size=INF if d["sa_size"] is None else float(d["sa_size"]),
             slot_w=float(d.get("slot_w", 0.0)),
             mates_g=float(d.get("mates_g", 0.5)),
+            att_w=float(d.get("att_w", 0.0)),
+            pp_g=float(d.get("pp_g", 0.25)),
         )
 
 
@@ -216,6 +231,12 @@ def factor(c: Cols, stat: str, name: str, ch: Choice) -> F:
         return np.asarray(c[f"mates.{ch.hl}"] ** ch.mates_g, dtype=float)
     if name == "rest" and ch.kind == "goalie":
         return c["rest_sa"]
+    if name == "pp_change":
+        return np.asarray(c["pp_change"] ** ch.pp_g, dtype=float)
+    if name in ("form", "opp_pos"):
+        return c[f"{name}.{stat}"]
+    if name == "team_pace":
+        return c["team_pace"]
     key = {
         "opp": f"opp.{stat}",
         "opp_shots": "opp.shots",
@@ -231,8 +252,15 @@ def factor(c: Cols, stat: str, name: str, ch: Choice) -> F:
     return c[key]
 
 
-def rate(c: Cols, stat: str, hl: int, m: float) -> F:
-    return (c[f"x.{stat}.{hl}"] + m * c[f"prior.{stat}"]) / (c[f"b.{stat}.{hl}"] + m)
+def rate(c: Cols, stat: str, hl: int, m: float, att_w: float = 0.0) -> F:
+    own = (c[f"x.{stat}.{hl}"] + m * c[f"prior.{stat}"]) / (c[f"b.{stat}.{hl}"] + m)
+    if att_w <= 0 or stat != "shots" or "x.attempts.0" not in c:
+        return own
+    # shot attempts are steadier than shots on goal: his attempt rate x the league's shots per attempt
+    conv = np.where(c["prior.attempts"] > 0, c["prior.shots"] / np.maximum(c["prior.attempts"], 1e-9), 0.0)
+    via_att = (c[f"x.attempts.{hl}"] * conv + m * c["prior.shots"]) / (c[f"b.attempts.{hl}"] + m)
+    has = c[f"b.attempts.{hl}"] > 0
+    return np.asarray(np.where(has, (1 - att_w) * own + att_w * via_att, own), dtype=float)
 
 
 def finish(c: Cols, hl: int, m: float) -> F:
@@ -255,7 +283,7 @@ def skater_mean(c: Cols, ch: Choice, shots: Choice | None) -> F:
         assert shots is not None
         lam = skater_mean(c, shots, None) * finish(c, ch.hl, ch.m)
     else:
-        lam = rate(c, ch.stat, ch.hl, ch.m) * expected_basis(c, ch.stat, ch)
+        lam = rate(c, ch.stat, ch.hl, ch.m, ch.att_w) * expected_basis(c, ch.stat, ch)
     for name in ch.factors:
         lam = lam * factor(c, ch.stat, name, ch)
     return np.asarray(lam, dtype=float)
@@ -309,6 +337,7 @@ def _tune_skater(c: Cols, y: F, stat: str, shots: Choice | None, version: str) -
     kinds = ["rate", "finish"] if stat == "goals" and shots is not None else ["rate"]
     allf = allowed(SKATER_FACTORS[stat], version)
     lines = "lines" in VERSIONS[version]
+    shot_inputs = "shot_inputs" in VERSIONS[version] and stat == "shots"
     for kind in kinds:
         grid = FINISH_GRID if kind == "finish" else M_GRID
         # opponent, playoff and rest effects on shot volume are already in the shots model
@@ -329,6 +358,14 @@ def _tune_skater(c: Cols, y: F, stat: str, shots: Choice | None, version: str) -
                 if s > score:
                     best = (replace(trial, size=size), s)
                     score = s
+        if shot_inputs and kind == "rate":  # the shot-attempt route, kept only if it helps
+            ch, score = best
+            for w in ATT_W_GRID:
+                trial = replace(ch, att_w=w)
+                size, s = dist.best_size(y, skater_mean(c, trial, shots))
+                if s > score:
+                    best = (replace(trial, size=size), s)
+                    score = s
         candidates.append(_ablate(c, y, best, shots))
     return max(candidates, key=lambda t: t[1])
 
@@ -336,6 +373,12 @@ def _tune_skater(c: Cols, y: F, stat: str, shots: Choice | None, version: str) -
 def _ablate(c: Cols, y: F, best: tuple[Choice, float], shots: Choice | None) -> tuple[Choice, float]:
     """Drop each factor that doesn't help on the tuning window; then pick the save-% prior."""
     ch, score = best
+    if "pp_change" in ch.factors:
+        for g in PP_G_GRID:
+            trial = replace(ch, pp_g=g)
+            size, s = dist.best_size(y, skater_mean(c, trial, shots))
+            if s > score:
+                ch, score = replace(trial, size=size), s
     if "mates" in ch.factors:
         for g in MATES_G_GRID:
             trial = replace(ch, mates_g=g)

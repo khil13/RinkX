@@ -93,7 +93,14 @@ def challengers(conn: sqlite3.Connection) -> dict[str, str]:
     }
 
 
-def _status_after_test(conn: sqlite3.Connection, family: str, version: str, passed: bool, current: str) -> str:
+def _status_after_test(
+    conn: sqlite3.Connection,
+    family: str,
+    version: str,
+    passed: bool,
+    current: str,
+    scores: dict[str, Any] | None = None,
+) -> str:
     """A family with no champion takes the first version (oldest first) that passes its test.
     After that, a newer version that passes is the challenger until live results decide; one
     rejected by live results stays retired."""
@@ -112,8 +119,25 @@ def _status_after_test(conn: sqlite3.Connection, family: str, version: str, pass
     if current == "retired":
         return "retired"
     if passed and order.index(version) > order.index(champ):
+        # One challenger per family: the passing newer version with the better walk-forward score.
+        cur = challengers(conn).get(family)
+        if cur is not None and cur != version:
+            if _family_score(conn, family, version, scores) <= _family_score(conn, family, cur, None):
+                return "candidate"
+            conn.execute(
+                "UPDATE model_versions SET status = 'candidate' WHERE model_family = ? AND version = ?", (family, cur)
+            )
         return "challenger"
     return "candidate"
+
+
+def _family_score(conn: sqlite3.Connection, family: str, version: str, stats: dict[str, Any] | None) -> float:
+    """Mean walk-forward log score of a version's passed stats in one family (stored test if `stats` is None)."""
+    if stats is None:
+        rep, _ = latest_report(conn, version)
+        stats = {k: e for k, e in (rep or {}).get("stats", {}).items() if e.get("family") == family}
+    vals = [e["log_score"] for e in stats.values() if e.get("passed") and e.get("log_score") is not None]
+    return sum(vals) / len(vals) if vals else -math.inf
 
 
 def record_evaluation(conn: sqlite3.Connection, report: dict[str, Any], now: datetime) -> None:
@@ -149,7 +173,7 @@ def record_evaluation(conn: sqlite3.Connection, report: dict[str, Any], now: dat
             ),
         )
         current = conn.execute("SELECT status FROM model_versions WHERE id = ?", (mv,)).fetchone()[0]
-        status = _status_after_test(conn, family, version, passed, current)
+        status = _status_after_test(conn, family, version, passed, current, stats)
         conn.execute(
             "UPDATE model_versions SET status = ?, hyperparams = ?, oos_metrics = ?, train_start = ?, train_end = ?, "
             "promoted_at = CASE WHEN ? AND status <> 'champion' THEN ? ELSE promoted_at END WHERE id = ?",
@@ -464,7 +488,7 @@ def explain_skater(f: dict[str, float], ch: Choice, shots: Choice | None, ctx: d
         own_eb = f[f"eb.{basis}.{i}"]
         eb = float(fit.expected_basis(c, stat, ch)[0])
         pos_b = f["pos_pp"] if basis == "pp" else f["pos_toi"]
-        r = float(fit.rate(c, stat, i, ch.m)[0])
+        r = float(fit.rate(c, stat, i, ch.m, ch.att_w)[0])
         prior = f[f"prior.{stat}"]
         own = f[f"b.{stat}.{i}"] / (f[f"b.{stat}.{i}"] + ch.m)
         what = "power-play time" if basis == "pp" else "ice time"
@@ -488,7 +512,12 @@ def explain_skater(f: dict[str, float], ch: Choice, shots: Choice | None, ctx: d
                 "name": "His rate",
                 "effect": r / prior - 1 if prior else 0.0,
                 "detail": f"{r:.2f} {label} per 60 min{' of PP' if basis == 'pp' else ''} vs {prior:.2f} "
-                f"for an average {pos}: his record weighted {own:.0%}, league average the rest.",
+                f"for an average {pos}: his record weighted {own:.0%}, league average the rest"
+                + (
+                    f"; {ch.att_w:.0%} of it from his shot attempts at the league's shots per attempt."
+                    if ch.att_w > 0
+                    else "."
+                ),
             }
         )
         reference = prior * pos_b
@@ -541,6 +570,31 @@ def _context_factor(
     label = LABELS[stat].lower()
     if name == "rest":
         return {"name": "Back-to-back", "effect": v - 1, "detail": _rest_text(ctx, label, v)}
+    if name == "form":
+        return {
+            "name": "Recent form",
+            "effect": v - 1,
+            "detail": f"His shot rate over his last 5 games, pulled toward his long-run rate: {_pct(v)}.",
+        }
+    if name == "opp_pos":
+        return {
+            "name": "Opponent vs his position",
+            "effect": v - 1,
+            "detail": f"{ctx['opp']} allows {_pct(v)} shots to "
+            f"{'defence' if ctx.get('pos') == 'defenceman' else 'forwards'} vs the league (recent games, shrunk).",
+        }
+    if name == "team_pace":
+        return {
+            "name": "Team pace",
+            "effect": v - 1,
+            "detail": f"{ctx['team']} takes {_pct(v)} shots vs the league average (recent games, shrunk).",
+        }
+    if name == "pp_change":
+        return {
+            "name": "Power-play time change",
+            "effect": v - 1,
+            "detail": f"His recent PP time vs his long-run PP time, weighted: {_pct(v)} (e.g. a move to PP1).",
+        }
     if name == "mates":
         now = (f or {}).get("mates.now", 1.0)
         ratio = (f or {}).get(f"mates.{ch.hl if ch else 1}", 1.0)

@@ -57,6 +57,22 @@ def test_version_15_adds_inputs_and_wins_the_walk_forward_test_here(deployed):
         assert new["stats"][s]["log_score"] > base["stats"][s]["log_score"]
 
 
+def test_version_16_shot_inputs_are_its_own(deployed):
+    conn, _ = deployed
+    tables = fit.collect(walk(history.load(conn)))
+    r16 = fit.evaluate(tables, "1.6")
+    new = {"form", "opp_pos", "team_pace", "pp_change"}
+    for v in ("1.4", "1.5"):
+        rv = fit.evaluate(tables, v)
+        assert not new & set(rv["choices"]["shots"]["factors"]) and rv["choices"]["shots"].get("att_w", 0) == 0
+    assert set(r16["choices"]["shots"]["factors"]) <= set(fit.SKATER_FACTORS["shots"])
+    assert r16["stats"]["shots"]["passed"]
+    # the candidates are point-in-time features with sane values
+    c = tables["skater"].cols
+    for k in ("form.shots", "opp_pos.shots", "team_pace", "pp_change"):
+        assert (c[k] > 0).all() and 0.3 < float(c[k].mean()) < 3
+
+
 def test_champion_publishes_and_challenger_is_priced_in_the_shadow(deployed, tmp_path):
     conn, _ = deployed
     today = date(2025, 10, 7) + timedelta(days=200)
@@ -68,7 +84,12 @@ def test_champion_publishes_and_challenger_is_priced_in_the_shadow(deployed, tmp
         (f, v): s for f, v, s in conn.execute("SELECT model_family, version, status FROM model_versions").fetchall()
     }
     assert status[("skater_shots", "1.4")] == "champion"  # the first version to pass takes an empty family
-    assert status[("skater_shots", "1.5")] == "challenger"
+    # One challenger per family: the passing newer version with the better walk-forward score.
+    chal_v = [v for (f, v), st in status.items() if f == "skater_shots" and st == "challenger"]
+    assert len(chal_v) == 1
+    newest = chal_v[0]
+    rep_by = {v: project.latest_report(conn, v)[0]["stats"]["shots"]["log_score"] for v in ("1.5", "1.6")}
+    assert newest == max(rep_by, key=lambda v: rep_by[v])
     assert project.champions(conn)["skater_shots"] == "1.4"
     # Published projections are the champion's; the challenger's sit beside them, unpublished.
     versions = {
@@ -91,7 +112,7 @@ def test_champion_publishes_and_challenger_is_priced_in_the_shadow(deployed, tmp
         "WHERE c.game_id = ? AND c.player_id = ? AND c.market_id = ?",
         (gid, pid, sog),
     ).fetchone()
-    assert chal is not None and chal[1] == "1.5" and chal[0] != pytest.approx(champ_mean, abs=1e-6)
+    assert chal is not None and chal[1] == newest and chal[0] != pytest.approx(champ_mean, abs=1e-6)
     # Explain carries his line and whether either team is on a back-to-back.
     inputs = json.loads(
         conn.execute(
@@ -120,9 +141,9 @@ def test_champion_publishes_and_challenger_is_priced_in_the_shadow(deployed, tmp
 
     rep = models_report(conn)
     assert rep["versions"]["skater_shots"] == "1.4"
-    assert rep["challengers"]["skater_shots"]["version"] == "1.5"
+    assert rep["challengers"]["skater_shots"]["version"] == newest
     fam = next(f for f in rep["promotion"]["families"] if f["family"] == "skater_shots")
-    assert fam == {"family": "skater_shots", "champion": "1.4", "challenger": "1.5", "live": None}
+    assert fam == {"family": "skater_shots", "champion": "1.4", "challenger": newest, "live": None}
 
 
 class Tracker:

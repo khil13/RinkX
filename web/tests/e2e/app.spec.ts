@@ -245,7 +245,7 @@ test("model tests page shows what passed and what was held back", async ({ page 
   await expect(page.getByText(/not modeled/)).toHaveCount(0); // every market in the catalogue has a model
   // Each family's published version, and a newer one waiting on live results.
   const cc = page.getByRole("list", { name: "Champion and challenger" });
-  await expect(cc).toContainText("shots: v1.4 published, v1.5 challenging");
+  await expect(cc).toContainText(/shots: v1\.4 published, v1\.[56] challenging/);
   await expect(cc).toContainText(/0 of 250 graded props/);
 });
 

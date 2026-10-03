@@ -108,3 +108,14 @@ RinkX presents probabilities, not certainties. Sports betting carries financial 
 * Version 1.5 can use back-to-back terms, its line slot's usual ice time, and linemate quality.
 * It runs beside the published 1.4 as the **challenger**. Every line is priced by both, and 1.5 replaces 1.4 for a model family only after it beats 1.4 on 250+ graded props. The Models page shows the race.
 * Same-game parlay legs are combined by a **seeded game simulation** that the browser runs from published inputs: linemates' points, shots vs the opposing goalie's saves, and the result move together. The correlation estimates are the fallback.
+
+**Prop intelligence and tools.**
+
+* **Scores on every priced prop:** Prop Intelligence (weights in `config/scoring.yml`) with a "Why?" breakdown, Shot Environment for SOG props, and model confidence vs prop value. "Why this prop" is written only from frozen inputs, and "View calculation" shows the projection step by step.
+* **Daily views:** a **Today** page with a daily report, a **Game prop center**, and advanced filters.
+* **Deployment:** a **Lines & PP** tracker with deployment, projection-change and scratch alerts. Goalie impact numbers appear on every starter line.
+* **Player pages:** prop profiles with an interactive **shot map**.
+* **Parlays:** a builder by risk level, plus **BUILD MY 8-LEG**.
+* **Results:** a **Backtest** page with no look-ahead and CLV breakdowns, and **My Performance** for bets you track on this device.
+* **Model 1.6:** adds shot attempts, recent form, opponent by position, team pace and PP-time change for shots. It runs as a challenger.
+* **Data integrity:** no source means **DATA UNAVAILABLE**. Public betting percentages are never estimated.

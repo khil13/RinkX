@@ -271,7 +271,10 @@ def _player_reason(conn: sqlite3.Connection, player_pk: int, status: dict[str, A
     return "ruled_out" if out else "no_upcoming_projection"
 
 
-VERSION_ADDS = {"1.5": "back-to-back terms; line and PP-unit ice time; linemate quality"}
+VERSION_ADDS = {
+    "1.5": "back-to-back terms; line and PP-unit ice time; linemate quality",
+    "1.6": "shots: shot attempts, recent form, opponent vs his position, team pace, PP-time change",
+}
 
 
 def _challengers(conn: sqlite3.Connection) -> dict[str, Any]:
