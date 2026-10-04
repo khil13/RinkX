@@ -30,6 +30,7 @@ from rinkx.timeutil import iso
 
 MIN_BETS = 100  # below this, the page says the sample is too small to judge
 TRACK_MIN = 200  # graded leans a market needs before its track record adjusts confidence
+CAL_MIN = 50  # graded props a market needs before its calibration gets a verdict
 MIN_BUCKET = 30  # a bucket needs this many bets before it counts in the monotonic check
 CONF_BUCKETS = ((0, 49, "under 50"), (50, 59, "50-59"), (60, 69, "60-69"), (70, 79, "70-79"), (80, 100, "80+"))
 OVER = ("over", "yes", "home")
@@ -123,6 +124,37 @@ def calibration(rows: list[sqlite3.Row]) -> dict[str, Any]:
     out["mean_p"] = round(statistics.fmean(p), 4)
     out["hit_rate"] = round(statistics.fmean(y), 4)
     return out
+
+
+def calibration_by_market(rows: list[sqlite3.Row]) -> list[dict[str, Any]]:
+    """Per market: on every graded prop, the probability the model gave the side it favoured vs how
+    often that side won. Claimed more than it delivered (beyond sampling noise, 95%) is
+    overconfident; less is underconfident; otherwise well calibrated. Under CAL_MIN props: no verdict."""
+    by: dict[str, list[tuple[float, int]]] = defaultdict(list)
+    for r in rows:
+        if r["result"] in ("push", "void"):
+            continue
+        p = float(r["p_model_over"])
+        y = 1 if r["result"] in OVER else 0
+        by[r["market_name"]].append((p, y) if p >= 0.5 else (1 - p, 1 - y))
+    out = []
+    for market, pts in by.items():
+        n = len(pts)
+        mp = statistics.fmean(p for p, _ in pts)
+        hr = statistics.fmean(y for _, y in pts)
+        if n < CAL_MIN:
+            verdict = "insufficient"
+        else:
+            se = math.sqrt(max(mp * (1 - mp), 1e-6) / n)
+            verdict = "over" if mp - hr > 1.96 * se else "under" if hr - mp > 1.96 * se else "well"
+        out.append({"market": market, "n": n, "mean_p": round(mp, 4), "hit_rate": round(hr, 4), "verdict": verdict})
+    return sorted(out, key=lambda b: -b["n"])
+
+
+def _line_key(r: sqlite3.Row) -> str:
+    side = r["side"]
+    line = f" {r['line']:g}" if r["line"] is not None else ""
+    return f"{r['market_name']} {side}{line}"
 
 
 def record(bets: list[sqlite3.Row]) -> dict[str, Any]:
@@ -238,6 +270,8 @@ def performance(conn: sqlite3.Connection, now: datetime) -> dict[str, Any]:
         "series": series,
         "max_drawdown": drawdown,
         "by_market": sorted(_split(settled, lambda r: r["market_name"]), key=lambda b: -b["n"]),
+        "by_line": sorted(_split(settled, _line_key), key=lambda b: (-b["n"], b["key"]))[:30],
+        "calibration_by_market": calibration_by_market(rows),
         "by_confidence": by_conf,
         "confidence_monotonic": _monotonic(by_conf),
         "by_month": sorted(_split(settled, lambda r: r["game_date"][:7]), key=lambda b: b["key"]),

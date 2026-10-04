@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router";
 import { odds, pts } from "../components/Lines";
 import { pct } from "../components/Projections";
+import { DecisionBadge } from "../components/Assess";
 import { ScoreBadge } from "../components/Scores";
 import { TeamChip, TeamStripe } from "../components/Team";
 import { Notice, Panel, Spinner } from "../components/ui";
@@ -31,6 +32,7 @@ function Pick({ r, rank, onOpen }: { r: PropRow; rank: number; onOpen: () => voi
               <TeamChip key={t} abbrev={t} />
             ))}
             <span className="text-sm font-semibold">{r.subject.type === "player" ? r.subject.name : betText(r)}</span>
+            <DecisionBadge d={r.decision} />
             <ScoreBadge score={r.scores?.intelligence} label="Prop Intelligence" />
           </span>
           <span className="num text-xs text-muted">

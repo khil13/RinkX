@@ -17,8 +17,13 @@ def _mmss(s: float | None) -> str | None:
     return f"{s // 60}:{s % 60:02d}"
 
 
+SMALL_SAMPLE = 10  # fewer games than this behind a hit rate: say so next to it
+
+
 def _rate(h: list[int] | None) -> str | None:
-    return f"{h[0]}/{h[1]} ({h[0] / h[1]:.0%})" if h and h[1] else None
+    if not h or not h[1]:
+        return None
+    return f"{h[0]}/{h[1]} ({h[0] / h[1]:.0%})" + (" · small sample" if h[1] < SMALL_SAMPLE else "")
 
 
 def bullets(

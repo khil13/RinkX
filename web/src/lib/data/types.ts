@@ -803,6 +803,36 @@ export interface PropRow {
   /** projected mean of the stat (player props; game totals) */
   projection?: number | null;
   scores?: PropScores | null;
+  /** the projection's own distribution: 10th / 25th / 50th / 75th / 90th percentiles */
+  range?: PropRange | null;
+  /** P(scored side | no push) before and after the live calibrator, when one applied */
+  calibration?: { raw: number; calibrated: number } | null;
+  /** what argues against the scored side ("Why not?"), from the row's own numbers */
+  risks?: PropRisk[];
+  decision?: PropDecision;
+}
+
+export interface PropRange {
+  floor: number;
+  p25: number;
+  median: number;
+  p75: number;
+  ceiling: number;
+  mean: number;
+  sd: number;
+  spread: "low" | "medium" | "high" | null;
+}
+
+export interface PropRisk {
+  code: string;
+  text: string;
+  serious: boolean;
+}
+
+export interface PropDecision {
+  code: "value" | "lean" | "pass" | "avoid";
+  label: string;
+  reason: string;
 }
 
 /** The frozen inputs behind a prop's scores (pipeline/rinkx/pricing/scores.py). */
@@ -822,6 +852,7 @@ export interface PropFacts {
   opp_vs_position?: number | null;
   team_shots_expected?: number | null;
   shot_environment?: number | null;
+  moved_against_pts?: number;
 }
 
 export interface ScorePart {
@@ -917,6 +948,16 @@ export interface Performance {
   max_drawdown: number;
   by_market: (BetRecord & { key: string })[];
   by_confidence: (BetRecord & { key: string })[];
+  /** results by market, side and line (most bets first, top 30) */
+  by_line?: (BetRecord & { key: string })[];
+  /** per market: P(favoured side) vs how often it won, with a verdict */
+  calibration_by_market?: {
+    market: string;
+    n: number;
+    mean_p: number;
+    hit_rate: number;
+    verdict: "well" | "over" | "under" | "insufficient";
+  }[];
   confidence_monotonic: boolean | null;
   by_month: (BetRecord & { key: string })[];
   by_version: (BetRecord & { key: string })[];

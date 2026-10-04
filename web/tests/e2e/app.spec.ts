@@ -338,6 +338,11 @@ test("card of the day: the date's best team and player props, one per player, in
   await expect(dialog.getByText(/^Implied\(/).first()).toBeVisible();
   await expect(dialog.getByText(/^Calibrated from live results: P\(over\) 0\.\d{4} → 0\.\d{4}/)).toBeVisible();
   await expect(dialog).toContainText(/Prediction #\d+ is frozen/);
+  // Decision, range, risks: never Avoid on the card; raw vs calibrated shown when a calibrator applied.
+  await expect(dialog.getByLabel("Decision")).toContainText(/^(Bettable value|Lean)/);
+  await expect(dialog.getByLabel("Projection range")).toContainText(/Floor\s*\d+.*Median\s*\d+.*Ceiling\s*\d+/);
+  await expect(dialog.getByLabel("Why not?")).toBeVisible();
+  await expect(dialog.getByText("Raw → calibrated")).toBeVisible();
   // Scores and explanations, built only from the frozen inputs.
   const why = dialog.getByRole("region", { name: "Why this prop" }).or(dialog.getByLabel("Why this prop"));
   await expect(why).toContainText("Projected Shots on Goal");

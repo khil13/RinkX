@@ -277,6 +277,7 @@ def score_prop(
     if inputs.get("pp_unit"):
         facts["pp_unit"] = inputs["pp_unit"]
     if moved_against_pts is not None:
+        facts["moved_against_pts"] = round(moved_against_pts, 2)
         parts["market_movement"] = (
             _clip(50 - 50 * math.tanh(moved_against_pts / 4)),
             f"{-moved_against_pts:+.1f} pts toward this side (24 h)",

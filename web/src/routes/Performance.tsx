@@ -100,6 +100,52 @@ function Reliability({ bins }: { bins: NonNullable<PerformanceData["calibration"
   );
 }
 
+const SMALL_SPLIT = 30; // pipeline/rinkx/grading/performance.py MIN_BUCKET
+
+const VERDICT: Record<"well" | "over" | "under" | "insufficient", [string, string]> = {
+  well: ["Well calibrated", "text-over"],
+  over: ["Overconfident", "text-bad"],
+  under: ["Underconfident", "text-warn"],
+  insufficient: ["INSUFFICIENT SAMPLE", "text-muted"],
+};
+
+function CalibrationByMarket({ rows }: { rows: NonNullable<PerformanceData["calibration_by_market"]> }) {
+  if (rows.length === 0) return null;
+  return (
+    <Panel title="Calibration by market">
+      <div className="overflow-x-auto">
+        <table className="num w-full text-sm" aria-label="Calibration by market">
+          <thead className="text-left text-[11px] text-muted">
+            <tr>
+              <th className="py-1 pr-2 font-normal" />
+              <th className="py-1 pr-2 text-right font-normal">Props</th>
+              <th className="py-1 pr-2 text-right font-normal">Model said</th>
+              <th className="py-1 pr-2 text-right font-normal">Came in</th>
+              <th className="py-1 text-right font-normal">Verdict</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.market} className="border-t border-line">
+                <td className="whitespace-nowrap py-1 pr-2 font-sans">{r.market}</td>
+                <td className="py-1 pr-2 text-right">{r.n}</td>
+                <td className="py-1 pr-2 text-right">{(r.mean_p * 100).toFixed(1)}%</td>
+                <td className="py-1 pr-2 text-right">{(r.hit_rate * 100).toFixed(1)}%</td>
+                <td className={`whitespace-nowrap py-1 text-right font-sans text-xs ${VERDICT[r.verdict][1]}`}>{VERDICT[r.verdict][0]}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p className="mt-2 text-[11px] text-muted">
+        On every graded prop, the probability the model gave the side it favoured, against how often that side won.
+        Overconfident: it claimed more than came in, beyond what chance explains (95%). Underconfident: less. Needs 50
+        graded props per market.
+      </p>
+    </Panel>
+  );
+}
+
 function SplitTable({ title, rows, note }: { title: string; rows: (BetRecord & { key: string })[]; note?: string }) {
   if (rows.length === 0) return null;
   return (
@@ -119,7 +165,10 @@ function SplitTable({ title, rows, note }: { title: string; rows: (BetRecord & {
           <tbody>
             {rows.map((r) => (
               <tr key={r.key} className="border-t border-line">
-                <td className="whitespace-nowrap py-1 pr-2 font-sans">{r.key}</td>
+                <td className="whitespace-nowrap py-1 pr-2 font-sans">
+                  {r.key}
+                  {r.n < SMALL_SPLIT && <span className="ml-1 text-[10px] text-warn">small sample</span>}
+                </td>
                 <td className="py-1 pr-2 text-right">{r.n}</td>
                 <td className="py-1 pr-2 text-right">
                   {r.wins}-{r.losses}-{r.pushes}
@@ -321,7 +370,9 @@ export function Performance() {
             </Panel>
           )}
 
+          {p.calibration_by_market && <CalibrationByMarket rows={p.calibration_by_market} />}
           <SplitTable title="By market" rows={p.by_market} />
+          {p.by_line && <SplitTable title="By prop line" rows={p.by_line} />}
           <SplitTable
             title="By confidence"
             rows={p.by_confidence}

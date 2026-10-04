@@ -63,6 +63,12 @@ describe("buildCard", () => {
     expect(buildCard(rows, "2026-10-03", null).player.shown.map((r) => r.subject.name)).toEqual(["P1", "P3"]);
   });
 
+  it("leaves out leans marked Avoid", () => {
+    const avoid = { ...row({ player: 2, ev: 0.5 }), decision: { code: "avoid" as const, label: "Avoid", reason: "x" } };
+    const card = buildCard([row({ player: 1 }), avoid], "2026-10-03", null);
+    expect(card.player.shown.map((r) => r.subject.name)).toEqual(["P1"]);
+  });
+
   it("takes the best-priced book, then one pick per player and per game, ranked by EV", () => {
     const rows = [
       row({ player: 1, book: "fanduel", ev: 0.05 }),

@@ -42,12 +42,12 @@ def _key(r: dict[str, Any]) -> str:
 
 
 def card(rows: list[dict[str, Any]], date: str) -> list[dict[str, Any]]:
-    """The Card of the Day for `date`, as the site builds it: leans on that date, the best-EV book
+    """The Card of the Day for `date`, as the site builds it: leans on that date (not marked Avoid), the best-EV book
     per prop; game props one per game (up to 4) by EV; player props by market group in order, up
     to 3 per group by EV, one pick per player across the card."""
     best: dict[str, dict[str, Any]] = {}
     for r in rows:
-        if not r["lean"] or r["game"]["date"] != date:
+        if not r["lean"] or r["game"]["date"] != date or (r.get("decision") or {}).get("code") == "avoid":
             continue
         k = f"{_key(r)}|{r['line']}"
         if k not in best or (r["ev"] or -9) > (best[k]["ev"] or -9):

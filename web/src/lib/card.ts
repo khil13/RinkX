@@ -23,14 +23,14 @@ export interface CardGroup {
   priced: number; // priced lines in this group on this date (lean or not)
 }
 
-/** The card for one date: leans only, and only for games on that date's schedule (`gameIds`,
+/** The card for one date: leans only (none marked Avoid), and only for games on that date's schedule (`gameIds`,
  * from the published slate); the best-priced book for each prop. Team props: one per game, by
  * expected value. Player props: by market group in a fixed order (SOG, points, goals, ...), up to
  * PER_GROUP each, by expected value, one pick per player across the card. Grouping keeps one
  * market (longshot goal props have the biggest EV) from filling every slot. */
 export function buildCard(rows: PropRow[], date: string, gameIds: Set<number> | null) {
   const onSlate = rows.filter((r) => r.game.date === date && (gameIds === null || gameIds.has(r.game.id)));
-  const leans = onSlate.filter((r) => r.lean);
+  const leans = onSlate.filter((r) => r.lean && r.decision?.code !== "avoid");
   const bestBook = new Map<string, PropRow>();
   for (const r of leans) {
     const key = `${r.game.id}|${r.subject.name}|${r.market}|${r.line}|${r.lean}`;

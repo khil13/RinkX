@@ -426,3 +426,5 @@ def test_pregame_card_groups_like_the_site():
     assert names[:3] == [("skater_shots_on_goal", 2), ("skater_shots_on_goal", 1), ("skater_points", 3)]
     goals = [n for n in names if n[0] == "skater_anytime_goal"]
     assert len(goals) == pregame.PER_GROUP and (("skater_anytime_goal", 1) not in goals)
+    avoid = row(4, "skater_shots_on_goal", 0.2) | {"decision": {"code": "avoid"}}
+    assert 4 not in [r["subject"]["id"] for r in pregame.card([*rows, avoid], "D")]

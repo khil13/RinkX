@@ -12,6 +12,7 @@ import type { BestProps as BestPropsData, PropRow } from "../lib/data/types";
 import { clock, localTime, longDate } from "../lib/format";
 import { ADVANCED, type Advanced, matches, SORT_LABELS, SORTS, type SortKey } from "../lib/propFilters";
 import { Freshness } from "../components/Freshness";
+import { Decision, DecisionBadge, ProjectionRange, RawVsCalibrated, WhyNot } from "../components/Assess";
 
 
 interface Filters {
@@ -22,6 +23,7 @@ interface Filters {
   side: string;
   minEdge: number;
   minConf: number;
+  decision: string;
   sort: SortKey;
   adv: Advanced;
 }
@@ -34,6 +36,7 @@ const DEFAULTS: Filters = {
   side: "",
   minEdge: 0,
   minConf: 0,
+  decision: "",
   sort: "ev",
   adv: ADVANCED,
 };
@@ -55,6 +58,13 @@ function save(key: string, value: unknown) {
   } catch {
     /* private mode or storage blocked: filters just don't persist */
   }
+}
+
+/** "qualified": the pool worth a look (Bettable value or Lean); otherwise one decision. */
+function decisionMatches(r: PropRow, d: string) {
+  if (!d) return true;
+  const code = r.decision?.code;
+  return d === "qualified" ? code === "value" || code === "lean" : code === d;
 }
 
 const lineKey = (r: PropRow) => `${r.game.id}|${r.subject.name}|${r.market}|${r.book}`;
@@ -102,6 +112,7 @@ function PropCard({ r, change, onOpen }: { r: PropRow; change: "new" | "moved" |
             <span className="font-semibold">{r.subject.name}</span>
             {r.subject.team && <TeamChip abbrev={r.subject.team} />}
             {change && <Chip kind={change} />}
+            <DecisionBadge d={r.decision} />
             <ScoreBadge score={r.scores?.intelligence} label="Prop Intelligence" />
           </span>
           <span className="num text-xs text-muted">
@@ -198,6 +209,7 @@ export function Drawer({ r, onClose }: { r: PropRow; onClose: () => void }) {
             Close
           </button>
         </header>
+        <Decision r={r} />
         <dl className="num grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
           <dt className="text-muted">Price</dt>
           <dd>
@@ -205,6 +217,7 @@ export function Drawer({ r, onClose }: { r: PropRow; onClose: () => void }) {
           </dd>
           <dt className="text-muted">Model</dt>
           <dd>{pct(r.p_model)}</dd>
+          <RawVsCalibrated r={r} />
           <dt className="text-muted">Market ({r.market_is_novig ? "no-vig" : "implied, margin included"})</dt>
           <dd>{r.p_market !== null ? pct(r.p_market) : "—"}</dd>
           <dt className="text-muted">Edge</dt>
@@ -223,7 +236,9 @@ export function Drawer({ r, onClose }: { r: PropRow; onClose: () => void }) {
             </>
           )}
         </dl>
+        <ProjectionRange r={r} />
         <WhyThisProp r={r} />
+        <WhyNot r={r} />
         <ScoreDetails r={r} />
         <ConfidenceVsValue r={r} />
         <PublicBetting />
@@ -384,6 +399,7 @@ export function BestProps({ all = false }: { all?: boolean }) {
             (!f.side || (r.lean ?? r.side_scored) === f.side) &&
             (r.edge ?? -1) * 100 >= f.minEdge &&
             (r.confidence ?? 0) >= f.minConf &&
+            decisionMatches(r, f.decision) &&
             matches(r, f.adv),
         )
         .sort(SORTS[f.sort]),
@@ -396,7 +412,7 @@ export function BestProps({ all = false }: { all?: boolean }) {
 
   const uniq = <T,>(xs: T[]) => Array.from(new Set(xs));
   const nOn =
-    (["date", "game", "market", "book", "side", "minEdge", "minConf"] as const).filter((k) => f[k] !== DEFAULTS[k]).length +
+    (["date", "game", "market", "book", "side", "minEdge", "minConf", "decision"] as const).filter((k) => f[k] !== DEFAULTS[k]).length +
     (JSON.stringify(f.adv) !== JSON.stringify(DEFAULTS.adv) ? 1 : 0);
   const dates = uniq(data.rows.map((r) => r.game.date)).sort();
   const games = uniq(data.rows.map((r) => `${r.game.id}|${r.game.away} @ ${r.game.home}`));
@@ -471,6 +487,8 @@ export function BestProps({ all = false }: { all?: boolean }) {
             options={[[0, "Any"], [3, "3+ pts"], [5, "5+ pts"], [8, "8+ pts"]]} />
           <Select label="Min confidence" value={f.minConf} onChange={(v) => update({ minConf: Number(v) })}
             options={[[0, "Any"], [50, "50+"], [60, "60+"], [70, "70+"]]} />
+          <Select label="Decision" value={f.decision} onChange={(v) => update({ decision: v })}
+            options={[["", "Any"], ["qualified", "Value + lean"], ["value", "Bettable value"], ["lean", "Lean"], ["pass", "Pass"], ["avoid", "Avoid"]]} />
           <Select label="Sort by" value={f.sort} onChange={(v) => update({ sort: v as SortKey })}
             options={Object.entries(SORT_LABELS) as [string, string][]} />
         </div>
