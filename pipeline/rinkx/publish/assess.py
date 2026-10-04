@@ -109,7 +109,7 @@ def risks(
     if diff is not None and row["kind"] == "over_under":
         toward = diff if over else -diff
         if toward <= 0:
-            out.append(_risk("wrong_side", f"Projection is on the other side of the line ({diff:+.2f})", serious=True))
+            out.append(_risk("wrong_side", f"Projection is on the other side of the line ({diff:+.2f})"))
         elif toward < THIN_MARGIN:
             out.append(_risk("thin", f"Projection only {toward:.2f} past the line"))
     l10 = f.get("l10_hit")
@@ -133,7 +133,6 @@ def risks(
             _risk(
                 "big_edge",
                 f"Edge of {edge * 100:.0f} pts: gaps this large usually mean the market knows something",
-                serious=True,
             )
         )
     if ev is not None and ev < 0:
@@ -157,6 +156,9 @@ def decision(row: dict[str, Any], rsk: list[dict[str, Any]]) -> dict[str, str]:
     """Bettable value / Lean / Pass / Avoid, with the reason in one sentence."""
     edge, ev, conf = row["edge"], row["ev"], row["confidence"]
     serious = [r for r in rsk if r["serious"]]
+    # Missing inputs are listed but not counted: they are already in data quality and confidence,
+    # and "lineup not confirmed" sits on nearly every prop until the morning skate.
+    rsk = [r for r in rsk if r["code"] not in MISSING]
     nums = []
     if edge is not None:
         nums.append(f"edge {edge * 100:+.1f} pts")

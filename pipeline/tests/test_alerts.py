@@ -317,7 +317,16 @@ def test_site_url_and_topic_settings():
     assert Settings.from_env({}).site_url is None
 
 
-def test_pregame_check_lists_what_changed_on_the_card(league, tmp_path):
+def _keep_on_card(monkeypatch):
+    """The fixture's pick has a 19-pt edge (Avoid by publish/assess.py); these tests are about the
+    pre-game check, not the decision, so it stays a plain lean here."""
+    from rinkx.publish import assess
+
+    monkeypatch.setattr(assess, "decision", lambda row, rsk: {"code": "lean", "label": "Lean", "reason": ""})
+
+
+def test_pregame_check_lists_what_changed_on_the_card(league, tmp_path, monkeypatch):
+    _keep_on_card(monkeypatch)
     conn, gid, pid, books, sog, src = league
     path = _yml(tmp_path, "alerts:\n  - {key: pre, type: pregame, minutes_before: 60}\n")
     sent: list[dict] = []
@@ -365,7 +374,8 @@ def test_pregame_check_lists_what_changed_on_the_card(league, tmp_path):
     assert al.run_alerts(conn, later + timedelta(minutes=20), send=sent.append, site_url=None, path=path) == 0
 
 
-def test_pregame_is_silent_when_nothing_changed(league, tmp_path):
+def test_pregame_is_silent_when_nothing_changed(league, tmp_path, monkeypatch):
+    _keep_on_card(monkeypatch)
     conn, *_ = league
     path = _yml(tmp_path, "alerts:\n  - {key: pre, type: pregame}\n")
     assert al.run_alerts(conn, NOW, send=None, site_url=None, path=path) == 0

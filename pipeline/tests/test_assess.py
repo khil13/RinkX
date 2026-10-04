@@ -86,11 +86,24 @@ def test_risks_come_from_the_row_numbers():
 
 
 def test_serious_risk_is_avoid_even_alone():
+    rsk = assess.risks(_row(), GOOD_FACTS | {"moved_against_pts": 5.0}, None, NOW)
+    assert [r["code"] for r in rsk] == ["moved"]
+    d = assess.decision(_row(), rsk)
+    assert d["code"] == "avoid" and d["reason"].startswith("Price moved 5.0 pts against")
+
+
+def test_big_edge_blocks_value_but_alone_is_a_lean():
     row = _row(edge=0.2)
     rsk = assess.risks(row, GOOD_FACTS, None, NOW)
-    assert [r["code"] for r in rsk] == ["big_edge"]
-    d = assess.decision(row, rsk)
-    assert d["code"] == "avoid" and d["reason"].startswith("Edge of 20 pts")
+    assert [r["code"] for r in rsk] == ["big_edge"] and not rsk[0]["serious"]
+    assert assess.decision(row, [*rsk, assess._risk("x", "y")])["code"] == "lean"
+
+
+def test_missing_inputs_are_listed_but_not_counted():
+    row = _row(missing_inputs=["lineup_unconfirmed", "injuries_not_connected"])
+    rsk = assess.risks(row, GOOD_FACTS, None, NOW)
+    assert {r["code"] for r in rsk} == {"lineup_unconfirmed", "injuries_not_connected"}
+    assert assess.decision(row, rsk)["code"] == "value"
 
 
 def test_no_lean_is_pass_and_no_market_is_pass():

@@ -428,7 +428,7 @@ test("model performance: graded results, calibration vs market, splits and recen
   await expect(page.getByText(/Worst drawdown from a high point: −\d/)).toBeVisible();
   await expect(page.getByRole("img", { name: "Reliability diagram" })).toBeVisible();
   await expect(page.getByText("No-vig market")).toBeVisible();
-  await expect(page.getByRole("table", { name: "By market" })).toContainText("Shots on Goal");
+  await expect(page.getByRole("table", { name: "By market", exact: true })).toContainText("Shots on Goal");
   await expect(page.getByRole("table", { name: "By confidence" })).toBeVisible();
   await expect(page.getByRole("table", { name: "By model version" })).toContainText("synthetic");
   const recent = page.getByRole("list", { name: "Recent graded bets" }).getByRole("listitem");
