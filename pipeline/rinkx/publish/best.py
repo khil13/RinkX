@@ -9,7 +9,7 @@ import sqlite3
 from datetime import datetime
 from typing import Any
 
-from rinkx.publish import why
+from rinkx.publish import assess, why
 from rinkx.timeutil import iso
 
 SQL = """
@@ -22,7 +22,7 @@ SELECT pr.*, m.code AS market, m.name AS market_name, m.kind, b.code AS book, b.
        g.nhl_game_id, g.game_date, g.start_time_utc, h.abbrev AS home, a.abbrev AS away,
        pl.nhl_player_id, pl.full_name, pl.position, t.abbrev AS team,
        pp.is_current AS proj_current, pp.data_quality, pp.missing_inputs, pp.mean AS proj_mean,
-       pp.std_dev AS proj_sd, gp.is_current AS gproj_current,
+       pp.std_dev AS proj_sd, pp.pmf AS proj_pmf, gp.is_current AS gproj_current, gp.pmf AS gproj_pmf,
        sc.intelligence, sc.intelligence_parts, sc.shot_environment, sc.shot_env_parts, sc.value AS value_score,
        sc.facts, sc.config_version
 FROM latest pr
@@ -42,7 +42,7 @@ WHERE l.status = 'open' AND g.status IN ('scheduled','pregame') AND g.start_time
 OVER_SIDES = ("over", "yes", "home")
 
 
-def _row(r: sqlite3.Row) -> dict[str, Any]:
+def _row(r: sqlite3.Row, now: datetime) -> dict[str, Any]:
     side = r["side"]
     lean = side != "none"
     over = side in OVER_SIDES if lean else (r["edge_over"] or -1) >= (r["edge_under"] or -1)
@@ -64,7 +64,7 @@ def _row(r: sqlite3.Row) -> dict[str, Any]:
         if r["nhl_player_id"]
         else {"type": "game", "name": f"{r['away']} @ {r['home']}", "team": None}
     )
-    return {
+    out: dict[str, Any] = {
         "prediction_id": r["id"],
         "subject": subject,
         "game": {
@@ -102,6 +102,18 @@ def _row(r: sqlite3.Row) -> dict[str, Any]:
         "projection": round(r["proj_mean"], 3) if r["proj_mean"] is not None else None,
         "scores": _scores(r, p_model=r["p_model_over"] if over else r["p_model_under"], p_market=p_market, edge=edge),
     }
+    return _assess(out, r, over, now)
+
+
+def _assess(out: dict[str, Any], r: sqlite3.Row, over: bool, now: datetime) -> dict[str, Any]:
+    raw = r["proj_pmf"] if r["projection_id"] else (r["gproj_pmf"] if r["kind"] == "over_under" else None)
+    rng = assess.projection_range(json.loads(raw)["p"]) if raw else None
+    out["range"] = rng
+    out["calibration"] = assess.calibration_shift(out["calculation"], over)
+    facts = out["scores"]["facts"] if out["scores"] else None
+    out["risks"] = assess.risks(out, facts, rng, now)
+    out["decision"] = assess.decision(out, out["risks"])
+    return out
 
 
 def _scores(r: sqlite3.Row, *, p_model: float, p_market: float | None, edge: float | None) -> dict[str, Any] | None:
@@ -124,7 +136,7 @@ def _scores(r: sqlite3.Row, *, p_model: float, p_market: float | None, edge: flo
 
 def best_props(conn: sqlite3.Connection, now: datetime) -> dict[str, Any]:
     rows = [
-        _row(r)
+        _row(r, now)
         for r in conn.execute(SQL, (iso(now),)).fetchall()
         if (r["projection_id"] and r["proj_current"]) or (r["game_projection_id"] and r["gproj_current"])
     ]

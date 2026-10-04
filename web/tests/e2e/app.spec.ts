@@ -338,6 +338,11 @@ test("card of the day: the date's best team and player props, one per player, in
   await expect(dialog.getByText(/^Implied\(/).first()).toBeVisible();
   await expect(dialog.getByText(/^Calibrated from live results: P\(over\) 0\.\d{4} → 0\.\d{4}/)).toBeVisible();
   await expect(dialog).toContainText(/Prediction #\d+ is frozen/);
+  // Decision, range, risks: never Avoid on the card; raw vs calibrated shown when a calibrator applied.
+  await expect(dialog.getByLabel("Decision")).toContainText(/^(Bettable value|Lean)/);
+  await expect(dialog.getByLabel("Projection range")).toContainText(/Floor\s*\d+.*Median\s*\d+.*Ceiling\s*\d+/);
+  await expect(dialog.getByLabel("Why not?")).toBeVisible();
+  await expect(dialog.getByText("Raw → calibrated")).toBeVisible();
   // Scores and explanations, built only from the frozen inputs.
   const why = dialog.getByRole("region", { name: "Why this prop" }).or(dialog.getByLabel("Why this prop"));
   await expect(why).toContainText("Projected Shots on Goal");
@@ -423,7 +428,7 @@ test("model performance: graded results, calibration vs market, splits and recen
   await expect(page.getByText(/Worst drawdown from a high point: −\d/)).toBeVisible();
   await expect(page.getByRole("img", { name: "Reliability diagram" })).toBeVisible();
   await expect(page.getByText("No-vig market")).toBeVisible();
-  await expect(page.getByRole("table", { name: "By market" })).toContainText("Shots on Goal");
+  await expect(page.getByRole("table", { name: "By market", exact: true })).toContainText("Shots on Goal");
   await expect(page.getByRole("table", { name: "By confidence" })).toBeVisible();
   await expect(page.getByRole("table", { name: "By model version" })).toContainText("synthetic");
   const recent = page.getByRole("list", { name: "Recent graded bets" }).getByRole("listitem");
