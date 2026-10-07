@@ -69,3 +69,33 @@ def test_watchdog_ignores_runs_the_gate_skipped():
     assert built([{"name": "gate", "conclusion": "success"}, {"name": "build", "conclusion": "success"}])
     assert not built([{"name": "gate", "conclusion": "success"}, {"name": "build", "conclusion": "skipped"}])
     assert not built([{"name": "gate", "conclusion": "success"}])
+
+
+_tspec = importlib.util.spec_from_file_location("ticker", REPO_ROOT / "scripts/ticker.py")
+assert _tspec is not None and _tspec.loader is not None
+ticker = importlib.util.module_from_spec(_tspec)
+_tspec.loader.exec_module(ticker)
+
+
+def test_ticker_runs_hourly_and_every_tick_when_a_game_is_near():
+    soon = _week(("2026-11-10T23:00:00Z", "FUT"))  # 3 h away
+    far = _week(("2026-11-11T02:00:00Z", "FUT"))  # 6 h away
+    recent = NOW - timedelta(minutes=10)
+    assert ticker.due(far, NOW, None) == (True, "first tick")
+    assert ticker.due(far, NOW, recent)[0] is False
+    assert ticker.due(far, NOW, NOW - timedelta(minutes=55)) == (True, "hourly")
+    go, why = ticker.due(soon, NOW, recent)
+    assert go and why.startswith("game day")
+    # schedule unreadable: no extra runs, but the hourly one still happens
+    assert ticker.due(None, NOW, recent)[0] is False
+    assert ticker.due(None, NOW, NOW - timedelta(hours=1))[0] is True
+
+
+def test_ticker_hands_over_inside_the_job_limit():
+    doc = yaml.safe_load((REPO_ROOT / ".github/workflows/ticker.yml").read_text())
+    job = doc["jobs"]["tick"]
+    limit = timedelta(minutes=job["timeout-minutes"])
+    # the last tick can start just before RUN_FOR and sleep one TICK: still inside the job limit
+    assert ticker.RUN_FOR + ticker.TICK < limit <= timedelta(hours=6)
+    assert job["steps"][-1]["if"] == "always()" and "ticker.yml" in job["steps"][-1]["run"]
+    assert doc["concurrency"]["cancel-in-progress"] is False

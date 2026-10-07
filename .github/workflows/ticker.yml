@@ -1,0 +1,38 @@
+name: ticker
+
+# Keeps pipeline.yml on time (scripts/ticker.py). GitHub delays and drops scheduled runs, so one
+# ticker job runs for about 5 h 30 min, starting pipeline runs itself (hourly, and every 10
+# minutes when a game is near), then starts the next ticker before it exits. The schedule below
+# only restarts the chain if it ever breaks; the concurrency group keeps it to one ticker at a
+# time (a second one waits, it never runs alongside).
+on:
+  schedule:
+    - cron: "23 */3 * * *"
+  workflow_dispatch:
+
+permissions:
+  actions: write # start pipeline.yml and the next ticker
+
+concurrency:
+  group: rinkx-ticker
+  cancel-in-progress: false
+
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: scripts
+      - name: Start pipeline runs on time
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: python3 scripts/ticker.py
+      - name: Start the next ticker
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: gh workflow run ticker.yml
