@@ -19,9 +19,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           # Every workflow with a schedule (CI checks this list against .github/workflows).
-          for wf in pipeline.yml watchdog.yml keepalive.yml; do
+          for wf in pipeline.yml watchdog.yml keepalive.yml ticker.yml; do
             gh workflow enable "$wf" --repo "$GITHUB_REPOSITORY"
           done
           # Verify: fail loudly (GitHub emails the owner) if any of them is still not active.
           gh workflow list --all --json path,state --repo "$GITHUB_REPOSITORY" \
-            | python3 -c "import json,sys; bad=[w for w in json.load(sys.stdin) if w['path'].split('/')[-1] in ('pipeline.yml','watchdog.yml','keepalive.yml') and w['state']!='active']; print(bad or 'all scheduled workflows active'); sys.exit(1 if bad else 0)"
+            | python3 -c "import json,sys; bad=[w for w in json.load(sys.stdin) if w['path'].split('/')[-1] in ('pipeline.yml','watchdog.yml','keepalive.yml','ticker.yml') and w['state']!='active']; print(bad or 'all scheduled workflows active'); sys.exit(1 if bad else 0)"
