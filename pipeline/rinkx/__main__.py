@@ -12,6 +12,7 @@ rinkx watchdog                       alert if the pipeline hasn't succeeded rece
 from __future__ import annotations
 
 import argparse
+import faulthandler
 import getpass
 import json
 import logging
@@ -47,9 +48,16 @@ def check_passphrase(p: str) -> None:
         )
 
 
+STUCK_DUMP_S = 20 * 60  # a run still going after this prints every thread's stack (and again every 20 min)
+
+
 def cmd_run(args: argparse.Namespace) -> int:
-    settings = Settings.from_env()
-    result = run(settings, Path(args.out), push=not args.no_push)
+    # The job is killed at 60 min with no trace of where it was; this puts the stuck line in the log.
+    faulthandler.dump_traceback_later(STUCK_DUMP_S, repeat=True, file=sys.stderr)
+    try:
+        result = run(Settings.from_env(), Path(args.out), push=not args.no_push)
+    finally:
+        faulthandler.cancel_dump_traceback_later()
     m = result.manifest
     print(
         json.dumps(

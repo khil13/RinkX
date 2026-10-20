@@ -5,7 +5,9 @@ from __future__ import annotations
 import logging
 import sqlite3
 import tempfile
-from collections.abc import Callable
+import time
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -179,6 +181,15 @@ def _issue_tracker(settings: Settings) -> IssueTracker | None:
     return None
 
 
+@contextmanager
+def _timed(stage: str) -> Iterator[None]:
+    """Log how long a stage took (names and seconds only), so a slow or stuck stage shows in the run log."""
+    t0 = time.monotonic()
+    log.info("stage %s: started", stage)
+    yield
+    log.info("stage %s: done in %.1f s", stage, time.monotonic() - t0)
+
+
 def _run_stages(
     conn: sqlite3.Connection,
     settings: Settings,
@@ -190,7 +201,8 @@ def _run_stages(
     """Run every stage; return follow-up actions to perform once the store is saved."""
     if "nhl" in settings.sources:
         fetcher: Fetcher = ReplayFetcher(settings.fixtures_dir) if settings.fixtures_dir is not None else HttpFetcher()
-        run_nhl(conn, fetcher, now, NhlOptions(today=settings.today, boxscore_limit=settings.boxscore_limit))
+        with _timed("nhl"):
+            run_nhl(conn, fetcher, now, NhlOptions(today=settings.today, boxscore_limit=settings.boxscore_limit))
         # Injury report (ESPN, unofficial). Offline replay uses the report recorded next to the NHL fixtures.
         if settings.fixtures_dir is None:
             run_injuries(conn, HttpFetcher(), now)
@@ -201,7 +213,8 @@ def _run_stages(
     if odds_client is None and settings.odds_api_key and "nhl" in settings.sources:
         odds_client = OddsClient(settings.odds_api_key, UrllibTransport())
     if odds_client is not None:
-        run_odds(conn, odds_client, now)
+        with _timed("odds"):
+            run_odds(conn, odds_client, now)
 
     tracker = tracker or _issue_tracker(settings)
     started = iso(now)
@@ -211,15 +224,23 @@ def _run_stages(
         qe = run_quick_entry(conn, tracker, owner, now)
 
     today = settings.today or slate_date(now)
-    run_xg(conn, now)  # expected goals on every shot (used by the models and the site only if it passed its test)
-    run_models(conn, now, today, qe.reasons if qe else None)
-    run_pricing(conn, now)  # model vs market for every open line with a current projection
-    run_grading(conn, now, today)  # settle predictions for finished games
-    run_promotion(conn, now)  # a challenger model that beat the champion on graded props takes over
-    run_calibration(conn, now)  # live isotonic calibrators for the next pricing run
-    run_correlations(conn, now)  # parlay correlations, re-estimated at most every 20 h
+    with _timed("xg"):
+        run_xg(conn, now)  # expected goals on every shot (used by the models and the site only if it passed its test)
+    with _timed("models"):
+        run_models(conn, now, today, qe.reasons if qe else None)
+    with _timed("pricing"):
+        run_pricing(conn, now)  # model vs market for every open line with a current projection
+    with _timed("grading"):
+        run_grading(conn, now, today)  # settle predictions for finished games
+    with _timed("promotion"):
+        run_promotion(conn, now)  # a challenger model that beat the champion on graded props takes over
+    with _timed("calibration"):
+        run_calibration(conn, now)  # live isotonic calibrators for the next pricing run
+    with _timed("correlations"):
+        run_correlations(conn, now)  # parlay correlations, re-estimated at most every 20 h
     if send is None and settings.ntfy_topic:
         send = ntfy.sender(settings.ntfy_topic, settings.ntfy_server)
-    run_alerts(conn, now, send=send, site_url=settings.site_url)  # delivered before the store is saved
+    with _timed("alerts"):
+        run_alerts(conn, now, send=send, site_url=settings.site_url)  # delivered before the store is saved
     conn.commit()
     return finish(conn, tracker, qe, started) if tracker is not None and qe is not None else []
