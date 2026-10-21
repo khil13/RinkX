@@ -11,6 +11,7 @@ import json
 import logging
 import os
 import sqlite3
+import time
 import traceback
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -78,6 +79,8 @@ def ingestion_run(conn: sqlite3.Connection, source_id: int, job_name: str) -> It
     ).lastrowid
     conn.commit()
     status, error = "succeeded", None
+    t0 = time.monotonic()
+    log.info("%s: started", job_name)
     try:
         yield stats
         conn.commit()
@@ -89,6 +92,7 @@ def ingestion_run(conn: sqlite3.Connection, source_id: int, job_name: str) -> It
         conn.rollback()
         status, error = "failed", f"{type(exc).__name__}: {exc}"
         log.error("%s failed: %s\n%s", job_name, error, traceback.format_exc())
+    log.info("%s: %s in %.1f s (%d HTTP calls)", job_name, status, time.monotonic() - t0, stats.http_calls)
     conn.execute(
         "UPDATE ingestion_runs SET status = ?, finished_at = ?, rows_read = ?, rows_upserted = ?, "
         "http_calls = ?, quota_remaining = ?, error = ?, meta = ? WHERE id = ?",
